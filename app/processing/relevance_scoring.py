@@ -61,6 +61,32 @@ COMPOSITE_WEIGHTS = {
     "factual_confidence": 0.15,
 }
 
+HIGH_SIGNAL_KEYWORDS = {
+    "earnings": 0.15,
+    "guidance": 0.18,
+    "fed": 0.18,
+    "inflation": 0.15,
+    "fda": 0.20,
+    "merger": 0.18,
+    "acquisition": 0.18,
+    "oil": 0.12,
+    "tariff": 0.12,
+    "yield": 0.10,
+    "sanction": 0.12,
+}
+
+LOW_SIGNAL_PATTERNS = (
+    "3 reasons to buy",
+    "bull and bear of the day",
+    "worth owning",
+    "millionaire maker",
+    "if i had",
+    "buy now",
+    "path to $",
+    "what analyst projections",
+    "some facts to note",
+)
+
 
 def score_event(
     event: NormalisedEvent,
@@ -74,13 +100,21 @@ def score_event(
     scores["source_credibility"] = SOURCE_CREDIBILITY.get(event.source, 0.3)
 
     # 2. Event type weight
-    scores["event_type_weight"] = EVENT_TYPE_WEIGHTS.get(event.event_type, 0.35)
+    scores["event_type_weight"] = max(
+        EVENT_TYPE_WEIGHTS.get(event.event_type, 0.35),
+        _keyword_impact(event),
+    )
 
     # 3. Personal relevance (max of sector, watchlist, region signals)
     sector_score = _sector_relevance(event, profile)
     watchlist_score = _watchlist_relevance(event, profile)
     region_score = _region_relevance(event, profile)
-    scores["personal_relevance"] = max(sector_score, watchlist_score, region_score)
+    scores["personal_relevance"] = max(
+        sector_score,
+        watchlist_score,
+        region_score,
+        event.personal_relevance_score or 0.0,
+    )
 
     # 4. Novelty
     if sent_hashes and event.content_hash in sent_hashes:
@@ -92,11 +126,15 @@ def score_event(
     # 5. Factual confidence (set by provider, adjusted here)
     scores["factual_confidence"] = event.factual_confidence_score
 
+    # Apply a small penalty to generic feature/listicle content.
+    quality_penalty = _quality_penalty(event)
+
     # Composite
     final = sum(
         COMPOSITE_WEIGHTS[dim] * scores[dim]
         for dim in COMPOSITE_WEIGHTS
     )
+    final = max(0.0, final - quality_penalty)
 
     # Apply the scores back to the event
     event.importance_score = scores["event_type_weight"]
@@ -180,6 +218,24 @@ def _build_explanation(
 
     parts.append(f"novelty={scores['novelty']:.2f}")
     parts.append(f"confidence={scores['factual_confidence']:.2f}")
+    if event.reason_code:
+        parts.append(f"reason={event.reason_code}")
     parts.append(f"FINAL={event.final_score:.4f}")
 
     return " | ".join(parts)
+
+
+def _keyword_impact(event: NormalisedEvent) -> float:
+    text = f"{event.title} {event.summary}".lower()
+    impact = 0.0
+    for keyword, boost in HIGH_SIGNAL_KEYWORDS.items():
+        if keyword in text:
+            impact = max(impact, min(0.95, EVENT_TYPE_WEIGHTS.get(event.event_type, 0.35) + boost))
+    return impact
+
+
+def _quality_penalty(event: NormalisedEvent) -> float:
+    text = f"{event.title} {event.summary}".lower()
+    if any(pattern in text for pattern in LOW_SIGNAL_PATTERNS):
+        return 0.08
+    return 0.0

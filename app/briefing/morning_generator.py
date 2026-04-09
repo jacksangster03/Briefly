@@ -9,10 +9,11 @@ from datetime import datetime
 from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
+from app.briefing.theme_builder import build_top_themes
 from app.logger import get_logger
+from app.personalization.delivery_rules import load_alert_rules
 from app.personalization.user_profile import UserProfile
-from app.processing.dedupe import deduplicate_events
-from app.processing.relevance_scoring import score_events
+from app.processing.pipeline import is_actionable_event, process_event_stream
 from app.schemas.briefings import MarketSetup, MorningBriefing
 from app.schemas.events import NormalisedEvent, SectorSnapshot
 from app.settings import Settings
@@ -41,6 +42,7 @@ class MorningBriefingGenerator:
         self.market_svc = market_data
         self.news_svc = news_data
         self.macro_svc = macro_data
+        self.rules = load_alert_rules(settings).morning
 
     def generate(self) -> MorningBriefing:
         """Generate the full morning briefing."""
@@ -65,15 +67,12 @@ class MorningBriefingGenerator:
         # 4. Enrich events with sector tags from universe
         all_events = self._enrich_sectors(all_events)
 
-        # 5. Deduplicate
-        deduped = deduplicate_events(all_events)
-        briefing.events_after_dedup = len(deduped)
-
-        # 6. Score and rank
-        scored = score_events(deduped, self.profile)
+        # 5-6. Process, cluster, classify, and rank
+        scored = process_event_stream(all_events, self.profile, self.settings)
+        briefing.events_after_dedup = len(scored)
 
         # 7. Assemble sections
-        briefing.top_themes = scored[:5]
+        briefing.top_themes = build_top_themes(scored, max_themes=self.rules.max_themes)
         briefing.sector_scan = self._build_sector_scan(scored)
         briefing.earnings_calendar = self._fetch_earnings()
         briefing.watchlist_events = self._filter_watchlist_events(scored)
@@ -136,13 +135,16 @@ class MorningBriefingGenerator:
         )
 
         snapshots = []
-        for sector in weighted_sectors[:12]:  # top 12 sectors
+        for sector in weighted_sectors[:12]:
             # Events mentioning this sector's tickers
             sector_tickers = set(sector.key_names)
             sector_events = [
                 e for e in scored_events
-                if any(t in sector_tickers for t in e.tickers)
+                if is_actionable_event(e)
+                and (
+                    any(t in sector_tickers for t in e.tickers)
                 or sector.key in e.sectors
+                )
             ]
 
             etf_quote = etf_quotes.get(sector.etf)
@@ -151,7 +153,7 @@ class MorningBriefingGenerator:
                 display_name=sector.display_name,
                 etf_symbol=sector.etf,
                 etf_quote=etf_quote,
-                top_events=sector_events[:3],
+                top_events=sector_events[: self.rules.max_sector_events],
             )
             snapshots.append(snap)
 
@@ -161,15 +163,15 @@ class MorningBriefingGenerator:
         """Fetch today's earnings calendar."""
         if not self.news_svc.finnhub or not self.news_svc.finnhub.is_configured():
             return []
-        return self.news_svc.finnhub.get_earnings_calendar(days_ahead=1)
+        return self.news_svc.finnhub.get_earnings_calendar(days_ahead=1)[: self.rules.max_earnings]
 
     def _filter_watchlist_events(self, scored: list[NormalisedEvent]) -> list[NormalisedEvent]:
         """Filter events relevant to the user's watchlist."""
         watchlist_set = set(self.profile.all_watchlist_tickers)
         return [
             e for e in scored
-            if any(t in watchlist_set for t in e.tickers)
-        ][:8]
+            if is_actionable_event(e) and any(t in watchlist_set for t in e.tickers)
+        ][: self.rules.max_watchlist_events]
 
     def _fetch_watchlist_quotes(self) -> list:
         """Fetch quotes for primary watchlist tickers."""

@@ -11,6 +11,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.briefing.formatter import TelegramFormatter
+from app.briefing.breaking_generator import BreakingAlertGenerator
+from app.briefing.intraday_generator import IntradayGenerator
 from app.briefing.morning_generator import MorningBriefingGenerator
 from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
@@ -21,8 +23,7 @@ from app.logger import get_logger
 from app.messaging.email import EmailMessenger
 from app.messaging.telegram import TelegramMessenger
 from app.personalization.user_profile import UserProfile, load_user_profile
-from app.processing.dedupe import deduplicate_events
-from app.processing.relevance_scoring import score_events
+from app.processing.event_store import record_sent_events
 from app.schemas.briefings import BreakingAlert, IntradayUpdate
 from app.settings import Settings, get_settings
 from app.universe.sector_universe import SectorUniverse, load_sector_universe
@@ -51,26 +52,41 @@ def _get_messengers(settings: Settings, profile: UserProfile):
     return messengers
 
 
-def _deliver(messengers, messages: list[str], msg_type: str, event_ids: list[str] | None = None):
+def _deliver(
+    messengers,
+    messages: list[str],
+    msg_type: str,
+    events: list | None = None,
+):
     """Deliver messages via all configured channels and record to DB."""
     for messenger in messengers:
         success = messenger.send_messages(messages)
+        is_dry_run = bool(getattr(messenger, "dry_run", False))
         try:
-            with get_session() as session:
-                import hashlib
-                content = "\n".join(messages)
-                record = SentMessage(
-                    message_type=msg_type,
-                    channel=messenger.name,
-                    event_ids=event_ids or [],
-                    content_preview=content[:500],
-                    content_hash=hashlib.sha256(content.encode()).hexdigest()[:16],
-                    sent_at=datetime.now(timezone.utc),
-                    success=success,
-                )
-                session.add(record)
+            if not is_dry_run:
+                with get_session() as session:
+                    import hashlib
+                    content = "\n".join(messages)
+                    record = SentMessage(
+                        message_type=msg_type,
+                        channel=messenger.name,
+                        event_ids=[
+                            evt.cluster_id or evt.content_hash or evt.event_id
+                            for evt in (events or [])
+                        ],
+                        content_preview=content[:500],
+                        content_hash=hashlib.sha256(content.encode()).hexdigest()[:16],
+                        sent_at=datetime.now(timezone.utc),
+                        success=success,
+                    )
+                    session.add(record)
         except Exception:
             logger.debug("Failed to record sent message", exc_info=True)
+        if success and not is_dry_run:
+            try:
+                record_sent_events(events or [])
+            except Exception:
+                logger.debug("Failed to record sent events", exc_info=True)
 
 
 # -- Morning Briefing ---------------------------------------------------------
@@ -99,8 +115,19 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
     messages = formatter.format_morning_briefing(briefing)
 
     messengers = _get_messengers(settings, profile)
-    event_ids = [e.event_id for e in briefing.top_themes]
-    _deliver(messengers, messages, "morning_brief", event_ids)
+    display_events = []
+    seen_tracking_ids = set()
+    for evt in briefing.top_themes + briefing.watchlist_events + [
+        sector_evt
+        for sector in briefing.sector_scan
+        for sector_evt in sector.top_events
+    ]:
+        tracking_id = evt.cluster_id or evt.content_hash or evt.event_id
+        if tracking_id in seen_tracking_ids:
+            continue
+        seen_tracking_ids.add(tracking_id)
+        display_events.append(evt)
+    _deliver(messengers, messages, "morning_brief", display_events)
 
     logger.info(
         "Morning briefing delivered: %d messages, %d events",
@@ -119,49 +146,27 @@ def run_intraday_update(settings: Settings | None = None) -> None:
     profile = load_user_profile(settings)
     universe = load_sector_universe(settings)
     market_svc, news_svc, _ = _build_services(settings)
-
-    # Fetch new events
-    events = news_svc.fetch_market_news()
-    fetched = len(events)
-
-    # Enrich sectors
-    for evt in events:
-        for ticker in evt.tickers:
-            sectors = universe.sectors_for_ticker(ticker)
-            evt.sectors.extend(s for s in sectors if s not in evt.sectors)
-
-    # Dedupe (includes already-sent check)
-    deduped = deduplicate_events(events)
-
-    # Score
-    scored = score_events(deduped, profile)
-
-    # Filter to top items above threshold
-    threshold = 0.4
-    top = [e for e in scored if e.final_score >= threshold][:7]
-
-    # Market snapshot
-    snapshot = market_svc.get_quotes(universe.all_index_symbols[:4])
-
-    now = datetime.now()
-    update = IntradayUpdate(
-        generated_at=now,
-        hour_label=now.strftime("%H:%M"),
-        market_snapshot=snapshot,
-        new_events=top,
-        events_fetched=fetched,
-        events_after_dedup=len(deduped),
-        events_sent=len(top),
+    generator = IntradayGenerator(
+        settings=settings,
+        profile=profile,
+        universe=universe,
+        market_data=market_svc,
+        news_data=news_svc,
     )
+    update = generator.generate()
 
     formatter = TelegramFormatter()
     messages = formatter.format_intraday_update(update)
 
     messengers = _get_messengers(settings, profile)
-    event_ids = [e.event_id for e in top]
-    _deliver(messengers, messages, "intraday", event_ids)
+    _deliver(messengers, messages, "intraday", update.new_events)
 
-    logger.info("Intraday update: %d fetched, %d deduped, %d sent", fetched, len(deduped), len(top))
+    logger.info(
+        "Intraday update: %d fetched, %d deduped, %d sent",
+        update.events_fetched,
+        update.events_after_dedup,
+        update.events_sent,
+    )
 
 
 # -- Breaking Alerts ----------------------------------------------------------
@@ -173,39 +178,34 @@ def run_breaking_check(settings: Settings | None = None) -> None:
 
     profile = load_user_profile(settings)
     universe = load_sector_universe(settings)
-    _, news_svc, _ = _build_services(settings)
-    market_svc = MarketDataService(settings)
+    market_svc, news_svc, _ = _build_services(settings)
+    generator = BreakingAlertGenerator(
+        settings=settings,
+        profile=profile,
+        universe=universe,
+        market_data=market_svc,
+        news_data=news_svc,
+    )
+    alerts = generator.check()
 
-    # Fetch latest news
-    events = news_svc.fetch_market_news()
-
-    # Quick enrich + dedupe + score
-    for evt in events:
-        for ticker in evt.tickers:
-            sectors = universe.sectors_for_ticker(ticker)
-            evt.sectors.extend(s for s in sectors if s not in evt.sectors)
-
-    deduped = deduplicate_events(events)
-    scored = score_events(deduped, profile)
-
-    # Breaking threshold (configurable)
-    threshold = 0.80
-    breaking = [e for e in scored if e.final_score >= threshold and not e.already_sent]
-
-    if not breaking:
-        logger.debug("No breaking events above threshold %.2f", threshold)
+    if not alerts:
+        logger.debug("No breaking events above configured thresholds")
         return
 
     formatter = TelegramFormatter()
     messengers = _get_messengers(settings, profile)
 
-    for evt in breaking[:3]:  # max 3 breaking alerts per check
-        context_quotes = market_svc.get_quotes(universe.all_index_symbols[:4])
-        alert = BreakingAlert(
-            event=evt,
-            market_context=context_quotes,
-            reason=evt.score_explanation,
-        )
+    for alert in alerts:
         messages = formatter.format_breaking_alert(alert)
-        _deliver(messengers, messages, "breaking", [evt.event_id])
-        logger.info("Breaking alert sent: %s (score=%.3f)", evt.title[:60], evt.final_score)
+        _deliver(messengers, messages, "breaking", [alert.event])
+        logger.info(
+            "Breaking alert sent: %s (score=%.3f)",
+            alert.event.title[:60],
+            alert.event.final_score,
+        )
+
+
+if __name__ == "__main__":
+    from app.scheduler import start_scheduler
+
+    start_scheduler()

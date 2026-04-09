@@ -94,9 +94,16 @@ def apply_credibility_scores(
 
         evt.factual_confidence_score = base_confidence
 
-        # Attention score: how "buzzy" is this event?
-        # For now, set equal to importance; Phase 3 adds social signal tracking
-        evt.attention_score = evt.importance_score
+        # Attention is intentionally distinct from factual confidence.
+        text = f"{evt.title} {evt.summary}".lower()
+        attention = 0.30
+        if any(word in text for word in ("breaking", "surge", "plunge", "shock", "war", "fed", "fda")):
+            attention += 0.20
+        if evt.tickers:
+            attention += 0.15
+        if evt.source == "sec_edgar":
+            attention += 0.15
+        evt.attention_score = min(1.0, attention)
 
     logger.debug("Applied credibility scores to %d events", len(events))
     return events

@@ -22,6 +22,11 @@ SUBMISSIONS_URL = "https://data.sec.gov/submissions"
 
 # Filing types most relevant to market-moving events
 MATERIAL_FORMS = {"8-K", "10-K", "10-Q", "S-1", "4", "SC 13D", "SC 13G", "DEF 14A"}
+MATERIAL_KEYWORDS = {
+    "acquisition", "agreement", "bankruptcy", "board", "ceo", "chief financial officer",
+    "clinical", "dividend", "earnings", "fda", "guidance", "investigation", "merger",
+    "officer", "results", "restructuring", "termination",
+}
 
 
 class SECProvider(BaseProvider):
@@ -66,8 +71,9 @@ class SECProvider(BaseProvider):
             params["startdt"] = (today - timedelta(days=1)).isoformat()
             params["enddt"] = today.isoformat()
 
-        if forms:
-            params["forms"] = ",".join(forms)
+        target_forms = forms or sorted(MATERIAL_FORMS)
+        if target_forms:
+            params["forms"] = ",".join(target_forms)
         if tickers:
             params["q"] = " OR ".join(tickers) if not query else query
 
@@ -87,11 +93,15 @@ class SECProvider(BaseProvider):
             source = hit.get("_source", {})
             form_type = source.get("form", source.get("root_forms", ["Filing"])[0]
                                    if source.get("root_forms") else "Filing")
+            if form_type not in MATERIAL_FORMS:
+                continue
             display_names = source.get("display_names", [])
             entity_name = display_names[0] if display_names else "Unknown"
             description = source.get("file_description", "")
             tickers = self._extract_tickers_from_display(display_names)
             adsh = source.get("adsh", "")
+            if not self._is_material_hit(form_type, description):
+                continue
 
             title_parts = [form_type, entity_name.split("(CIK")[0].strip()]
             if description:
@@ -228,3 +238,13 @@ class SECProvider(BaseProvider):
         if form.startswith("S-"):
             return "registration"
         return "filing"
+
+    @staticmethod
+    def _is_material_hit(form_type: str, description: str) -> bool:
+        form = form_type.upper().strip()
+        if form in {"8-K", "8-K/A"}:
+            return True
+        if not description:
+            return form in {"10-K", "10-Q"}
+        text = description.lower()
+        return any(keyword in text for keyword in MATERIAL_KEYWORDS)

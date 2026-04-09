@@ -5,10 +5,11 @@ from __future__ import annotations
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
 from app.logger import get_logger
+from app.personalization.delivery_rules import load_alert_rules
 from app.personalization.user_profile import UserProfile
-from app.processing.dedupe import deduplicate_events
-from app.processing.relevance_scoring import score_events
+from app.processing.pipeline import process_event_stream, select_breaking_events
 from app.schemas.briefings import BreakingAlert
+from app.schemas.events import NormalisedEvent
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
 
@@ -31,11 +32,12 @@ class BreakingAlertGenerator:
         self.universe = universe
         self.market_svc = market_data
         self.news_svc = news_data
+        self.rules = load_alert_rules(settings).breaking
 
     def check(
         self,
-        min_score: float = 0.80,
-        max_alerts: int = 3,
+        min_score: float | None = None,
+        max_alerts: int | None = None,
     ) -> list[BreakingAlert]:
         """Check for breaking events. Returns list of alerts to send."""
         events = self.news_svc.fetch_market_news()
@@ -46,15 +48,12 @@ class BreakingAlertGenerator:
                 sectors = self.universe.sectors_for_ticker(ticker)
                 evt.sectors.extend(s for s in sectors if s not in evt.sectors)
 
-        # Dedupe + score
-        deduped = deduplicate_events(events)
-        scored = score_events(deduped, self.profile)
-
-        # Filter to breaking threshold, exclude already-sent
-        breaking = [
-            e for e in scored
-            if e.final_score >= min_score and not e.already_sent
-        ]
+        scored = process_event_stream(events, self.profile, self.settings)
+        if min_score is not None:
+            self.rules.min_final_score = min_score
+        if max_alerts is not None:
+            self.rules.max_per_hour = max_alerts
+        breaking = select_breaking_events(scored, self.rules)
 
         if not breaking:
             return []
@@ -67,7 +66,7 @@ class BreakingAlertGenerator:
             alert = BreakingAlert(
                 event=evt,
                 market_context=context_quotes,
-                reason=evt.score_explanation,
+                reason=_build_alert_reason(evt),
             )
             alerts.append(alert)
             logger.info(
@@ -76,3 +75,24 @@ class BreakingAlertGenerator:
             )
 
         return alerts
+
+
+def _build_alert_reason(evt: NormalisedEvent) -> str:
+    """Build a concise, user-facing reason for why this event triggered."""
+    parts: list[str] = []
+
+    if evt.cluster_size > 1:
+        parts.append(f"Confirmed by {evt.cluster_size} sources")
+    if evt.update_status == "material_update":
+        parts.append("developing story with new details")
+    if evt.tickers:
+        parts.append(f"affects {', '.join(evt.tickers[:3])}")
+    if evt.sectors:
+        parts.append(f"sector: {', '.join(evt.sectors[:2])}")
+    if evt.source == "sec_edgar":
+        parts.append("official regulatory filing")
+
+    if not parts:
+        parts.append("high-impact market event")
+
+    return ". ".join(parts)

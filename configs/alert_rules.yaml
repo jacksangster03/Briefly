@@ -4,9 +4,10 @@
 
 breaking_alerts:
   min_final_score: 0.80
+  material_update_min_final_score: 0.88
   max_per_hour: 3
   require_ticker: false
-  min_factual_confidence: 0.50
+  min_factual_confidence: 0.65
 
   # Event types that qualify for breaking alerts at lower thresholds
   high_priority_types:
@@ -28,6 +29,8 @@ intraday_updates:
   min_final_score: 0.40
   max_events_per_update: 7
   min_novelty_score: 0.3
+  continuation_min_final_score: 0.58
+  continuation_min_novelty_score: 0.45
 
 morning_briefing:
   max_themes: 5

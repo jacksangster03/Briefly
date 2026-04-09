@@ -1,82 +1,124 @@
 """Event clustering: group related events into narrative clusters.
 
-Groups events by shared tickers, keywords, or themes within a time window.
-Each cluster gets a single representative event for the briefing, with
-a note about how many related items exist.
+Clusters are deterministic so the same catalyst can be recognised across
+multiple runs. That lets us suppress noisy repeats while still allowing
+material follow-ups to flow through as updates.
 """
 
 from __future__ import annotations
 
-import uuid
+import hashlib
 from collections import defaultdict
 from datetime import timedelta
 
 from app.logger import get_logger
+from app.processing.cleaners import normalise_for_comparison
 from app.schemas.events import NormalisedEvent
 
 logger = get_logger("clustering")
+
+STOPWORDS = {
+    "after", "analyst", "announces", "another", "becomes", "could", "from",
+    "heres", "just", "market", "markets", "more", "says", "say", "stock",
+    "stocks", "their", "these", "this", "today", "update", "what", "why",
+    "with", "would", "worth", "reuters", "sources", "report", "according",
+}
+
+# Macro threads: events sharing one of these keyword groups cluster together
+# even without shared tickers. Each group defines a single macro narrative.
+MACRO_THREAD_GROUPS = [
+    {"iran", "tehran", "persian"},
+    {"israel", "gaza", "hamas", "hezbollah", "netanyahu"},
+    {"tariff", "trade war", "trade deal"},
+    {"fed", "fomc", "powell", "rate cut", "rate hike"},
+    {"opec", "oil output", "oil production", "crude"},
+    {"ukraine", "russia", "kyiv", "moscow"},
+    {"china", "beijing", "xi jinping"},
+]
 
 
 def cluster_events(
     events: list[NormalisedEvent],
     time_window_hours: int = 12,
 ) -> list[NormalisedEvent]:
-    """Assign cluster IDs to related events and return representatives.
-
-    Two events are in the same cluster if they share at least one ticker
-    and their event types are compatible, within the time window.
-    """
+    """Assign deterministic cluster IDs and return cluster representatives."""
     if not events:
         return []
 
-    # Build clusters
-    clusters: dict[str, list[NormalisedEvent]] = {}
-    assigned: set[str] = set()
-
-    # Sort by published_at (newest first) so the best event is likely first
+    clusters: dict[str, list[NormalisedEvent]] = defaultdict(list)
     sorted_events = sorted(
         events,
-        key=lambda e: e.published_at or e.generated_at if hasattr(e, "generated_at") else e.published_at,
+        key=lambda e: (
+            e.final_score,
+            e.published_at.isoformat() if e.published_at else "",
+        ),
         reverse=True,
     )
 
     for evt in sorted_events:
-        if evt.event_id in assigned:
+        matched_cluster = _find_matching_cluster(evt, clusters, time_window_hours)
+        if matched_cluster:
+            evt.cluster_id = matched_cluster
+            clusters[matched_cluster].append(evt)
             continue
 
-        # Try to find an existing cluster this event belongs to
-        matched_cluster = _find_matching_cluster(evt, clusters, time_window_hours)
+        cluster_id = build_story_key(evt)
+        evt.cluster_id = cluster_id
+        clusters[cluster_id].append(evt)
 
-        if matched_cluster:
-            clusters[matched_cluster].append(evt)
-            assigned.add(evt.event_id)
-        else:
-            # Start a new cluster
-            cluster_id = str(uuid.uuid4())[:8]
-            evt.cluster_id = cluster_id
-            clusters[cluster_id] = [evt]
-            assigned.add(evt.event_id)
-
-    # Select representative from each cluster (highest final_score)
     representatives: list[NormalisedEvent] = []
-    for cluster_id, cluster_events_list in clusters.items():
-        cluster_events_list.sort(key=lambda e: e.final_score, reverse=True)
-        rep = cluster_events_list[0]
+    for cluster_id, cluster_members in clusters.items():
+        cluster_members.sort(
+            key=lambda e: (
+                e.final_score,
+                e.published_at.isoformat() if e.published_at else "",
+            ),
+            reverse=True,
+        )
+        rep = cluster_members[0]
         rep.cluster_id = cluster_id
+        rep.cluster_size = len(cluster_members)
+        # Preserve original summary before we append cluster metadata
+        rep.raw_data["summary_original"] = rep.summary
+        rep.raw_data["cluster_titles"] = [member.title for member in cluster_members[:5]]
+        rep.raw_data["cluster_sources"] = sorted({member.source for member in cluster_members})
+        rep.raw_data["cluster_member_hashes"] = [
+            member.content_hash for member in cluster_members if member.content_hash
+        ]
 
-        if len(cluster_events_list) > 1:
+        if len(cluster_members) > 1:
+            related_count = len(cluster_members) - 1
             rep.summary = (
-                f"{rep.summary} "
-                f"[+{len(cluster_events_list) - 1} related]"
+                f"{rep.summary} [+{related_count} related]"
             ).strip()
 
         representatives.append(rep)
 
-    logger.info(
-        "Clustered %d events into %d clusters",
-        len(events), len(representatives),
-    )
+    representatives.sort(key=lambda e: e.final_score, reverse=True)
+    logger.info("Clustered %d events into %d story clusters", len(events), len(representatives))
     return representatives
+
+
+def build_story_key(evt: NormalisedEvent) -> str:
+    """Build a stable story key from tickers, event family, and topic terms.
+
+    For tickerless events that match a macro thread group, the group index
+    becomes the anchor so all Iran-thread events share a key root.
+    """
+    family = _event_family(evt.event_type)
+    tickers = ",".join(sorted(evt.tickers)[:3])
+
+    if not tickers:
+        text = f"{evt.title} {evt.summary}".lower()
+        macro_groups = _matching_macro_groups(text)
+        if macro_groups:
+            tickers = f"macro_thread_{min(macro_groups)}"
+        else:
+            tickers = "macro"
+
+    topic = " ".join(_topic_terms(evt.title, evt.summary))
+    raw = f"{family}|{tickers}|{topic}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:12]
 
 
 def _find_matching_cluster(
@@ -84,44 +126,94 @@ def _find_matching_cluster(
     clusters: dict[str, list[NormalisedEvent]],
     window_hours: int,
 ) -> str | None:
-    """Find a cluster this event belongs to, or return None."""
     window = timedelta(hours=window_hours)
     evt_tickers = set(evt.tickers)
-
-    if not evt_tickers:
-        return None
+    evt_terms = set(_topic_terms(evt.title, evt.summary))
+    evt_text = f"{evt.title} {evt.summary}".lower()
+    evt_macro_groups = _matching_macro_groups(evt_text)
 
     for cluster_id, members in clusters.items():
         rep = members[0]
         rep_tickers = set(rep.tickers)
+        rep_terms = set(_topic_terms(rep.title, rep.summary))
 
-        # Must share at least one ticker
-        if not evt_tickers & rep_tickers:
-            continue
-
-        # Must be within time window
         if evt.published_at and rep.published_at:
             if abs(evt.published_at - rep.published_at) > window:
                 continue
 
-        # Compatible event types (don't cluster earnings with general news)
-        if _compatible_types(evt.event_type, rep.event_type):
+        if not _compatible_types(evt.event_type, rep.event_type):
+            continue
+
+        # Shared tickers: strong signal
+        if evt_tickers and rep_tickers and evt_tickers & rep_tickers:
             return cluster_id
+
+        # Shared topic terms: moderate signal
+        if evt_terms and rep_terms and len(evt_terms & rep_terms) >= 2:
+            return cluster_id
+
+        # Macro thread grouping: cluster tickerless geopolitical/macro events
+        # about the same narrative (e.g. all Iran-related, all tariff-related)
+        if evt_macro_groups:
+            rep_text = f"{rep.title} {rep.summary}".lower()
+            rep_macro_groups = _matching_macro_groups(rep_text)
+            if evt_macro_groups & rep_macro_groups:
+                return cluster_id
 
     return None
 
 
-def _compatible_types(type_a: str, type_b: str) -> bool:
-    """Check if two event types are similar enough to cluster."""
-    if type_a == type_b:
-        return True
+def _matching_macro_groups(text: str) -> set[int]:
+    """Return indices of MACRO_THREAD_GROUPS that match the given text."""
+    matches = set()
+    for i, group in enumerate(MACRO_THREAD_GROUPS):
+        if any(keyword in text for keyword in group):
+            matches.add(i)
+    return matches
 
-    # Group compatible types
+
+def _event_family(event_type: str) -> str:
+    event_type = (event_type or "headline").lower()
     news_types = {"market_news", "company_news", "headline", "news_search"}
     filing_types = {"filing", "current_report", "annual_report", "quarterly_report"}
     earnings_types = {"earnings", "guidance"}
+    macro_types = {"macro_release", "fed_decision", "geopolitical", "regulatory"}
 
-    for group in [news_types, filing_types, earnings_types]:
+    if event_type in news_types:
+        return "news"
+    if event_type in filing_types:
+        return "filing"
+    if event_type in earnings_types:
+        return "earnings"
+    if event_type in macro_types:
+        return "macro"
+    return event_type
+
+
+def _topic_terms(title: str, summary: str = "", limit: int = 5) -> list[str]:
+    text = normalise_for_comparison(f"{title} {summary}")
+    words = [word for word in text.split() if len(word) > 2 and word not in STOPWORDS]
+    deduped: list[str] = []
+    seen = set()
+    for word in words:
+        if word not in seen:
+            deduped.append(word)
+            seen.add(word)
+        if len(deduped) >= limit:
+            break
+    return deduped or ["headline"]
+
+
+def _compatible_types(type_a: str, type_b: str) -> bool:
+    if type_a == type_b:
+        return True
+
+    news_types = {"market_news", "company_news", "headline", "news_search"}
+    filing_types = {"filing", "current_report", "annual_report", "quarterly_report"}
+    earnings_types = {"earnings", "guidance"}
+    macro_types = {"macro_release", "fed_decision", "geopolitical", "regulatory"}
+
+    for group in [news_types, filing_types, earnings_types, macro_types]:
         if type_a in group and type_b in group:
             return True
 

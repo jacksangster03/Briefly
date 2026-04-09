@@ -9,9 +9,9 @@ from datetime import datetime
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
 from app.logger import get_logger
+from app.personalization.delivery_rules import load_alert_rules
 from app.personalization.user_profile import UserProfile
-from app.processing.dedupe import deduplicate_events
-from app.processing.relevance_scoring import score_events
+from app.processing.pipeline import process_event_stream, select_intraday_events
 from app.schemas.briefings import IntradayUpdate
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
@@ -35,11 +35,12 @@ class IntradayGenerator:
         self.universe = universe
         self.market_svc = market_data
         self.news_svc = news_data
+        self.rules = load_alert_rules(settings).intraday
 
     def generate(
         self,
-        min_score: float = 0.40,
-        max_events: int = 7,
+        min_score: float | None = None,
+        max_events: int | None = None,
     ) -> IntradayUpdate:
         """Generate an intraday update."""
         logger.info("Generating intraday update...")
@@ -54,12 +55,14 @@ class IntradayGenerator:
                 sectors = self.universe.sectors_for_ticker(ticker)
                 evt.sectors.extend(s for s in sectors if s not in evt.sectors)
 
-        # Dedupe (includes already-sent check against DB)
-        deduped = deduplicate_events(events)
-
-        # Score and filter
-        scored = score_events(deduped, self.profile)
-        top = [e for e in scored if e.final_score >= min_score][:max_events]
+        scored = process_event_stream(events, self.profile, self.settings)
+        effective_min_score = min_score if min_score is not None else self.rules.min_final_score
+        effective_max_events = max_events if max_events is not None else self.rules.max_events_per_update
+        if effective_min_score != self.rules.min_final_score:
+            self.rules.min_final_score = effective_min_score
+        if effective_max_events != self.rules.max_events_per_update:
+            self.rules.max_events_per_update = effective_max_events
+        top = select_intraday_events(scored, self.rules)
 
         # Market snapshot
         snapshot = self.market_svc.get_quotes(self.universe.all_index_symbols[:4])
@@ -71,12 +74,12 @@ class IntradayGenerator:
             market_snapshot=snapshot,
             new_events=top,
             events_fetched=fetched,
-            events_after_dedup=len(deduped),
+            events_after_dedup=len(scored),
             events_sent=len(top),
         )
 
         logger.info(
             "Intraday update: %d fetched, %d deduped, %d above threshold",
-            fetched, len(deduped), len(top),
+            fetched, len(scored), len(top),
         )
         return update

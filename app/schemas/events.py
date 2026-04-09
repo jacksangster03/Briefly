@@ -83,7 +83,10 @@ class NormalisedEvent(BaseModel):
     final_score: float = 0.0               # 0 to 1, composite
     content_hash: str = ""
     cluster_id: str | None = None
+    cluster_size: int = 1
     already_sent: bool = False
+    update_status: str = "new"             # new | material_update | duplicate
+    reason_code: str = ""
     score_explanation: str = ""
     raw_data: dict[str, Any] = Field(default_factory=dict)
 

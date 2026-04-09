@@ -246,20 +246,56 @@ class TelegramFormatter:
         return "\n".join(parts) if len(parts) > 1 else ""
 
     def _format_single_event(self, evt: NormalisedEvent) -> str:
-        """Format a single event for intraday/alert context."""
+        """Format a single event for intraday/alert context.
+
+        Avoids duplicating the title as the summary, and only shows
+        metadata that is genuinely differentiating (not boilerplate).
+        """
         tickers = f" [{', '.join(evt.tickers[:3])}]" if evt.tickers else ""
         parts = [f"<b>{evt.title}</b>{tickers}"]
+
+        # Only show summary if it adds information beyond the title
         if evt.summary:
-            parts.append(evt.summary[:300])
+            summary_clean = evt.summary.strip()
+            if not self._summary_duplicates_title(summary_clean, evt.title):
+                parts.append(summary_clean[:300])
+
+        # Compact metadata: only include what differentiates this item
         meta = []
+        if evt.update_status == "material_update":
+            meta.append("Developing")
+        if evt.cluster_size > 1:
+            meta.append(f"{evt.cluster_size} reports")
+        if evt.source == "sec_edgar":
+            meta.append("Official filing")
         if evt.sectors:
-            meta.append(f"Sector: {', '.join(evt.sectors[:2])}")
-        if evt.event_type:
-            meta.append(f"Type: {evt.event_type}")
-        meta.append(f"Score: {evt.final_score:.2f}")
+            meta.append(", ".join(evt.sectors[:2]))
         if meta:
             parts.append("<i>" + " | ".join(meta) + "</i>")
+
         return "\n".join(parts)
+
+    @staticmethod
+    def _summary_duplicates_title(summary: str, title: str) -> bool:
+        """Return True if the summary is essentially the title repeated."""
+        s = summary.lower().strip()
+        t = title.lower().strip()
+        # Strip source attributions
+        for sep in (" - ", " | ", "  "):
+            if sep in s:
+                s = s[: s.rfind(sep)].strip()
+            if sep in t:
+                t = t[: t.rfind(sep)].strip()
+        if not s or not t:
+            return True
+        if s in t or t in s:
+            return True
+        s_tokens = set(s.split())
+        t_tokens = set(t.split())
+        if not s_tokens:
+            return True
+        overlap = len(s_tokens & t_tokens) / max(len(s_tokens), len(t_tokens))
+        return overlap >= 0.75
 
     # -- Message splitting ----------------------------------------------------
 
