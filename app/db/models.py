@@ -1,0 +1,113 @@
+"""SQLAlchemy ORM models for market-briefing-bot persistence."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy.types import JSON
+
+from app.db.base import Base
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class RawEvent(Base):
+    """Unprocessed events as received from providers."""
+
+    __tablename__ = "raw_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source = Column(String(50), nullable=False, index=True)
+    source_id = Column(String(255))
+    title = Column(Text, nullable=False)
+    summary = Column(Text, default="")
+    url = Column(Text, default="")
+    published_at = Column(DateTime)
+    fetched_at = Column(DateTime, default=_utcnow)
+    raw_data = Column(JSON, default=dict)
+    content_hash = Column(String(64), index=True)
+
+
+class NormalisedEvent(Base):
+    """Processed, scored, deduplicated events."""
+
+    __tablename__ = "normalised_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String(36), unique=True, index=True)
+    source = Column(String(50), index=True)
+    source_type = Column(String(50))
+    published_at = Column(DateTime, index=True)
+    title = Column(Text, nullable=False)
+    summary = Column(Text, default="")
+    url = Column(Text, default="")
+    tickers = Column(JSON, default=list)
+    sectors = Column(JSON, default=list)
+    regions = Column(JSON, default=list)
+    event_type = Column(String(50), default="")
+    sentiment = Column(Float, default=0.0)
+    importance_score = Column(Float, default=0.0)
+    novelty_score = Column(Float, default=0.0)
+    personal_relevance_score = Column(Float, default=0.0)
+    factual_confidence_score = Column(Float, default=0.5)
+    attention_score = Column(Float, default=0.0)
+    final_score = Column(Float, default=0.0)
+    content_hash = Column(String(64), index=True)
+    cluster_id = Column(String(36), nullable=True)
+    score_explanation = Column(Text, default="")
+    already_sent = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class SentMessage(Base):
+    """Record of every message delivered to the user."""
+
+    __tablename__ = "sent_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    message_type = Column(String(50), nullable=False)  # morning_brief | intraday | breaking
+    channel = Column(String(50), nullable=False)        # telegram | email
+    event_ids = Column(JSON, default=list)
+    content_preview = Column(Text, default="")
+    content_hash = Column(String(64))
+    sent_at = Column(DateTime, default=_utcnow)
+    success = Column(Boolean, default=True)
+    error_message = Column(Text, nullable=True)
+
+
+class ProviderHealthLog(Base):
+    """Per-call observability for data providers."""
+
+    __tablename__ = "provider_health"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    provider = Column(String(50), nullable=False, index=True)
+    endpoint = Column(String(255))
+    latency_ms = Column(Integer)
+    status_code = Column(Integer, nullable=True)
+    success = Column(Boolean, default=True)
+    error_message = Column(Text, nullable=True)
+    items_returned = Column(Integer, default=0)
+    timestamp = Column(DateTime, default=_utcnow)
+
+
+class MarketSnapshot(Base):
+    """Point-in-time price snapshot for indices, sectors, commodities."""
+
+    __tablename__ = "market_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    display_name = Column(String(100), default="")
+    price = Column(Float)
+    change = Column(Float)
+    change_percent = Column(Float)
+    volume = Column(Float, nullable=True)
+    high = Column(Float, nullable=True)
+    low = Column(Float, nullable=True)
+    previous_close = Column(Float, nullable=True)
+    snapshot_type = Column(String(30), default="quote")  # quote | sector_etf | macro
+    timestamp = Column(DateTime, default=_utcnow)

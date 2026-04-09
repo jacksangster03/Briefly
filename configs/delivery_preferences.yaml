@@ -1,0 +1,50 @@
+# ============================================================================
+# Delivery preferences: channel-specific formatting and routing
+# ============================================================================
+
+channels:
+  telegram:
+    enabled: true
+    priority: 1
+    parse_mode: HTML
+    disable_preview: true
+    max_message_length: 4096
+    format:
+      use_html_bold: true
+      sparse_emoji: true
+      compact_numbers: true
+
+  email:
+    enabled: false
+    priority: 2
+    format:
+      include_full_summaries: true
+      include_links: true
+
+  slack:
+    enabled: false
+    priority: 3
+    format:
+      use_mrkdwn: true
+
+  discord:
+    enabled: false
+    priority: 4
+    format:
+      use_markdown: true
+
+# Routing rules: which message types go to which channels
+routing:
+  morning_brief:
+    channels: [telegram]
+    fallback: email
+
+  intraday:
+    channels: [telegram]
+
+  breaking:
+    channels: [telegram]
+    also_send_to: [email]    # breaking alerts go to backup too
+
+  evening_recap:
+    channels: [telegram]

@@ -1,0 +1,88 @@
+# ============================================================================
+# Sector definitions and their representative ETFs / tickers
+# ============================================================================
+
+sectors:
+  technology:
+    etf: XLK
+    display_name: Technology
+    key_names: [AAPL, MSFT, NVDA, AVGO, ORCL, CRM, ADBE, ACN, CSCO, IBM]
+
+  semiconductors:
+    etf: SMH
+    display_name: Semiconductors
+    key_names: [NVDA, AVGO, AMD, INTC, QCOM, TXN, MU, LRCX, AMAT, ASML]
+
+  software_internet:
+    etf: IGV
+    display_name: Software / Internet
+    key_names: [MSFT, CRM, ADBE, NOW, INTU, SNPS, PANW, CRWD, PLTR, SHOP]
+
+  healthcare:
+    etf: XLV
+    display_name: Healthcare
+    key_names: [UNH, JNJ, LLY, ABBV, MRK, TMO, ABT, DHR, PFE, AMGN]
+
+  pharma_biotech:
+    etf: XBI
+    display_name: Pharma / Biotech
+    key_names: [LLY, ABBV, MRK, PFE, AMGN, GILD, REGN, VRTX, BMY, BIIB]
+
+  financials:
+    etf: XLF
+    display_name: Financials
+    key_names: [JPM, BAC, WFC, GS, MS, BLK, SCHW, C, AXP, USB]
+
+  energy:
+    etf: XLE
+    display_name: Energy
+    key_names: [XOM, CVX, COP, SLB, EOG, MPC, PSX, VLO, OXY, PXD]
+
+  industrials:
+    etf: XLI
+    display_name: Industrials
+    key_names: [CAT, GE, HON, UNP, RTX, DE, BA, LMT, MMM, UPS]
+
+  consumer_discretionary:
+    etf: XLY
+    display_name: Consumer Discretionary
+    key_names: [AMZN, TSLA, HD, MCD, NKE, LOW, SBUX, TJX, BKNG, CMG]
+
+  consumer_staples:
+    etf: XLP
+    display_name: Consumer Staples
+    key_names: [PG, KO, PEP, COST, WMT, PM, MO, CL, MDLZ, KHC]
+
+  communication_services:
+    etf: XLC
+    display_name: Communication Services
+    key_names: [META, GOOGL, NFLX, DIS, CMCSA, T, VZ, TMUS, CHTR, EA]
+
+  real_estate:
+    etf: XLRE
+    display_name: Real Estate
+    key_names: [PLD, AMT, CCI, EQIX, SPG, O, DLR, PSA, WELL, AVB]
+
+  utilities:
+    etf: XLU
+    display_name: Utilities
+    key_names: [NEE, SO, DUK, CEG, SRE, AEP, D, EXC, XEL, ED]
+
+  materials:
+    etf: XLB
+    display_name: Materials
+    key_names: [LIN, APD, SHW, ECL, FCX, NEM, NUE, DOW, DD, VMC]
+
+# Indices and macro instruments tracked in market setup
+indices:
+  - { symbol: SPY, display: "S&P 500" }
+  - { symbol: QQQ, display: "Nasdaq 100" }
+  - { symbol: DIA, display: "Dow 30" }
+  - { symbol: IWM, display: "Russell 2000" }
+
+macro_instruments:
+  - { symbol: TLT, display: "20Y+ Treasury" }
+  - { symbol: GLD, display: Gold }
+  - { symbol: USO, display: "WTI Crude" }
+  - { symbol: UUP, display: "USD Index" }
+  - { symbol: IBIT, display: Bitcoin }

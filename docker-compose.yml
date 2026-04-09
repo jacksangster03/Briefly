@@ -1,0 +1,23 @@
+services:
+  briefing-bot:
+    build: .
+    container_name: market-briefing-bot
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./configs:/app/configs
+    restart: unless-stopped
+    command: python -m app.cli scheduler
+
+  # One-shot morning briefing (use: docker compose run morning)
+  morning:
+    build: .
+    container_name: mbb-morning
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./configs:/app/configs
+    command: python -m app.cli morning
+    profiles: ["manual"]

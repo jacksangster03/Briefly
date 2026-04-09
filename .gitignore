@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data
+data/raw/*
+data/processed/*
+data/cache/*
+data/state/*
+!data/*/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+
+# User configs (examples are tracked)
+configs/user_profile.yaml
+configs/watchlists.yaml

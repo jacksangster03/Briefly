@@ -1,0 +1,38 @@
+# ============================================================================
+# Watchlist configuration
+# Copy to watchlists.yaml and customise.
+# Tickers on your watchlist get boosted relevance in all briefings.
+# ============================================================================
+
+primary:
+  - NVDA
+  - MSFT
+  - AAPL
+  - GOOGL
+  - META
+  - AMZN
+  - TSLA
+  - AMD
+  - AVGO
+  - LLY
+
+secondary:
+  - ASML
+  - ARM
+  - PLTR
+  - CRWD
+  - SNOW
+  - RHHBY    # Roche
+  - NVO      # Novo Nordisk
+  - JPM
+  - GS
+  - BLK
+
+# Tickers you want tracked but at lower priority
+monitor:
+  - COIN
+  - SQ
+  - SOFI
+  - DDOG
+  - NET
+  - ABNB

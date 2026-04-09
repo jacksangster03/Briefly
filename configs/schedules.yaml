@@ -1,0 +1,31 @@
+# ============================================================================
+# Schedule configuration
+# Times are in the user's local timezone (from user_profile.yaml)
+# ============================================================================
+
+morning_briefing:
+  time: "12:30"
+  days: [mon, tue, wed, thu, fri]
+  description: Pre-US-open morning briefing
+
+hourly_intraday:
+  start: "14:30"
+  end: "22:00"
+  interval_minutes: 60
+  days: [mon, tue, wed, thu, fri]
+  description: Hourly intraday market updates
+
+breaking_alerts:
+  enabled: true
+  poll_interval_minutes: 5
+  start: "07:00"
+  end: "23:00"
+  days: [mon, tue, wed, thu, fri]
+  min_score_threshold: 0.80
+  description: High-threshold breaking market alerts
+
+evening_recap:
+  enabled: false
+  time: "22:30"
+  days: [mon, tue, wed, thu, fri]
+  description: End-of-day market recap (future)

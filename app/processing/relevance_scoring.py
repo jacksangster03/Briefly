@@ -1,0 +1,185 @@
+"""Multi-dimensional event scoring engine.
+
+Computes five scoring dimensions per event, then a weighted composite:
+1. source_credibility   - how trustworthy is the source?
+2. event_type_weight    - how market-moving is this type of event?
+3. personal_relevance   - does it match the user's sectors/watchlist/regions?
+4. novelty              - has the user already seen this?
+5. factual_confidence   - is this verified or speculative?
+
+The final_score is a weighted combination used for inclusion/ranking.
+"""
+
+from __future__ import annotations
+
+from app.logger import get_logger
+from app.personalization.user_profile import UserProfile
+from app.schemas.events import NormalisedEvent
+
+logger = get_logger("scoring")
+
+# -- Source credibility by provider -------------------------------------------
+SOURCE_CREDIBILITY: dict[str, float] = {
+    "sec_edgar": 0.95,
+    "fred": 0.90,
+    "finnhub": 0.75,
+    "polygon": 0.75,
+    "newsapi": 0.55,
+    "yfinance": 0.50,
+    "x_twitter": 0.25,
+}
+
+# -- Event type importance weights -------------------------------------------
+EVENT_TYPE_WEIGHTS: dict[str, float] = {
+    "earnings": 0.90,
+    "guidance": 0.90,
+    "fda_decision": 0.95,
+    "m_and_a": 0.90,
+    "insider_transaction": 0.70,
+    "current_report": 0.80,     # 8-K
+    "annual_report": 0.75,      # 10-K
+    "quarterly_report": 0.70,   # 10-Q
+    "ownership_disclosure": 0.65,
+    "macro_release": 0.85,
+    "fed_decision": 0.95,
+    "geopolitical": 0.80,
+    "regulatory": 0.80,
+    "analyst_action": 0.65,
+    "market_news": 0.50,
+    "company_news": 0.55,
+    "headline": 0.45,
+    "news_search": 0.40,
+    "filing": 0.60,
+}
+
+# -- Composite weights -------------------------------------------------------
+COMPOSITE_WEIGHTS = {
+    "source_credibility": 0.15,
+    "event_type_weight": 0.25,
+    "personal_relevance": 0.25,
+    "novelty": 0.20,
+    "factual_confidence": 0.15,
+}
+
+
+def score_event(
+    event: NormalisedEvent,
+    profile: UserProfile,
+    sent_hashes: set[str] | None = None,
+) -> NormalisedEvent:
+    """Score a single event across all dimensions and set final_score."""
+    scores: dict[str, float] = {}
+
+    # 1. Source credibility
+    scores["source_credibility"] = SOURCE_CREDIBILITY.get(event.source, 0.3)
+
+    # 2. Event type weight
+    scores["event_type_weight"] = EVENT_TYPE_WEIGHTS.get(event.event_type, 0.35)
+
+    # 3. Personal relevance (max of sector, watchlist, region signals)
+    sector_score = _sector_relevance(event, profile)
+    watchlist_score = _watchlist_relevance(event, profile)
+    region_score = _region_relevance(event, profile)
+    scores["personal_relevance"] = max(sector_score, watchlist_score, region_score)
+
+    # 4. Novelty
+    if sent_hashes and event.content_hash in sent_hashes:
+        scores["novelty"] = 0.1
+        event.already_sent = True
+    else:
+        scores["novelty"] = event.novelty_score if event.novelty_score > 0 else 1.0
+
+    # 5. Factual confidence (set by provider, adjusted here)
+    scores["factual_confidence"] = event.factual_confidence_score
+
+    # Composite
+    final = sum(
+        COMPOSITE_WEIGHTS[dim] * scores[dim]
+        for dim in COMPOSITE_WEIGHTS
+    )
+
+    # Apply the scores back to the event
+    event.importance_score = scores["event_type_weight"]
+    event.personal_relevance_score = scores["personal_relevance"]
+    event.novelty_score = scores["novelty"]
+    event.attention_score = scores["source_credibility"]
+    event.final_score = round(final, 4)
+
+    # Build explanation
+    event.score_explanation = _build_explanation(scores, event, profile)
+
+    return event
+
+
+def score_events(
+    events: list[NormalisedEvent],
+    profile: UserProfile,
+    sent_hashes: set[str] | None = None,
+) -> list[NormalisedEvent]:
+    """Score and sort events by final_score descending."""
+    scored = [score_event(e, profile, sent_hashes) for e in events]
+    scored.sort(key=lambda e: e.final_score, reverse=True)
+    logger.info(
+        "Scored %d events. Top score: %.3f, Bottom: %.3f",
+        len(scored),
+        scored[0].final_score if scored else 0,
+        scored[-1].final_score if scored else 0,
+    )
+    return scored
+
+
+# -- Relevance sub-scorers ---------------------------------------------------
+
+def _sector_relevance(event: NormalisedEvent, profile: UserProfile) -> float:
+    if not event.sectors:
+        return 0.2
+    return max(
+        profile.sector_weights.get(s, 0.2) for s in event.sectors
+    )
+
+
+def _watchlist_relevance(event: NormalisedEvent, profile: UserProfile) -> float:
+    if not event.tickers:
+        return 0.0
+    primary = set(profile.watchlist_primary)
+    secondary = set(profile.watchlist_secondary)
+    for ticker in event.tickers:
+        if ticker in primary:
+            return 1.0
+        if ticker in secondary:
+            return 0.75
+    return 0.0
+
+
+def _region_relevance(event: NormalisedEvent, profile: UserProfile) -> float:
+    if not event.regions:
+        return 0.3  # default for events with no region tag
+    return max(
+        profile.coverage_weights.get(r, 0.3) for r in event.regions
+    )
+
+
+def _build_explanation(
+    scores: dict[str, float],
+    event: NormalisedEvent,
+    profile: UserProfile,
+) -> str:
+    """Human-readable explanation of why an event scored as it did."""
+    parts = []
+    parts.append(f"source={event.source} ({scores['source_credibility']:.2f})")
+    parts.append(f"type={event.event_type} ({scores['event_type_weight']:.2f})")
+    parts.append(f"relevance={scores['personal_relevance']:.2f}")
+
+    if event.tickers:
+        in_watchlist = [
+            t for t in event.tickers
+            if t in set(profile.watchlist_primary + profile.watchlist_secondary)
+        ]
+        if in_watchlist:
+            parts.append(f"watchlist=[{','.join(in_watchlist)}]")
+
+    parts.append(f"novelty={scores['novelty']:.2f}")
+    parts.append(f"confidence={scores['factual_confidence']:.2f}")
+    parts.append(f"FINAL={event.final_score:.4f}")
+
+    return " | ".join(parts)

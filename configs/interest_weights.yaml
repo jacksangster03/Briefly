@@ -1,0 +1,40 @@
+# ============================================================================
+# Interest weights: fine-grained topic/theme boosting
+# These weights multiply the personal relevance score for events
+# matching specific themes beyond sector/watchlist matching.
+# ============================================================================
+
+themes:
+  ai_infrastructure: 1.0
+  gpu_compute: 1.0
+  large_language_models: 0.95
+  cloud_computing: 0.85
+  semiconductor_supply: 0.95
+  drug_discovery: 0.90
+  clinical_trials: 0.85
+  obesity_drugs: 0.90
+  neurotech: 0.90
+  gene_therapy: 0.80
+  fintech: 0.85
+  digital_payments: 0.80
+  capital_markets_structure: 0.85
+  quantitative_trading: 0.85
+  crypto_regulation: 0.70
+  ev_battery: 0.65
+  renewable_energy: 0.55
+  space_technology: 0.50
+
+# Keywords that trigger theme matching (case-insensitive)
+theme_keywords:
+  ai_infrastructure: [ai, artificial intelligence, gpu, data center, inference, training]
+  gpu_compute: [gpu, cuda, tensor, nvidia, h100, b100, blackwell]
+  large_language_models: [llm, gpt, claude, gemini, language model, chatbot, openai, anthropic]
+  cloud_computing: [aws, azure, gcp, cloud, saas, iaas]
+  semiconductor_supply: [tsmc, samsung foundry, chip shortage, wafer, fab, semiconductor]
+  drug_discovery: [drug discovery, pipeline, molecule, preclinical, phase 1, phase 2, phase 3]
+  clinical_trials: [clinical trial, fda approval, pdufa, nda, bla, ema]
+  obesity_drugs: [glp-1, ozempic, wegovy, mounjaro, tirzepatide, obesity]
+  neurotech: [neuroscience, brain computer, neuralink, bci, alzheimer, neurodegen]
+  fintech: [fintech, neobank, digital bank, payment, stripe, plaid]
+  capital_markets_structure: [market structure, dark pool, hft, clearing, settlement, t+1]
+  quantitative_trading: [quant, algo trading, systematic, factor, momentum, mean reversion]

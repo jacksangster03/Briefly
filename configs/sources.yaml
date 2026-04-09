@@ -1,0 +1,66 @@
+# ============================================================================
+# Data source configuration and trust tiers
+# ============================================================================
+
+providers:
+  finnhub:
+    enabled: true
+    tier: primary
+    trust: high
+    rate_limit_per_minute: 60
+    capabilities: [quotes, company_news, market_news, earnings_calendar, company_profile]
+
+  fred:
+    enabled: true
+    tier: primary
+    trust: high
+    rate_limit_per_minute: 120
+    capabilities: [macro_series, economic_calendar]
+
+  sec_edgar:
+    enabled: true
+    tier: primary
+    trust: highest
+    rate_limit_per_second: 10
+    capabilities: [filings, insider_transactions]
+
+  newsapi:
+    enabled: false      # set true if NEWSAPI_KEY is provided
+    tier: secondary
+    trust: medium
+    rate_limit_per_day: 100
+    capabilities: [headlines, broad_news]
+
+  yfinance:
+    enabled: true       # no key needed, but unofficial
+    tier: fallback
+    trust: medium
+    note: "Unofficial Yahoo Finance wrapper. Use as fallback only."
+    capabilities: [quotes, history]
+
+  polygon:
+    enabled: false
+    tier: premium
+    trust: high
+    capabilities: [quotes, trades, aggregates, news]
+
+  alpaca:
+    enabled: false
+    tier: premium
+    trust: high
+    capabilities: [quotes, trades, paper_trading]
+
+  x_twitter:
+    enabled: false
+    tier: experimental
+    trust: low
+    note: "Social signal layer. Disabled by default. Low factual confidence."
+    capabilities: [social_sentiment, narrative_tracking]
+
+# Trust tiers determine factual confidence floor
+trust_tiers:
+  highest: 0.95    # SEC filings, official releases
+  high: 0.80       # Finnhub, FRED, Polygon, established wires
+  medium: 0.55     # NewsAPI, yfinance
+  low: 0.25        # Social, unverified sources
+  experimental: 0.15

@@ -1,0 +1,57 @@
+# ============================================================================
+# User profile configuration
+# Copy to user_profile.yaml and customise.
+# ============================================================================
+
+user:
+  name: default_user
+  timezone: Europe/Madrid
+  home_region: spain
+  message_depth: standard          # minimal | standard | detailed
+  primary_channel: telegram
+  backup_channel: email
+
+coverage_weights:
+  us: 1.0
+  europe: 0.75
+  spain: 0.65
+  global_macro: 0.7
+  asia: 0.35
+  latam: 0.3
+
+sector_weights:
+  technology: 1.0
+  ai: 1.0
+  semiconductors: 0.95
+  software_internet: 0.95
+  pharma: 0.95
+  biotech: 0.95
+  neurotech: 0.9
+  healthcare: 0.95
+  financials: 0.85
+  capital_markets: 0.85
+  digital_infrastructure: 0.8
+  energy: 0.55
+  industrials: 0.55
+  consumer_discretionary: 0.45
+  consumer_staples: 0.35
+  utilities: 0.3
+  real_estate: 0.3
+  materials: 0.3
+
+delivery:
+  morning_brief_time: "12:30"      # local time (30 min before US open for Europe/Madrid)
+  hourly_updates: true
+  hourly_start: "14:30"            # first intraday update (US market opens 15:30 Madrid)
+  hourly_end: "22:00"              # last intraday update
+  breaking_alerts: true
+  quiet_hours_start: "23:00"
+  quiet_hours_end: "07:00"
+  weekdays_only: true
+
+style:
+  concise: true
+  numbers_first: true
+  mobile_first: true
+  sparse_emoji: true
+  no_hype: true

@@ -1,0 +1,44 @@
+# ============================================================================
+# Region definitions for geographic relevance scoring
+# ============================================================================
+
+regions:
+  us:
+    display_name: United States
+    market_hours:
+      open: "09:30"
+      close: "16:00"
+      timezone: America/New_York
+    exchanges: [NYSE, NASDAQ, CBOE, CME]
+    keywords: [us, usa, america, fed, fomc, treasury, sec, wall street, congress]
+
+  europe:
+    display_name: Europe
+    market_hours:
+      open: "09:00"
+      close: "17:30"
+      timezone: Europe/London
+    exchanges: [LSE, XETRA, EURONEXT, SIX]
+    keywords: [europe, eu, ecb, european, eurozone, boe, uk, germany, france]
+
+  spain:
+    display_name: Spain
+    market_hours:
+      open: "09:00"
+      close: "17:30"
+      timezone: Europe/Madrid
+    exchanges: [BME]
+    keywords: [spain, spanish, ibex, madrid, bde, cnmv]
+
+  asia:
+    display_name: Asia-Pacific
+    market_hours:
+      open: "09:00"
+      close: "15:00"
+      timezone: Asia/Tokyo
+    exchanges: [TSE, HKEX, SSE, SZSE, KRX, BSE, NSE]
+    keywords: [china, japan, asia, boj, pboc, nikkei, hang seng, shanghai, korea]
+
+  global_macro:
+    display_name: Global / Macro
+    keywords: [imf, world bank, opec, g7, g20, global, geopolitical, tariff, trade war, sanctions]
