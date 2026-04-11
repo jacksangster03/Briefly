@@ -4,25 +4,25 @@
 # ============================================================================
 
 morning_briefing:
-  time: "12:30"
+  time: "08:45"
   days: [mon, tue, wed, thu, fri]
-  description: Pre-US-open morning briefing
+  description: Spain morning note covering overnight global moves, Europe open, and US setup
 
 hourly_intraday:
   start: "14:30"
-  end: "22:00"
+  end: "21:30"
   interval_minutes: 60
   days: [mon, tue, wed, thu, fri]
-  description: Hourly intraday market updates
+  description: US macro + cash-session intraday updates
 
 breaking_alerts:
   enabled: true
   poll_interval_minutes: 5
-  start: "07:00"
+  start: "08:00"
   end: "23:00"
   days: [mon, tue, wed, thu, fri]
   min_score_threshold: 0.80
-  description: High-threshold breaking market alerts
+  description: High-threshold breaking alerts during waking market hours
 
 evening_recap:
   enabled: false

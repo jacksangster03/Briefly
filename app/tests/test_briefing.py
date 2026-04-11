@@ -1,12 +1,15 @@
 """Tests for briefing formatting and assembly."""
 
-import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.briefing.formatter import TelegramFormatter
+from app.briefing.morning_generator import MorningBriefingGenerator
 from app.briefing.templates import format_change, format_price_line, TELEGRAM_MAX_LENGTH
+from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MorningBriefing, MarketSetup, IntradayUpdate, BreakingAlert
 from app.schemas.events import QuoteData, NormalisedEvent, MacroDataPoint, SectorSnapshot
+from app.settings import Settings
+from app.universe.sector_universe import InstrumentDef, SectorDef, SectorUniverse
 
 
 class TestFormatHelpers:
@@ -31,7 +34,7 @@ class TestFormatHelpers:
 
 class TestTelegramFormatter:
     def setup_method(self):
-        self.formatter = TelegramFormatter()
+        self.formatter = TelegramFormatter("Europe/Madrid")
 
     def test_morning_briefing_produces_output(self):
         briefing = MorningBriefing(
@@ -87,20 +90,116 @@ class TestTelegramFormatter:
             summary="Game-changing approval for weight management.",
             final_score=0.92,
             factual_confidence_score=0.95,
+            published_at=datetime(2026, 4, 9, 15, 9, tzinfo=timezone.utc),
         )
         alert = BreakingAlert(
             event=evt,
             reason="FDA decision, high market cap, watchlist ticker",
+            market_context=[
+                QuoteData(
+                    symbol="SPY",
+                    display_name="S&P 500",
+                    current_price=5234.5,
+                    previous_close=5222.2,
+                    change=12.3,
+                    change_percent=0.24,
+                )
+            ],
         )
         messages = self.formatter.format_breaking_alert(alert)
         assert "BREAKING" in messages[0]
-        assert "LLY" in messages[0]
+        assert "Eli Lilly (LLY)" in messages[0]
         assert "FDA" in messages[0]
+        assert "17:09 CEST" in messages[0]
+        assert "S&P 500 (SPY): 5,234.50 vs 5,222.20 prev (+0.24%)" in messages[0]
+
+    def test_intraday_event_includes_local_time_and_company_name(self):
+        evt = NormalisedEvent(
+            title="Amazon files 8-K after logistics update",
+            tickers=["AMZN"],
+            summary="Official filing details expanded delivery partnerships.",
+            published_at=datetime(2026, 4, 9, 15, 9, tzinfo=timezone.utc),
+            cluster_size=3,
+            source="sec_edgar",
+        )
+        update = IntradayUpdate(
+            hour_label="17:00",
+            new_events=[evt],
+            events_fetched=10,
+            events_after_dedup=2,
+            events_sent=1,
+        )
+        messages = self.formatter.format_intraday_update(update)
+        full = "\n".join(messages)
+        assert "Amazon (AMZN)" in full
+        assert "17:09 CEST" in full
+
+    def test_intraday_event_suppresses_duplicate_summary(self):
+        """If the summary is just the title repeated, don't echo it."""
+        evt = NormalisedEvent(
+            title="Oando plans $750 million drilling campaign",
+            summary="Oando plans $750 million drilling campaign - Reuters",
+            tickers=[],
+            source="newsapi",
+            event_type="headline",
+        )
+        update = IntradayUpdate(
+            hour_label="14:00",
+            new_events=[evt],
+            events_fetched=1,
+            events_after_dedup=1,
+            events_sent=1,
+        )
+        messages = self.formatter.format_intraday_update(update)
+        full = "\n".join(messages)
+        # Title shows once (bold wrapped), summary line must NOT re-echo it
+        assert full.count("Oando plans $750 million drilling campaign") == 1
+
+    def test_intraday_event_strips_cluster_suffix(self):
+        """The [+N related] suffix clustering appends shouldn't leak into output."""
+        evt = NormalisedEvent(
+            title="Chip sector rally lifts semis",
+            summary="Wafer pricing pressure eases heading into Q3. [+3 related]",
+            tickers=["NVDA"],
+            source="finnhub",
+            event_type="market_news",
+        )
+        update = IntradayUpdate(
+            hour_label="14:00",
+            new_events=[evt],
+            events_fetched=1,
+            events_after_dedup=1,
+            events_sent=1,
+        )
+        messages = self.formatter.format_intraday_update(update)
+        full = "\n".join(messages)
+        assert "[+" not in full
+        assert "Wafer pricing pressure eases" in full
+
+    def test_breaking_alert_suppresses_duplicate_summary(self):
+        """Breaking alerts must never repeat the headline as the body."""
+        evt = NormalisedEvent(
+            title="Oando plans $750 million drilling campaign",
+            summary="Oando plans $750 million drilling campaign",
+            tickers=[],
+            final_score=0.9,
+            factual_confidence_score=0.9,
+            published_at=datetime(2026, 4, 9, 15, 9, tzinfo=timezone.utc),
+        )
+        alert = BreakingAlert(
+            event=evt,
+            reason="High-impact energy event",
+            market_context=[],
+        )
+        messages = self.formatter.format_breaking_alert(alert)
+        full = "\n".join(messages)
+        # Title appears exactly once (in the bold headline line)
+        assert full.count("Oando plans $750 million drilling campaign") == 1
 
 
 class TestSectorSnapshot:
     def test_sector_scan_format(self):
-        formatter = TelegramFormatter()
+        formatter = TelegramFormatter("Europe/Madrid")
         briefing = MorningBriefing(
             sector_scan=[
                 SectorSnapshot(
@@ -128,3 +227,71 @@ class TestSectorSnapshot:
         full = "\n".join(messages)
         assert "Technology" in full
         assert "XLK" in full
+
+
+class _DummyMarketData:
+    def get_quotes(self, symbols):
+        return []
+
+
+class _DummyNewsData:
+    def fetch_all(self, watchlist=None):
+        return []
+
+
+class _DummyMacroData:
+    def get_morning_macro(self):
+        return []
+
+    def get_treasury_yields(self):
+        return None, None
+
+
+class TestMorningSectorSelection:
+    def test_sector_scan_skips_macro_bleed_with_single_loose_ticker(self):
+        generator = MorningBriefingGenerator(
+            settings=Settings(),
+            profile=UserProfile(sector_weights={"semiconductors": 1.0}),
+            universe=SectorUniverse(
+                sectors=[
+                    SectorDef(
+                        key="semiconductors",
+                        etf="SMH",
+                        display_name="Semiconductors",
+                        key_names=["NVDA", "AMD", "ASML"],
+                    )
+                ],
+                indices=[InstrumentDef(symbol="SPY", display="S&P 500")],
+                macro_instruments=[],
+            ),
+            market_data=_DummyMarketData(),
+            news_data=_DummyNewsData(),
+            macro_data=_DummyMacroData(),
+        )
+
+        snapshots = generator._build_sector_scan(
+            [
+                NormalisedEvent(
+                    title="Powell says no rate hike needed to fight oil shock",
+                    summary="Inflation and energy remain the core macro driver.",
+                    tickers=["NVDA"],
+                    sectors=["semiconductors"],
+                    source="finnhub",
+                    event_type="market_news",
+                    final_score=0.9,
+                ),
+                NormalisedEvent(
+                    title="ASML set to report Q1 earnings next week",
+                    summary="Guidance focus remains on EUV demand.",
+                    tickers=["ASML"],
+                    sectors=["semiconductors"],
+                    source="finnhub",
+                    event_type="company_news",
+                    final_score=0.8,
+                ),
+            ]
+        )
+
+        titles = [event.title for event in snapshots[0].top_events]
+        assert "ASML set to report Q1 earnings next week" in titles
+        assert "Powell says no rate hike needed to fight oil shock" not in titles

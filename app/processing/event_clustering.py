@@ -8,6 +8,7 @@ material follow-ups to flow through as updates.
 from __future__ import annotations
 
 import hashlib
+import re
 from collections import defaultdict
 from datetime import timedelta
 
@@ -26,14 +27,23 @@ STOPWORDS = {
 
 # Macro threads: events sharing one of these keyword groups cluster together
 # even without shared tickers. Each group defines a single macro narrative.
+# Keep groups tight: a keyword should only ever belong to one thread, or
+# clustering will pull unrelated stories into the same bucket.
 MACRO_THREAD_GROUPS = [
-    {"iran", "tehran", "persian"},
-    {"israel", "gaza", "hamas", "hezbollah", "netanyahu"},
-    {"tariff", "trade war", "trade deal"},
-    {"fed", "fomc", "powell", "rate cut", "rate hike"},
-    {"opec", "oil output", "oil production", "crude"},
-    {"ukraine", "russia", "kyiv", "moscow"},
+    {"iran", "tehran", "hormuz"},
+    {"israel", "gaza", "hamas", "hezbollah", "netanyahu", "lebanon", "beirut"},
+    {"tariff", "trade war", "trade deal", "trade deficit"},
+    # Bare "fed" is too noisy (matches "fed up", "fed into", etc.) — rely on
+    # unambiguous Fed terms instead.
+    {"fomc", "powell", "federal reserve", "rate cut", "rate hike", "interest rate"},
+    {"ecb", "lagarde", "european central bank"},
+    {"boj", "ueda", "bank of japan"},
+    {"bank of england"},
+    {"opec", "oil output", "oil production", "crude oil", "oil price"},
+    {"ukraine", "kyiv", "moscow", "kremlin", "putin", "zelensky"},
     {"china", "beijing", "xi jinping"},
+    {"nonfarm", "payrolls", "jobless claims", "unemployment rate"},
+    {"cpi", "ppi", "pce", "core inflation", "inflation report"},
 ]
 
 
@@ -148,28 +158,44 @@ def _find_matching_cluster(
         if evt_tickers and rep_tickers and evt_tickers & rep_tickers:
             return cluster_id
 
-        # Shared topic terms: moderate signal
-        if evt_terms and rep_terms and len(evt_terms & rep_terms) >= 2:
-            return cluster_id
-
-        # Macro thread grouping: cluster tickerless geopolitical/macro events
-        # about the same narrative (e.g. all Iran-related, all tariff-related)
-        if evt_macro_groups:
+        # Macro thread grouping: for tickerless events, this is the primary
+        # clustering signal (e.g. all Iran-related, all tariff-related).
+        # Checked before topic terms to prevent coincidental word overlap
+        # from pulling macro events into the wrong cluster.
+        if not evt_tickers and evt_macro_groups:
             rep_text = f"{rep.title} {rep.summary}".lower()
             rep_macro_groups = _matching_macro_groups(rep_text)
             if evt_macro_groups & rep_macro_groups:
                 return cluster_id
 
+        # Shared topic terms: moderate signal
+        if evt_terms and rep_terms and len(evt_terms & rep_terms) >= 2:
+            return cluster_id
+
     return None
 
 
 def _matching_macro_groups(text: str) -> set[int]:
-    """Return indices of MACRO_THREAD_GROUPS that match the given text."""
+    """Return indices of MACRO_THREAD_GROUPS that match the given text.
+
+    Uses word-boundary matching so "fed up" doesn't trigger the Fed thread,
+    "putin" requires its own word, and "opec" doesn't match inside
+    "nopecorn" etc.
+    """
     matches = set()
     for i, group in enumerate(MACRO_THREAD_GROUPS):
-        if any(keyword in text for keyword in group):
-            matches.add(i)
+        for keyword in group:
+            if _keyword_hit(keyword, text):
+                matches.add(i)
+                break
     return matches
+
+
+def _keyword_hit(keyword: str, text: str) -> bool:
+    """Match keyword against text with whole-word semantics."""
+    if " " in keyword:
+        return keyword in text
+    return re.search(rf"\b{re.escape(keyword)}\b", text) is not None
 
 
 def _event_family(event_type: str) -> str:

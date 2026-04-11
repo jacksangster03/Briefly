@@ -21,6 +21,23 @@ from app.universe.sector_universe import SectorUniverse
 
 logger = get_logger("morning_gen")
 
+MACRO_BLEED_TERMS = (
+    "powell",
+    "fed",
+    "inflation",
+    "treasury",
+    "yield",
+    "oil",
+    "crude",
+    "hormuz",
+    "iran",
+    "geopolitical",
+    "ceasefire",
+    "opec",
+    "middle east",
+    "war",
+)
+
 
 class MorningBriefingGenerator:
     """Builds the morning briefing by fetching data from all services,
@@ -64,11 +81,15 @@ class MorningBriefingGenerator:
         )
         briefing.events_fetched = len(all_events)
 
-        # 4. Enrich events with sector tags from universe
-        all_events = self._enrich_sectors(all_events)
-
-        # 5-6. Process, cluster, classify, and rank
-        scored = process_event_stream(all_events, self.profile, self.settings)
+        # 4. Process, cluster, classify, and rank
+        # Sector enrichment runs inside the pipeline after ticker resolution
+        # so sector tags reflect the cleaned ticker set, not spurious feeds.
+        scored = process_event_stream(
+            all_events,
+            self.profile,
+            self.settings,
+            sector_lookup=self.universe.sectors_for_ticker,
+        )
         briefing.events_after_dedup = len(scored)
 
         # 7. Assemble sections
@@ -119,33 +140,43 @@ class MorningBriefingGenerator:
         return setup
 
     def _build_sector_scan(self, scored_events: list[NormalisedEvent]) -> list[SectorSnapshot]:
-        """Build sector snapshots with ETF quotes and top events per sector."""
-        # Fetch sector ETF quotes
+        """Build sector snapshots with ETF quotes and top events per sector.
+
+        Each event is placed in only one sector: the first matching sector
+        in the user's weighted sector order. This prevents the same story
+        from appearing in multiple sections (e.g. an Apple/JPMorgan AI
+        partnership showing up under both Tech and Financials).
+        """
         etf_symbols = self.universe.all_sector_etfs
         etf_quotes = {}
         if etf_symbols:
             for q in self.market_svc.get_quotes(etf_symbols):
                 etf_quotes[q.symbol] = q
 
-        # Sort sectors by user's sector weights (highest first)
         weighted_sectors = sorted(
             self.universe.sectors,
             key=lambda s: self.profile.sector_weights.get(s.key, 0.3),
             reverse=True,
         )
 
+        placed_event_ids: set[str] = set()
         snapshots = []
         for sector in weighted_sectors[:12]:
-            # Events mentioning this sector's tickers
             sector_tickers = set(sector.key_names)
-            sector_events = [
-                e for e in scored_events
-                if is_actionable_event(e)
-                and (
-                    any(t in sector_tickers for t in e.tickers)
-                or sector.key in e.sectors
-                )
-            ]
+            sector_events = []
+            for event in scored_events:
+                if event.event_id in placed_event_ids:
+                    continue
+                if not is_actionable_event(event):
+                    continue
+                ticker_matches = sum(1 for ticker in event.tickers if ticker in sector_tickers)
+                has_sector_tag = sector.key in event.sectors
+                if not (ticker_matches or has_sector_tag):
+                    continue
+                if self._looks_like_macro_bleed(event) and ticker_matches < 2 and event.source != "sec_edgar":
+                    continue
+                sector_events.append(event)
+                placed_event_ids.add(event.event_id)
 
             etf_quote = etf_quotes.get(sector.etf)
             snap = SectorSnapshot(
@@ -158,6 +189,11 @@ class MorningBriefingGenerator:
             snapshots.append(snap)
 
         return snapshots
+
+    @staticmethod
+    def _looks_like_macro_bleed(event: NormalisedEvent) -> bool:
+        text = f"{event.title} {event.summary}".lower()
+        return any(term in text for term in MACRO_BLEED_TERMS)
 
     def _fetch_earnings(self):
         """Fetch today's earnings calendar."""
@@ -179,13 +215,3 @@ class MorningBriefingGenerator:
         if not tickers:
             return []
         return self.market_svc.get_quotes(tickers)
-
-    def _enrich_sectors(self, events: list[NormalisedEvent]) -> list[NormalisedEvent]:
-        """Tag events with sector information based on their tickers."""
-        for evt in events:
-            if evt.sectors:
-                continue
-            for ticker in evt.tickers:
-                sectors = self.universe.sectors_for_ticker(ticker)
-                evt.sectors.extend(s for s in sectors if s not in evt.sectors)
-        return events

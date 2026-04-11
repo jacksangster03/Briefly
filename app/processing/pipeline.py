@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from app.personalization.delivery_rules import BreakingRules, IntradayRules
 from app.personalization.user_profile import UserProfile
+from app.processing.cleaners import strip_title_suffix
 from app.processing.dedupe import classify_against_sent_history, deduplicate_events
 from app.processing.event_clustering import cluster_events
 from app.processing.personal_relevance import compute_personal_relevance
@@ -13,8 +15,14 @@ from app.processing.relevance_scoring import score_events
 from app.processing.source_credibility import apply_credibility_scores
 from app.schemas.events import NormalisedEvent
 from app.settings import Settings
+from app.universe.ticker_metadata import (
+    TICKER_DISPLAY_NAMES,
+    extract_tickers_from_text,
+)
 
 import re
+
+SectorLookup = Callable[[str], list[str]]
 
 # Substring patterns: if any of these appear in lower(title + summary), suppress the event.
 LOW_SIGNAL_PATTERNS = (
@@ -51,8 +59,11 @@ LOW_SIGNAL_PATTERNS = (
     "could make you a millionaire",
     "is it too late to buy",
     "my top pick",
+    "buying opportunity",
     "beaten-down stock",
     "beaten down stock",
+    "bottom-fish",
+    "bottom fish",
     "bargain stock",
     "hot stock",
     "next big thing",
@@ -61,6 +72,99 @@ LOW_SIGNAL_PATTERNS = (
     "for passive income",
     "for retirement",
     "no-brainer stock",
+    "before placing a bet",
+    "higher stock price",
+    "don't buy either stock",
+    "stock is a buy before",
+    "don't buy either stock until you read this",
+    "earnings preview",
+    "ahead of earnings",
+    "how to play",
+    "could surge",
+    "spacex isn't even public yet",
+    "what's going on with",
+    "what is going on with",
+    "wall street thinks",
+    "hidden gem",
+    "must-buy",
+    "must buy stock",
+    "can't-miss",
+    "can't miss stock",
+    "sleeper stock",
+    "under the radar",
+    "flying under the radar",
+    "overlooked stock",
+    "safe dividend",
+    "secret to",
+    "underrated stock",
+    "stampeded into",
+    "stampede into",
+    "charts reveal",
+    "the chart says",
+    "one chart shows",
+    "countdown to",
+    "stark message",
+    "stark warning",
+    "going public",
+    "is going public",
+    "soon to go public",
+    "investors turn bearish",
+    "investors turn bullish",
+    "turning bearish",
+    "turning bullish",
+    "growing more bullish",
+    "growing more bearish",
+    "should investors buy",
+    "should investors sell",
+    "what to do if",
+    "is it time to buy",
+    "is it time to sell",
+    "is now the time",
+    "is now a good time",
+    "time to buy",
+    "what investors need",
+    "why investors should",
+    "could be a bargain",
+    "could double",
+    "could triple",
+    "set to soar",
+    "set to surge",
+    "best bet",
+    "worst performing",
+    "the smart money",
+    "smart money is buying",
+    "smart money is selling",
+    "dividend machine",
+    "cash cow",
+    "cash machine",
+    "penny stock",
+    "meme stock",
+    "stock to watch",
+    "stocks to watch",
+    "something just changed with",
+    "screaming buy",
+    "screaming sell",
+    "don't panic over",
+    "stock for retirees",
+    "stocks for retirees",
+    "real opportunity",
+    "the real opportunity",
+    "bye-bye to buy-buy",
+    "rating upgrade",
+    "rating downgrade",
+    "growth stocks to buy",
+    "value stocks to buy",
+    "dividend stocks to buy",
+    "stock keeps going down",
+    "stock keeps going up",
+    "wall street sees",
+    "wall street's take",
+    "zacks analyst blog",
+    "analyst blog highlights",
+    "here's why wall street",
+    "here's why the street",
+    "best stocks to buy",
+    "top stocks to buy",
 )
 
 # Regex patterns: if any match lower(title), suppress the event.
@@ -71,15 +175,23 @@ _NUM = r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
 _LOW_SIGNAL_REGEXES = [
     re.compile(p) for p in (
         rf"^{_NUM} (?:reasons?|stocks?|things?|ways?) to ",
-        rf"^{_NUM} (?:best|top|worst|smarter|monster|magnificent)",
+        rf"^{_NUM} (?:best|top|worst|smarter|monster|magnificent|high[- ]yield)",
+        rf"^{_NUM} (?:dividend|growth|value|no[- ]brainer|under[- ]the[- ]radar) stocks?",
         r"^is .{3,60} (?:a buy|worth|a cheap|undervalued|overvalued|a good investment)",
         r"^is .{3,60}\?$",            # generic question-headline clickbait
-        r"^why .{3,80} (?:moved|dropped|surged|fell|rose|tanked|soared)\b",
+        r"^why .{3,80} (?:moved|dropped|surged|fell|rose|tanked|soared|jumped|plunged|crashed|skyrocketed)\b",
         r"^(?:here'?s? (?:why|what|how)|what (?:you need|investors? need|to know))",
         rf"{_NUM} (?:risks?|things?) to watch",
         r"if you invested \$",
-        r"better buy:",
+        r"^better .{3,40}:",              # "Better Buy:", "Better Hold:", comparison headlines
         r"buy the dip",
+        r"prediction: .* stock is a buy before",
+        r"^what(?:'s| is) (?:going on|happening) with",
+        r"\bdown \d+(?:\.\d+)?%.*analysts?\b",   # "down 12% - analysts say..."
+        r"\bup \d+(?:\.\d+)?%.*(?:analysts?|here'?s why|this is why)\b",
+        r"^is this the next ",
+        r"\bhigh[- ]yield(?:ing)? .{0,20} stock",
+        r"\banalysts? (?:predict|expect|project) .{0,40} (?:surge|soar|jump|rally)",
     )
 ]
 
@@ -91,12 +203,38 @@ MACRO_SIGNAL_KEYWORDS = {
 }
 
 
+def _normalise_filter_text(value: str) -> str:
+    """Normalise punctuation so low-signal rules catch typographic variants."""
+    return (
+        value.lower()
+        .replace("’", "'")
+        .replace("‘", "'")
+        .replace("`", "'")
+        .replace("“", '"')
+        .replace("”", '"')
+        .replace("—", "-")
+        .replace("–", "-")
+        .replace("\xa0", " ")
+    )
+
+
 def process_event_stream(
     events: list[NormalisedEvent],
     profile: UserProfile,
     settings: Settings,
+    sector_lookup: SectorLookup | None = None,
 ) -> list[NormalisedEvent]:
-    """Normalize, cluster, classify, and score an incoming event stream."""
+    """Normalize, cluster, classify, and score an incoming event stream.
+
+    When ``sector_lookup`` is provided, sector enrichment runs inside the
+    pipeline after ticker resolution so sectors are always derived from the
+    cleaned ticker set (never from spurious provider-supplied tickers).
+    """
+    _clean_event_titles(events)
+    _resolve_event_tickers(events)
+    if sector_lookup is not None:
+        _enrich_event_sectors(events, sector_lookup)
+
     deduped = deduplicate_events(
         events,
         apply_ticker_clustering=False,
@@ -182,13 +320,99 @@ def select_breaking_events(
     return selected
 
 
+def _clean_event_titles(events: list[NormalisedEvent]) -> None:
+    """Strip source attribution suffixes from event titles."""
+    for evt in events:
+        evt.title = strip_title_suffix(evt.title)
+
+
+_NON_NEWS_SOURCES = {"sec_edgar", "fred"}
+
+
+def _resolve_event_tickers(events: list[NormalisedEvent]) -> None:
+    """Resolve event tickers with title priority.
+
+    Provider ticker data is unreliable: Finnhub's ``related`` field lists
+    tangential tickers (TSMC story tagged NVDA because a Nvidia quote appears
+    three paragraphs in) and NewsAPI headlines carry no tickers at all. This
+    function runs three steps:
+
+      1. Bucket each provider-supplied ticker by whether its symbol appears
+         in the title or only in the summary; drop it if it appears nowhere.
+      2. Extract additional tickers from the title and summary via the
+         company-name lookup in ``ticker_metadata``.
+      3. If any ticker resolves from the title, the event is labeled using
+         only those tickers — summary-only tickers are discarded to stop
+         incidental mentions from taking over the event label.
+
+    Regulatory filings and macro data rows are left untouched: they already
+    carry authoritative tickers.
+    """
+    for evt in events:
+        if evt.source in _NON_NEWS_SOURCES:
+            continue
+
+        title = evt.title or ""
+        summary = evt.summary or ""
+
+        title_tickers: list[str] = []
+        summary_tickers: list[str] = []
+
+        for symbol in evt.tickers or []:
+            upper = symbol.upper()
+            if _symbol_in_text(upper, title):
+                _append_unique(title_tickers, upper)
+            elif _symbol_in_text(upper, summary):
+                _append_unique(summary_tickers, upper)
+
+        for extracted in extract_tickers_from_text(title):
+            _append_unique(title_tickers, extracted)
+        for extracted in extract_tickers_from_text(summary):
+            if extracted not in title_tickers:
+                _append_unique(summary_tickers, extracted)
+
+        evt.tickers = title_tickers if title_tickers else summary_tickers
+
+
+def _symbol_in_text(symbol: str, text: str) -> bool:
+    """Return True if ``symbol`` appears in ``text`` with acceptable context.
+
+    Short symbols (1–2 chars like T, F, V) must appear in explicit notation
+    (``$T`` or ``(T)``) to avoid matching common English words. Longer symbols
+    need only word-boundary matching.
+    """
+    if not text:
+        return False
+    upper = text.upper()
+    if len(symbol) <= 2:
+        return f"${symbol}" in upper or f"({symbol})" in upper
+    return re.search(rf"\b{re.escape(symbol)}\b", upper) is not None
+
+
+def _append_unique(bucket: list[str], value: str) -> None:
+    if value and value not in bucket:
+        bucket.append(value)
+
+
+def _enrich_event_sectors(
+    events: list[NormalisedEvent],
+    sector_lookup: SectorLookup,
+) -> None:
+    """Populate sector tags from resolved tickers."""
+    for evt in events:
+        for ticker in evt.tickers:
+            for sector in sector_lookup(ticker):
+                if sector not in evt.sectors:
+                    evt.sectors.append(sector)
+
+
 def is_actionable_event(evt: NormalisedEvent) -> bool:
     """Filter out low-signal feature content before surfacing it to users."""
     if evt.source == "sec_edgar":
         return True
 
-    text = f"{evt.title} {evt.summary}".lower()
-    title_lower = evt.title.lower()
+    text = _normalise_filter_text(f"{evt.title} {evt.summary}")
+    title_lower = _normalise_filter_text(evt.title)
 
     # Substring blocklist
     if any(pattern in text for pattern in LOW_SIGNAL_PATTERNS):

@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     finnhub_api_key: str = ""
     newsapi_key: str = ""
     fred_api_key: str = ""
+    ecb_base_url: str = "https://data-api.ecb.europa.eu/service"
+    eurostat_base_url: str = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
+    bls_api_key: str = ""
+    bls_base_url: str = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
+    bea_api_key: str = ""
+    bea_base_url: str = "https://apps.bea.gov/api/data"
     sec_user_agent: str = "market-briefing-bot contact@example.com"
     polygon_api_key: str = ""
     alpaca_api_key: str = ""
@@ -65,6 +71,14 @@ class Settings(BaseSettings):
     @property
     def fred_configured(self) -> bool:
         return bool(self.fred_api_key)
+
+    @property
+    def bls_configured(self) -> bool:
+        return bool(self.bls_api_key)
+
+    @property
+    def bea_configured(self) -> bool:
+        return bool(self.bea_api_key)
 
     @property
     def newsapi_configured(self) -> bool:

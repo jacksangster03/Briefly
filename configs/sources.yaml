@@ -17,6 +17,30 @@ providers:
     rate_limit_per_minute: 120
     capabilities: [macro_series, economic_calendar]
 
+  ecb:
+    enabled: true
+    tier: primary
+    trust: highest
+    capabilities: [macro_series, fx, rates, euro_area_macro]
+
+  eurostat:
+    enabled: true
+    tier: primary
+    trust: highest
+    capabilities: [macro_series, inflation, labour, industrial_production, trade]
+
+  bls:
+    enabled: false
+    tier: primary
+    trust: highest
+    capabilities: [macro_series, cpi, ppi, payrolls, unemployment]
+
+  bea:
+    enabled: false
+    tier: primary
+    trust: highest
+    capabilities: [macro_series, gdp, income, spending]
+
   sec_edgar:
     enabled: true
     tier: primary

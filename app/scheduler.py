@@ -5,6 +5,7 @@ Timezone-aware, market-session-aware, weekday-only by default.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytz
@@ -34,12 +35,13 @@ def build_scheduler(settings: Settings | None = None) -> BlockingScheduler:
     morning = schedule_config.get("morning_briefing", {})
     morning_time = morning.get("time", "12:30")
     h, m = morning_time.split(":")
+    morning_days = _days_expr(morning.get("days"))
     scheduler.add_job(
         run_morning_briefing,
         CronTrigger(
             hour=int(h),
             minute=int(m),
-            day_of_week="mon-fri",
+            day_of_week=morning_days,
             timezone=tz,
         ),
         id="morning_briefing",
@@ -51,20 +53,25 @@ def build_scheduler(settings: Settings | None = None) -> BlockingScheduler:
     # Hourly intraday updates
     intraday = schedule_config.get("hourly_intraday", {})
     if intraday.get("interval_minutes"):
-        start_h, start_m = intraday.get("start", "14:30").split(":")
-        end_h, end_m = intraday.get("end", "22:00").split(":")
-        scheduler.add_job(
-            run_intraday_update,
-            CronTrigger(
-                hour=f"{start_h}-{end_h}",
-                minute=int(start_m),
-                day_of_week="mon-fri",
-                timezone=tz,
-            ),
-            id="intraday_update",
-            name="Hourly Intraday Update",
-            misfire_grace_time=120,
+        intraday_days = _days_expr(intraday.get("days"))
+        run_times = _intraday_run_times(
+            intraday.get("start", "14:30"),
+            intraday.get("end", "22:00"),
+            int(intraday.get("interval_minutes", 60)),
         )
+        for hour, minute in run_times:
+            scheduler.add_job(
+                run_intraday_update,
+                CronTrigger(
+                    hour=hour,
+                    minute=minute,
+                    day_of_week=intraday_days,
+                    timezone=tz,
+                ),
+                id=f"intraday_update_{hour:02d}{minute:02d}",
+                name=f"Intraday Update {hour:02d}:{minute:02d}",
+                misfire_grace_time=120,
+            )
         logger.info(
             "Scheduled intraday updates %s-%s (weekdays)",
             intraday.get("start"), intraday.get("end"),
@@ -74,9 +81,17 @@ def build_scheduler(settings: Settings | None = None) -> BlockingScheduler:
     breaking = schedule_config.get("breaking_alerts", {})
     if breaking.get("enabled", True):
         poll_mins = breaking.get("poll_interval_minutes", 5)
+        breaking_days = _days_expr(breaking.get("days"))
+        start_h, start_m = map(int, breaking.get("start", "07:00").split(":"))
+        end_h, end_m = map(int, breaking.get("end", "23:00").split(":"))
         scheduler.add_job(
             run_breaking_check,
-            IntervalTrigger(minutes=poll_mins, timezone=tz),
+            CronTrigger(
+                minute=f"*/{poll_mins}",
+                hour=f"{start_h}-{end_h}",
+                day_of_week=breaking_days,
+                timezone=tz,
+            ),
             id="breaking_alerts",
             name="Breaking Alert Check",
             misfire_grace_time=60,
@@ -104,3 +119,20 @@ def start_scheduler() -> None:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
         logger.info("Scheduler stopped.")
+
+
+def _days_expr(days: list[str] | None) -> str:
+    """Convert YAML day list into APScheduler day-of-week expression."""
+    return ",".join(days) if days else "mon-fri"
+
+
+def _intraday_run_times(start: str, end: str, interval_minutes: int) -> list[tuple[int, int]]:
+    """Expand an intraday schedule window into explicit HH:MM run times."""
+    start_dt = datetime.strptime(start, "%H:%M")
+    end_dt = datetime.strptime(end, "%H:%M")
+    run_times: list[tuple[int, int]] = []
+    current = start_dt
+    while current <= end_dt:
+        run_times.append((current.hour, current.minute))
+        current += timedelta(minutes=interval_minutes)
+    return run_times

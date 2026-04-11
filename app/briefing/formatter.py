@@ -6,8 +6,10 @@ phone reading: short sections, clear labels, numbers first, sparse emoji.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.processing.cleaners import truncate
 from app.briefing.templates import (
     MAX_EARNINGS_DISPLAY,
     MAX_INTRADAY_EVENTS,
@@ -17,6 +19,7 @@ from app.briefing.templates import (
     SECTION_HEADERS,
     TELEGRAM_MAX_LENGTH,
     format_change,
+    format_context_price,
     format_compact_price,
     format_price_line,
 )
@@ -28,10 +31,17 @@ from app.schemas.events import (
     QuoteData,
     SectorSnapshot,
 )
+from app.universe.ticker_metadata import format_company_ticker_list
 
 
 class TelegramFormatter:
     """Formats briefing objects into Telegram-ready text messages."""
+
+    def __init__(self, timezone_name: str = "UTC"):
+        try:
+            self.local_tz = ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            self.local_tz = ZoneInfo("UTC")
 
     def format_morning_briefing(self, briefing: MorningBriefing) -> list[str]:
         """Format a complete morning briefing. Returns a list of messages
@@ -119,21 +129,39 @@ class TelegramFormatter:
     def format_breaking_alert(self, alert: BreakingAlert) -> list[str]:
         """Format a breaking alert."""
         evt = alert.event
-        tickers = ", ".join(evt.tickers) if evt.tickers else ""
-        ticker_label = f" [{tickers}]" if tickers else ""
+        company_label = self._company_label(evt)
+        time_label = self._format_event_time(evt)
 
         sections = [
-            f"<b>{SECTION_HEADERS['breaking_title']}{ticker_label}</b>",
+            f"<b>{SECTION_HEADERS['breaking_title']}</b>",
             f"<b>{evt.title}</b>",
         ]
 
-        if evt.summary:
-            sections.append(evt.summary[:500])
+        summary_clean = self._strip_cluster_suffix((evt.summary or "").strip())
+        if summary_clean and not self._summary_duplicates_title(summary_clean, evt.title):
+            sections.append(truncate(summary_clean, 500))
+
+        meta = []
+        if company_label:
+            meta.append(company_label)
+        if time_label:
+            meta.append(time_label)
+        if meta:
+            sections.append("<i>" + " | ".join(meta) + "</i>")
 
         if alert.market_context:
-            ctx_lines = [format_compact_price(q.display_name or q.symbol, q.change_percent)
-                         for q in alert.market_context[:4]]
-            sections.append("Context: " + " | ".join(ctx_lines))
+            ctx_lines = ["Context:"]
+            for q in alert.market_context[:4]:
+                ctx_lines.append(
+                    "  " + format_context_price(
+                        q.display_name or q.symbol,
+                        q.symbol,
+                        q.current_price,
+                        q.previous_close,
+                        q.change_percent,
+                    )
+                )
+            sections.append("\n".join(ctx_lines))
 
         if alert.reason:
             sections.append(f"<i>Why it matters: {alert.reason}</i>")
@@ -190,10 +218,17 @@ class TelegramFormatter:
             return ""
         lines = [f"<b>{SECTION_HEADERS['themes']}</b>"]
         for i, evt in enumerate(themes[:MAX_THEMES], 1):
-            tickers = f" [{', '.join(evt.tickers[:3])}]" if evt.tickers else ""
-            lines.append(f"{i}. <b>{evt.title}</b>{tickers}")
+            lines.append(f"{i}. <b>{evt.title}</b>")
             if evt.summary:
-                lines.append(f"   {evt.summary[:200]}")
+                lines.append(f"   {truncate(evt.summary, 200)}")
+            meta = self._build_event_meta(
+                evt,
+                include_company=True,
+                include_time=True,
+                include_cluster=True,
+            )
+            if meta:
+                lines.append(f"   <i>{' | '.join(meta)}</i>")
         return "\n".join(lines)
 
     def _format_sector_scan(self, sectors: list[SectorSnapshot]) -> str:
@@ -211,8 +246,11 @@ class TelegramFormatter:
 
             # Top events in this sector
             for evt in snap.top_events[:MAX_SECTOR_EVENTS]:
-                tickers = f" [{', '.join(evt.tickers[:2])}]" if evt.tickers else ""
-                lines.append(f"  {evt.title[:120]}{tickers}")
+                prefix = self._build_event_prefix(evt)
+                if prefix:
+                    lines.append(f"  {prefix} | {evt.title[:110]}")
+                else:
+                    lines.append(f"  {evt.title[:120]}")
 
         return "\n".join(lines)
 
@@ -240,8 +278,11 @@ class TelegramFormatter:
         # Watchlist-relevant events
         if events:
             for evt in events[:MAX_WATCHLIST_EVENTS]:
-                tickers = f"[{', '.join(evt.tickers[:2])}] " if evt.tickers else ""
-                parts.append(f"  {tickers}{evt.title[:150]}")
+                prefix = self._build_event_prefix(evt)
+                if prefix:
+                    parts.append(f"  {prefix} | {evt.title[:140]}")
+                else:
+                    parts.append(f"  {evt.title[:150]}")
 
         return "\n".join(parts) if len(parts) > 1 else ""
 
@@ -251,17 +292,22 @@ class TelegramFormatter:
         Avoids duplicating the title as the summary, and only shows
         metadata that is genuinely differentiating (not boilerplate).
         """
-        tickers = f" [{', '.join(evt.tickers[:3])}]" if evt.tickers else ""
-        parts = [f"<b>{evt.title}</b>{tickers}"]
+        parts = [f"<b>{evt.title}</b>"]
 
         # Only show summary if it adds information beyond the title
         if evt.summary:
-            summary_clean = evt.summary.strip()
-            if not self._summary_duplicates_title(summary_clean, evt.title):
-                parts.append(summary_clean[:300])
+            summary_clean = self._strip_cluster_suffix(evt.summary.strip())
+            if summary_clean and not self._summary_duplicates_title(summary_clean, evt.title):
+                parts.append(truncate(summary_clean, 300))
 
         # Compact metadata: only include what differentiates this item
         meta = []
+        company_label = self._company_label(evt)
+        if company_label:
+            meta.append(company_label)
+        time_label = self._format_event_time(evt)
+        if time_label:
+            meta.append(time_label)
         if evt.update_status == "material_update":
             meta.append("Developing")
         if evt.cluster_size > 1:
@@ -275,12 +321,64 @@ class TelegramFormatter:
 
         return "\n".join(parts)
 
+    def _company_label(self, evt: NormalisedEvent) -> str:
+        return format_company_ticker_list(evt.tickers)
+
+    def _format_event_time(self, evt: NormalisedEvent) -> str:
+        dt = evt.published_at
+        if not dt:
+            return ""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local_dt = dt.astimezone(self.local_tz)
+        return local_dt.strftime("%H:%M %Z")
+
+    def _build_event_meta(
+        self,
+        evt: NormalisedEvent,
+        *,
+        include_company: bool = False,
+        include_time: bool = False,
+        include_cluster: bool = False,
+    ) -> list[str]:
+        meta: list[str] = []
+        if include_company:
+            company_label = self._company_label(evt)
+            if company_label:
+                meta.append(company_label)
+        if include_time:
+            time_label = self._format_event_time(evt)
+            if time_label:
+                meta.append(time_label)
+        if include_cluster and evt.cluster_size > 1:
+            meta.append(f"{evt.cluster_size} reports")
+        return meta
+
+    def _build_event_prefix(self, evt: NormalisedEvent) -> str:
+        meta = self._build_event_meta(
+            evt,
+            include_company=True,
+            include_time=True,
+        )
+        return " | ".join(meta)
+
+    @staticmethod
+    def _strip_cluster_suffix(summary: str) -> str:
+        """Remove any "[+N related]" suffix that clustering may have appended."""
+        if "[+" in summary:
+            summary = summary[: summary.rfind("[+")].rstrip(" .,")
+        return summary
+
     @staticmethod
     def _summary_duplicates_title(summary: str, title: str) -> bool:
-        """Return True if the summary is essentially the title repeated."""
+        """Return True if the summary is essentially the title repeated.
+
+        Uses a 0.70 token-overlap threshold so paraphrased repetition
+        (e.g. "Oando plans $750M drilling campaign" vs "Oando to launch
+        a $750 million drilling programme") is still caught.
+        """
         s = summary.lower().strip()
         t = title.lower().strip()
-        # Strip source attributions
         for sep in (" - ", " | ", "  "):
             if sep in s:
                 s = s[: s.rfind(sep)].strip()
@@ -292,10 +390,10 @@ class TelegramFormatter:
             return True
         s_tokens = set(s.split())
         t_tokens = set(t.split())
-        if not s_tokens:
+        if not s_tokens or not t_tokens:
             return True
         overlap = len(s_tokens & t_tokens) / max(len(s_tokens), len(t_tokens))
-        return overlap >= 0.75
+        return overlap >= 0.70
 
     # -- Message splitting ----------------------------------------------------
 

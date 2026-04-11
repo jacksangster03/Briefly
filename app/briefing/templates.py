@@ -43,6 +43,15 @@ def format_compact_price(name: str, change_pct: float) -> str:
     return f"{name} {sign}{change_pct:.2f}%"
 
 
+def format_context_price(name: str, symbol: str, current: float, previous: float, change_pct: float) -> str:
+    """Readable context line with full instrument name and previous close."""
+    sign = "+" if change_pct >= 0 else ""
+    return (
+        f"{name} ({symbol}): {current:,.2f} vs {previous:,.2f} prev "
+        f"({sign}{change_pct:.2f}%)"
+    )
+
+
 # Telegram character limit per message
 TELEGRAM_MAX_LENGTH = 4096
 

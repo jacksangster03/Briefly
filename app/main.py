@@ -111,7 +111,7 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
     )
 
     briefing = generator.generate()
-    formatter = TelegramFormatter()
+    formatter = TelegramFormatter(profile.timezone)
     messages = formatter.format_morning_briefing(briefing)
 
     messengers = _get_messengers(settings, profile)
@@ -155,7 +155,7 @@ def run_intraday_update(settings: Settings | None = None) -> None:
     )
     update = generator.generate()
 
-    formatter = TelegramFormatter()
+    formatter = TelegramFormatter(profile.timezone)
     messages = formatter.format_intraday_update(update)
 
     messengers = _get_messengers(settings, profile)
@@ -192,7 +192,7 @@ def run_breaking_check(settings: Settings | None = None) -> None:
         logger.debug("No breaking events above configured thresholds")
         return
 
-    formatter = TelegramFormatter()
+    formatter = TelegramFormatter(profile.timezone)
     messengers = _get_messengers(settings, profile)
 
     for alert in alerts:

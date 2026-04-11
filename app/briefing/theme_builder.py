@@ -59,12 +59,14 @@ def _build_theme_summary(evt: NormalisedEvent) -> str:
     if original and not _is_near_duplicate(original, evt.title):
         parts.append(truncate(original, 160))
 
-    # Cluster breadth
+    # Cluster breadth: only attribute sources when at least two distinct
+    # outlets have reported. A "3 reports (finnhub)" line implies corroboration
+    # that isn't really there.
     if evt.cluster_size > 1:
-        source_names = evt.raw_data.get("cluster_sources", [])
-        if source_names:
-            sources_str = ", ".join(sorted(source_names))
-            parts.append(f"{evt.cluster_size} reports ({sources_str}).")
+        distinct_sources = sorted({s for s in evt.raw_data.get("cluster_sources", []) if s})
+        if len(distinct_sources) >= 2:
+            sources_str = ", ".join(distinct_sources)
+            parts.append(f"Corroborated by {evt.cluster_size} reports across {sources_str}.")
         else:
             parts.append(f"{evt.cluster_size} related reports.")
 

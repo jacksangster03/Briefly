@@ -49,13 +49,12 @@ class IntradayGenerator:
         events = self.news_svc.fetch_market_news()
         fetched = len(events)
 
-        # Enrich with sector tags
-        for evt in events:
-            for ticker in evt.tickers:
-                sectors = self.universe.sectors_for_ticker(ticker)
-                evt.sectors.extend(s for s in sectors if s not in evt.sectors)
-
-        scored = process_event_stream(events, self.profile, self.settings)
+        scored = process_event_stream(
+            events,
+            self.profile,
+            self.settings,
+            sector_lookup=self.universe.sectors_for_ticker,
+        )
         effective_min_score = min_score if min_score is not None else self.rules.min_final_score
         effective_max_events = max_events if max_events is not None else self.rules.max_events_per_update
         if effective_min_score != self.rules.min_final_score:
@@ -66,6 +65,9 @@ class IntradayGenerator:
 
         # Market snapshot
         snapshot = self.market_svc.get_quotes(self.universe.all_index_symbols[:4])
+        name_map = {i.symbol: i.display for i in self.universe.indices}
+        for quote in snapshot:
+            quote.display_name = name_map.get(quote.symbol, quote.symbol)
 
         now = datetime.now()
         update = IntradayUpdate(

@@ -12,6 +12,7 @@ from app.schemas.briefings import BreakingAlert
 from app.schemas.events import NormalisedEvent
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
+from app.universe.ticker_metadata import format_company_ticker_list
 
 logger = get_logger("breaking_gen")
 
@@ -42,13 +43,12 @@ class BreakingAlertGenerator:
         """Check for breaking events. Returns list of alerts to send."""
         events = self.news_svc.fetch_market_news()
 
-        # Enrich sectors
-        for evt in events:
-            for ticker in evt.tickers:
-                sectors = self.universe.sectors_for_ticker(ticker)
-                evt.sectors.extend(s for s in sectors if s not in evt.sectors)
-
-        scored = process_event_stream(events, self.profile, self.settings)
+        scored = process_event_stream(
+            events,
+            self.profile,
+            self.settings,
+            sector_lookup=self.universe.sectors_for_ticker,
+        )
         if min_score is not None:
             self.rules.min_final_score = min_score
         if max_alerts is not None:
@@ -60,6 +60,9 @@ class BreakingAlertGenerator:
 
         # Build alerts with market context
         context_quotes = self.market_svc.get_quotes(self.universe.all_index_symbols[:4])
+        name_map = {i.symbol: i.display for i in self.universe.indices}
+        for quote in context_quotes:
+            quote.display_name = name_map.get(quote.symbol, quote.symbol)
         alerts = []
 
         for evt in breaking[:max_alerts]:
@@ -86,7 +89,9 @@ def _build_alert_reason(evt: NormalisedEvent) -> str:
     if evt.update_status == "material_update":
         parts.append("developing story with new details")
     if evt.tickers:
-        parts.append(f"affects {', '.join(evt.tickers[:3])}")
+        label = format_company_ticker_list(evt.tickers, max_items=3)
+        if label:
+            parts.append(f"affects {label}")
     if evt.sectors:
         parts.append(f"sector: {', '.join(evt.sectors[:2])}")
     if evt.source == "sec_edgar":
