@@ -93,6 +93,7 @@ class TestTelegramFormatter:
             published_at=datetime(2026, 4, 9, 15, 9, tzinfo=timezone.utc),
         )
         alert = BreakingAlert(
+            generated_at=datetime(2026, 4, 9, 17, 30),
             event=evt,
             reason="FDA decision, high market cap, watchlist ticker",
             market_context=[
@@ -111,7 +112,9 @@ class TestTelegramFormatter:
         assert "Eli Lilly (LLY)" in messages[0]
         assert "FDA" in messages[0]
         assert "17:09 CEST" in messages[0]
-        assert "S&P 500 (SPY): 5,234.50 vs 5,222.20 prev (+0.24%)" in messages[0]
+        assert "S&P 500 (SPY): 5,234.50, +0.24% vs prior close 5,222.20" in messages[0]
+        assert "Score:" not in messages[0]
+        assert "Confidence:" not in messages[0]
 
     def test_intraday_event_includes_local_time_and_company_name(self):
         evt = NormalisedEvent(
@@ -195,6 +198,75 @@ class TestTelegramFormatter:
         full = "\n".join(messages)
         # Title appears exactly once (in the bold headline line)
         assert full.count("Oando plans $750 million drilling campaign") == 1
+
+    def test_weekend_intraday_header_and_lede(self):
+        update = IntradayUpdate(
+            session_mode="saturday",
+            hour_label="18:11",
+            new_events=[],
+            events_fetched=10,
+            events_after_dedup=5,
+            events_sent=0,
+        )
+        messages = self.formatter.format_intraday_update(update)
+        full = "\n".join(messages)
+        assert "WEEKEND UPDATE" in full
+        assert "Weekend briefing" in full
+        assert "No material weekend developments" in full
+
+    def test_weekend_morning_uses_weekend_sections(self):
+        briefing = MorningBriefing(
+            generated_at=datetime(2026, 4, 11, 8, 45),  # Saturday
+            session_mode="saturday",
+            market_setup=MarketSetup(
+                index_quotes=[
+                    QuoteData(symbol="SPY", display_name="S&P 500", current_price=5234.5, change=12.3, change_percent=0.24),
+                ],
+            ),
+            top_themes=[
+                NormalisedEvent(
+                    title="Oil rises as Strait of Hormuz disruptions persist",
+                    summary="Shipping and insurance costs climb across the energy complex.",
+                    event_type="macro_release",
+                ),
+            ],
+            watchlist_quotes=[
+                QuoteData(symbol="NVDA", display_name="Nvidia", current_price=100.0, change=2.0, change_percent=2.0),
+            ],
+        )
+        messages = self.formatter.format_morning_briefing(briefing)
+        full = "\n".join(messages)
+        assert "WEEKEND BRIEFING — SATURDAY" in full
+        assert "LAST CLOSE (FRIDAY)" in full
+        assert "WEEKEND DEVELOPMENTS" in full
+        assert "WHAT TO WATCH NEXT WEEK" in full
+
+    def test_weekend_breaking_context_uses_friday_label(self):
+        evt = NormalisedEvent(
+            title="Saudi Arabia says attacks cut oil output",
+            summary="Output and pipeline flow disruption could pressure crude benchmarks.",
+            factual_confidence_score=0.8,
+        )
+        alert = BreakingAlert(
+            generated_at=datetime(2026, 4, 11, 12, 0),  # Saturday
+            event=evt,
+            reason="Widely reported energy supply disruption.",
+            market_context=[
+                QuoteData(
+                    symbol="SPY",
+                    display_name="S&P 500",
+                    current_price=5234.5,
+                    previous_close=5222.2,
+                    change=12.3,
+                    change_percent=0.24,
+                )
+            ],
+        )
+        messages = self.formatter.format_breaking_alert(alert)
+        full = "\n".join(messages)
+        assert "Friday prior close" in full
+        assert "Score:" not in full
+        assert "Confidence:" not in full
 
 
 class TestSectorSnapshot:

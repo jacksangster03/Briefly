@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import timedelta
 
 from app.logger import get_logger
@@ -23,6 +23,24 @@ STOPWORDS = {
     "heres", "just", "market", "markets", "more", "says", "say", "stock",
     "stocks", "their", "these", "this", "today", "update", "what", "why",
     "with", "would", "worth", "reuters", "sources", "report", "according",
+}
+
+HEADLINE_NOISE_PATTERNS = (
+    "what's moving markets",
+    "morning brief",
+    " and 3 more things",
+    " and more",
+    "what we know",
+    "explainer",
+    "explained",
+    "here's why",
+)
+
+SIDE_ANGLE_NAME_TOKENS = {
+    "starmer",
+    "melania",
+    "cramer",
+    "scaramucci",
 }
 
 # Macro threads: events sharing one of these keyword groups cluster together
@@ -85,7 +103,7 @@ def cluster_events(
             ),
             reverse=True,
         )
-        rep = cluster_members[0]
+        rep = _pick_cluster_representative(cluster_members)
         rep.cluster_id = cluster_id
         rep.cluster_size = len(cluster_members)
         # Preserve original summary before we append cluster metadata
@@ -107,6 +125,79 @@ def cluster_events(
     representatives.sort(key=lambda e: e.final_score, reverse=True)
     logger.info("Clustered %d events into %d story clusters", len(events), len(representatives))
     return representatives
+
+
+def _pick_cluster_representative(cluster_members: list[NormalisedEvent]) -> NormalisedEvent:
+    """Choose a cluster representative that best matches the core narrative.
+
+    Highest final score alone can produce odd representatives when a tangential
+    headline carries a dense summary. We rank by title alignment with the
+    cluster core, then apply a headline-quality penalty to down-rank roundup
+    and commentary framing.
+    """
+    if len(cluster_members) == 1:
+        return cluster_members[0]
+
+    core_terms = _cluster_core_terms(cluster_members)
+
+    def rank_key(evt: NormalisedEvent) -> tuple[float, float, float, str]:
+        title_terms = set(_topic_terms(evt.title, "", limit=8))
+        summary_terms = set(_topic_terms("", evt.summary, limit=6))
+
+        title_alignment = len(title_terms & core_terms)
+        summary_alignment = len(summary_terms & core_terms)
+        noise_penalty = _headline_noise_penalty(evt.title)
+
+        return (
+            title_alignment - noise_penalty,
+            summary_alignment,
+            evt.final_score,
+            evt.published_at.isoformat() if evt.published_at else "",
+        )
+
+    return max(cluster_members, key=rank_key)
+
+
+def _cluster_core_terms(cluster_members: list[NormalisedEvent]) -> set[str]:
+    term_counter: Counter[str] = Counter()
+    for evt in cluster_members:
+        # Weight title terms more heavily, but still learn from summaries so
+        # side-angle titles with on-topic summaries don't dominate.
+        for term in set(_topic_terms(evt.title, "", limit=8)):
+            term_counter[term] += 2
+        for term in set(_topic_terms("", evt.summary, limit=8)):
+            term_counter[term] += 1
+
+    core = {term for term, count in term_counter.items() if count >= 3}
+    if core:
+        return core
+
+    return {term for term, _ in term_counter.most_common(6)}
+
+
+def _headline_noise_penalty(title: str) -> float:
+    lowered = (title or "").lower()
+    penalty = 0.0
+
+    if "?" in lowered:
+        penalty += 0.35
+    if lowered.startswith("why "):
+        penalty += 0.35
+    if lowered.startswith("what "):
+        penalty += 0.20
+
+    if re.search(r":\s*['\"].+['\"]", lowered):
+        penalty += 0.45
+
+    if any(token in lowered for token in SIDE_ANGLE_NAME_TOKENS):
+        penalty += 0.40
+
+    for pattern in HEADLINE_NOISE_PATTERNS:
+        if pattern in lowered:
+            penalty += 0.40
+            break
+
+    return penalty
 
 
 def build_story_key(evt: NormalisedEvent) -> str:

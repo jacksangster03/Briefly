@@ -321,6 +321,36 @@ def test_macro_thread_clusters_hormuz_and_lebanon():
     assert sizes == [2, 2]
 
 
+def test_cluster_representative_prefers_cluster_central_headline():
+    """Representative title should match the core narrative, not side-angle copy."""
+    events = [
+        NormalisedEvent(
+            title="Keir Starmer: 'I'm fed up' with Trump and Putin affecting UK energy costs",
+            summary="Iran effectively closed the Strait of Hormuz, tightening oil supply.",
+            event_type="market_news",
+            final_score=0.82,
+        ),
+        NormalisedEvent(
+            title="Saudi Arabia says Iran-linked attacks cut oil output and East-West Pipeline flow",
+            summary="Energy infrastructure disruption near Hormuz is reducing exports across the region.",
+            event_type="market_news",
+            final_score=0.80,
+        ),
+        NormalisedEvent(
+            title="Iran crisis keeps Strait of Hormuz risk premium in crude markets",
+            summary="Tanker insurance and shipping costs rise as conflict persists.",
+            event_type="market_news",
+            final_score=0.79,
+        ),
+    ]
+    clustered = cluster_events(events)
+    rep = max(clustered, key=lambda e: e.cluster_size)
+    assert rep.cluster_size >= 2
+    rep_title = rep.title.lower()
+    assert "starmer" not in rep_title
+    assert any(term in rep_title for term in ("oil", "hormuz", "pipeline", "iran"))
+
+
 def test_ticker_resolution_strips_spurious_tickers():
     """Market news tickers not mentioned in the text should be stripped."""
     from app.processing.pipeline import _resolve_event_tickers

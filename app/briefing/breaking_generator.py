@@ -81,23 +81,22 @@ class BreakingAlertGenerator:
 
 
 def _build_alert_reason(evt: NormalisedEvent) -> str:
-    """Build a concise, user-facing reason for why this event triggered."""
-    parts: list[str] = []
+    """Build a concise market-facing reason for the breaking trigger."""
+    signals: list[str] = []
 
     if evt.cluster_size > 1:
-        parts.append(f"Confirmed by {evt.cluster_size} sources")
+        signals.append(f"widely reported ({evt.cluster_size} source reports)")
     if evt.update_status == "material_update":
-        parts.append("developing story with new details")
+        signals.append("new details in a developing story")
     if evt.tickers:
         label = format_company_ticker_list(evt.tickers, max_items=3)
         if label:
-            parts.append(f"affects {label}")
+            signals.append(f"direct read-through to {label}")
     if evt.sectors:
-        parts.append(f"sector: {', '.join(evt.sectors[:2])}")
+        signals.append(f"sector impact: {', '.join(evt.sectors[:2])}")
     if evt.source == "sec_edgar":
-        parts.append("official regulatory filing")
+        signals.append("official filing confirmation")
 
-    if not parts:
-        parts.append("high-impact market event")
-
-    return ". ".join(parts)
+    if not signals:
+        return "High-impact market development."
+    return "; ".join(signals).capitalize() + "."

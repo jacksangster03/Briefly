@@ -23,7 +23,12 @@ from app.briefing.templates import (
     format_compact_price,
     format_price_line,
 )
-from app.schemas.briefings import BreakingAlert, IntradayUpdate, MorningBriefing
+from app.schemas.briefings import (
+    BreakingAlert,
+    IntradayUpdate,
+    MorningBriefing,
+    session_mode_for,
+)
 from app.schemas.events import (
     EarningsEvent,
     MacroDataPoint,
@@ -48,11 +53,18 @@ class TelegramFormatter:
         (split if exceeding Telegram's 4096 char limit).
         """
         sections = []
+        is_weekend = briefing.session_mode in {"saturday", "sunday"}
 
         # Header
         date_str = briefing.generated_at.strftime("%a %d %b %Y")
+        if briefing.session_mode == "saturday":
+            header = SECTION_HEADERS["weekend_title_saturday"]
+        elif briefing.session_mode == "sunday":
+            header = SECTION_HEADERS["weekend_title_sunday"]
+        else:
+            header = SECTION_HEADERS["morning_title"]
         sections.append(
-            f"<b>{SECTION_HEADERS['morning_title']}</b>\n{date_str}"
+            f"<b>{header}</b>\n{date_str}"
         )
 
         # Market setup
@@ -66,9 +78,14 @@ class TelegramFormatter:
             sections.append(macro)
 
         # Top themes
-        themes = self._format_themes(briefing.top_themes)
+        themes = self._format_themes_for_mode(briefing.top_themes, briefing.session_mode)
         if themes:
             sections.append(themes)
+
+        if is_weekend:
+            week_ahead = self._format_week_ahead(briefing)
+            if week_ahead:
+                sections.append(week_ahead)
 
         # Sector scan
         sector = self._format_sector_scan(briefing.sector_scan)
@@ -99,9 +116,15 @@ class TelegramFormatter:
     def format_intraday_update(self, update: IntradayUpdate) -> list[str]:
         """Format an hourly intraday update."""
         sections = []
+        is_weekend = update.session_mode in {"saturday", "sunday"}
+        title = (
+            SECTION_HEADERS["weekend_intraday_title"]
+            if is_weekend
+            else SECTION_HEADERS["intraday_title"]
+        )
 
         sections.append(
-            f"<b>{SECTION_HEADERS['intraday_title']}</b> | {update.hour_label}"
+            f"<b>{title}</b> | {update.hour_label}"
         )
 
         # Quick market snapshot
@@ -110,12 +133,19 @@ class TelegramFormatter:
                      for q in update.market_snapshot[:6]]
             sections.append(" | ".join(lines))
 
+        lead = self._build_intraday_lead(update)
+        if lead:
+            sections.append(lead)
+
         # New events
         for evt in update.new_events[:MAX_INTRADAY_EVENTS]:
             sections.append(self._format_single_event(evt))
 
         if not update.new_events:
-            sections.append("<i>No material new developments this hour.</i>")
+            if is_weekend:
+                sections.append("<i>No material weekend developments in this cycle.</i>")
+            else:
+                sections.append("<i>No material new developments this hour.</i>")
 
         sections.append(
             f"<i>{update.events_fetched} fetched, "
@@ -131,6 +161,9 @@ class TelegramFormatter:
         evt = alert.event
         company_label = self._company_label(evt)
         time_label = self._format_event_time(evt)
+        generated_local = alert.generated_at.astimezone(self.local_tz) if alert.generated_at.tzinfo else alert.generated_at
+        session_mode = session_mode_for(generated_local)
+        reference_label = "Friday prior close" if session_mode in {"saturday", "sunday"} else "prior close"
 
         sections = [
             f"<b>{SECTION_HEADERS['breaking_title']}</b>",
@@ -141,6 +174,9 @@ class TelegramFormatter:
         if summary_clean and not self._summary_duplicates_title(summary_clean, evt.title):
             sections.append(truncate(summary_clean, 500))
 
+        if alert.reason:
+            sections.append(f"<i>Why it matters:</i> {alert.reason}")
+
         meta = []
         if company_label:
             meta.append(company_label)
@@ -150,7 +186,7 @@ class TelegramFormatter:
             sections.append("<i>" + " | ".join(meta) + "</i>")
 
         if alert.market_context:
-            ctx_lines = ["Context:"]
+            ctx_lines = ["Market context:"]
             for q in alert.market_context[:4]:
                 ctx_lines.append(
                     "  " + format_context_price(
@@ -159,17 +195,10 @@ class TelegramFormatter:
                         q.current_price,
                         q.previous_close,
                         q.change_percent,
+                        reference_label=reference_label,
                     )
                 )
             sections.append("\n".join(ctx_lines))
-
-        if alert.reason:
-            sections.append(f"<i>Why it matters: {alert.reason}</i>")
-
-        sections.append(
-            f"<i>Score: {evt.final_score:.2f} | "
-            f"Confidence: {evt.factual_confidence_score:.0%}</i>"
-        )
 
         full_text = "\n\n".join(sections)
         return self._split_message(full_text)
@@ -177,7 +206,9 @@ class TelegramFormatter:
     # -- Section formatters ---------------------------------------------------
 
     def _format_market_setup(self, briefing: MorningBriefing) -> str:
-        lines = [f"<b>{SECTION_HEADERS['market_setup']}</b>"]
+        is_weekend = briefing.session_mode in {"saturday", "sunday"}
+        section_name = SECTION_HEADERS["weekend_setup"] if is_weekend else SECTION_HEADERS["market_setup"]
+        lines = [f"<b>{section_name}</b>"]
 
         # Index quotes
         for q in briefing.market_setup.index_quotes:
@@ -214,9 +245,21 @@ class TelegramFormatter:
         return "\n".join(lines)
 
     def _format_themes(self, themes: list[NormalisedEvent]) -> str:
+        return self._format_themes_for_mode(themes, session_mode="weekday")
+
+    def _format_themes_for_mode(
+        self,
+        themes: list[NormalisedEvent],
+        session_mode: str,
+    ) -> str:
         if not themes:
             return ""
-        lines = [f"<b>{SECTION_HEADERS['themes']}</b>"]
+        section = (
+            SECTION_HEADERS["weekend_themes"]
+            if session_mode in {"saturday", "sunday"}
+            else SECTION_HEADERS["themes"]
+        )
+        lines = [f"<b>{section}</b>"]
         for i, evt in enumerate(themes[:MAX_THEMES], 1):
             lines.append(f"{i}. <b>{evt.title}</b>")
             if evt.summary:
@@ -320,6 +363,36 @@ class TelegramFormatter:
             parts.append("<i>" + " | ".join(meta) + "</i>")
 
         return "\n".join(parts)
+
+    def _build_intraday_lead(self, update: IntradayUpdate) -> str:
+        if update.session_mode in {"saturday", "sunday"}:
+            return "<i>Weekend briefing: key developments while cash equity markets are closed.</i>"
+        if not update.new_events:
+            return ""
+
+        top = update.new_events[0]
+        text = f"{top.title} {top.summary}".lower()
+        if any(k in text for k in ("iran", "hormuz", "israel", "oil", "opec", "saudi")):
+            return "<i>Main thread: energy and geopolitical risk continue to drive cross-asset headlines.</i>"
+        if any(k in text for k in ("powell", "fomc", "inflation", "yield", "rates", "fed")):
+            return "<i>Main thread: rates and macro policy signals are leading the tape.</i>"
+        if any(k in text for k in ("nvidia", "ai", "chip", "semiconductor", "meta", "amazon")):
+            return "<i>Main thread: AI and mega-cap tech headlines remain in focus.</i>"
+        return "<i>Main thread: the highest-impact developments this cycle are below.</i>"
+
+    def _format_week_ahead(self, briefing: MorningBriefing) -> str:
+        lines = [f"<b>{SECTION_HEADERS['week_ahead']}</b>"]
+
+        text = " ".join(evt.title.lower() for evt in briefing.top_themes[:8])
+        if any(k in text for k in ("iran", "hormuz", "oil", "opec", "saudi", "israel")):
+            lines.append("  Energy and geopolitical headlines may drive Monday risk sentiment and oil-sensitive sectors.")
+        if any(k in text for k in ("powell", "fomc", "inflation", "cpi", "ppi", "pce", "payroll")):
+            lines.append("  Macro path remains central: watch inflation, labor, and central-bank communication.")
+        if briefing.watchlist_quotes:
+            focus = ", ".join((q.display_name or q.symbol) for q in briefing.watchlist_quotes[:4])
+            lines.append(f"  Watchlist focus into next open: {focus}.")
+        lines.append("  Futures, FX, crypto, and crude will shape the initial tone before US cash-market reopen.")
+        return "\n".join(lines)
 
     def _company_label(self, evt: NormalisedEvent) -> str:
         return format_company_ticker_list(evt.tickers)

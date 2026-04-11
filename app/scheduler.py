@@ -80,23 +80,28 @@ def build_scheduler(settings: Settings | None = None) -> BlockingScheduler:
     # Breaking alerts (polling)
     breaking = schedule_config.get("breaking_alerts", {})
     if breaking.get("enabled", True):
-        poll_mins = breaking.get("poll_interval_minutes", 5)
+        poll_mins = int(breaking.get("poll_interval_minutes", 5))
         breaking_days = _days_expr(breaking.get("days"))
-        start_h, start_m = map(int, breaking.get("start", "07:00").split(":"))
-        end_h, end_m = map(int, breaking.get("end", "23:00").split(":"))
-        scheduler.add_job(
-            run_breaking_check,
-            CronTrigger(
-                minute=f"*/{poll_mins}",
-                hour=f"{start_h}-{end_h}",
-                day_of_week=breaking_days,
-                timezone=tz,
-            ),
-            id="breaking_alerts",
-            name="Breaking Alert Check",
-            misfire_grace_time=60,
+        start = breaking.get("start", "07:00")
+        end = breaking.get("end", "23:00")
+        run_times = _breaking_run_times(start, end, poll_mins)
+        for hour, minute in run_times:
+            scheduler.add_job(
+                run_breaking_check,
+                CronTrigger(
+                    hour=hour,
+                    minute=minute,
+                    day_of_week=breaking_days,
+                    timezone=tz,
+                ),
+                id=f"breaking_alerts_{hour:02d}{minute:02d}",
+                name=f"Breaking Alert Check {hour:02d}:{minute:02d}",
+                misfire_grace_time=60,
+            )
+        logger.info(
+            "Scheduled %d breaking alert checks (%s-%s every %d min)",
+            len(run_times), start, end, poll_mins,
         )
-        logger.info("Scheduled breaking alert checks every %d min", poll_mins)
 
     return scheduler
 
@@ -136,3 +141,14 @@ def _intraday_run_times(start: str, end: str, interval_minutes: int) -> list[tup
         run_times.append((current.hour, current.minute))
         current += timedelta(minutes=interval_minutes)
     return run_times
+
+
+def _breaking_run_times(start: str, end: str, interval_minutes: int) -> list[tuple[int, int]]:
+    """Expand a breaking-alert polling window into explicit HH:MM run times.
+
+    ``end`` is treated inclusively: a window of 08:00–23:00 with a 5-minute
+    interval ends with a poll at exactly 23:00, not 23:55. The previous
+    CronTrigger-based implementation used ``hour="8-23" minute="*/5"`` which
+    happily fired every 5 minutes throughout the 23rd hour.
+    """
+    return _intraday_run_times(start, end, interval_minutes)

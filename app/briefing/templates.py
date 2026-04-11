@@ -6,13 +6,19 @@ Keeps all copy/layout decisions in one place so they are easy to adjust.
 # Sparse emoji for section headers (mobile-friendly visual anchors)
 SECTION_HEADERS = {
     "morning_title": "MORNING BRIEFING",
+    "weekend_title_saturday": "WEEKEND BRIEFING — SATURDAY",
+    "weekend_title_sunday": "WEEKEND BRIEFING — SUNDAY",
     "market_setup": "MARKET SETUP",
+    "weekend_setup": "LAST CLOSE (FRIDAY)",
     "macro": "MACRO CONTEXT",
     "themes": "TOP THEMES",
+    "weekend_themes": "WEEKEND DEVELOPMENTS",
     "sectors": "SECTOR SCAN",
     "earnings": "EARNINGS CALENDAR",
     "watchlist": "WATCHLIST",
+    "week_ahead": "WHAT TO WATCH NEXT WEEK",
     "intraday_title": "INTRADAY UPDATE",
+    "weekend_intraday_title": "WEEKEND UPDATE",
     "breaking_title": "BREAKING",
     "footer": "market-briefing-bot",
 }
@@ -43,12 +49,23 @@ def format_compact_price(name: str, change_pct: float) -> str:
     return f"{name} {sign}{change_pct:.2f}%"
 
 
-def format_context_price(name: str, symbol: str, current: float, previous: float, change_pct: float) -> str:
-    """Readable context line with full instrument name and previous close."""
+def format_context_price(
+    name: str,
+    symbol: str,
+    current: float,
+    previous: float,
+    change_pct: float,
+    reference_label: str = "prior close",
+) -> str:
+    """Readable context line with full instrument name and reference close.
+
+    Example (weekday): 'S&P 500 (SPY): 679.48, -0.06% vs prior close 679.91'
+    Example (weekend): 'S&P 500 (SPY): 679.48, -0.06% vs Friday close 679.91'
+    """
     sign = "+" if change_pct >= 0 else ""
     return (
-        f"{name} ({symbol}): {current:,.2f} vs {previous:,.2f} prev "
-        f"({sign}{change_pct:.2f}%)"
+        f"{name} ({symbol}): {current:,.2f}, {sign}{change_pct:.2f}% "
+        f"vs {reference_label} {previous:,.2f}"
     )
 
 

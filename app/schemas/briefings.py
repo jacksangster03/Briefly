@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -13,6 +14,23 @@ from app.schemas.events import (
     QuoteData,
     SectorSnapshot,
 )
+
+SessionMode = Literal["weekday", "saturday", "sunday"]
+
+
+def session_mode_for(dt: datetime) -> SessionMode:
+    """Derive the session mode from a local datetime's weekday.
+
+    Saturday/Sunday get their own labels so the formatter can switch into
+    weekend framing: there's no live cash session, index quotes are stale,
+    and the reference close is Friday's close rather than "yesterday".
+    """
+    weekday = dt.weekday()  # Mon=0..Sun=6
+    if weekday == 5:
+        return "saturday"
+    if weekday == 6:
+        return "sunday"
+    return "weekday"
 
 
 class MarketSetup(BaseModel):
@@ -30,6 +48,7 @@ class MorningBriefing(BaseModel):
     """Complete morning briefing, ready for formatting and delivery."""
 
     generated_at: datetime = Field(default_factory=datetime.now)
+    session_mode: SessionMode = "weekday"
     market_setup: MarketSetup = Field(default_factory=MarketSetup)
     macro_context: list[MacroDataPoint] = Field(default_factory=list)
     top_themes: list[NormalisedEvent] = Field(default_factory=list)
@@ -47,6 +66,7 @@ class IntradayUpdate(BaseModel):
     """Hourly intraday update with only new, material developments."""
 
     generated_at: datetime = Field(default_factory=datetime.now)
+    session_mode: SessionMode = "weekday"
     hour_label: str = ""
     market_snapshot: list[QuoteData] = Field(default_factory=list)
     new_events: list[NormalisedEvent] = Field(default_factory=list)

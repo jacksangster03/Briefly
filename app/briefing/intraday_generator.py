@@ -12,7 +12,7 @@ from app.logger import get_logger
 from app.personalization.delivery_rules import load_alert_rules
 from app.personalization.user_profile import UserProfile
 from app.processing.pipeline import process_event_stream, select_intraday_events
-from app.schemas.briefings import IntradayUpdate
+from app.schemas.briefings import IntradayUpdate, session_mode_for
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
 
@@ -72,6 +72,7 @@ class IntradayGenerator:
         now = datetime.now()
         update = IntradayUpdate(
             generated_at=now,
+            session_mode=session_mode_for(now),
             hour_label=now.strftime("%H:%M"),
             market_snapshot=snapshot,
             new_events=top,

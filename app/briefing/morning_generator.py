@@ -14,7 +14,7 @@ from app.logger import get_logger
 from app.personalization.delivery_rules import load_alert_rules
 from app.personalization.user_profile import UserProfile
 from app.processing.pipeline import is_actionable_event, process_event_stream
-from app.schemas.briefings import MarketSetup, MorningBriefing
+from app.schemas.briefings import MarketSetup, MorningBriefing, session_mode_for
 from app.schemas.events import NormalisedEvent, SectorSnapshot
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
@@ -64,7 +64,11 @@ class MorningBriefingGenerator:
     def generate(self) -> MorningBriefing:
         """Generate the full morning briefing."""
         logger.info("Generating morning briefing...")
-        briefing = MorningBriefing(generated_at=datetime.now())
+        now = datetime.now()
+        briefing = MorningBriefing(
+            generated_at=now,
+            session_mode=session_mode_for(now),
+        )
 
         # 1. Market setup (quotes for indices + macro instruments)
         briefing.market_setup = self._build_market_setup()
