@@ -106,8 +106,9 @@ class EmailFormatter:
         return "".join(parts)
 
     def _market_setup_block(self, indices: list[QuoteData], macro_quotes: list[QuoteData]) -> str:
+        selected_quotes = indices[:4] + macro_quotes[:4]
         rows = []
-        for quote in (indices[:4] + macro_quotes[:4]):
+        for quote in selected_quotes:
             sign = "+" if quote.change_percent >= 0 else ""
             rows.append(
                 "<tr>"
@@ -118,11 +119,17 @@ class EmailFormatter:
             )
         if not rows:
             return ""
-        return (
+        table = (
             "<table style=\"width:100%;border-collapse:collapse;font-size:14px;\">"
             + "".join(rows)
             + "</table>"
         )
+        freshness = self._quotes_freshness_summary(selected_quotes)
+        if freshness:
+            table += (
+                f"<div style=\"margin-top:8px;font-size:12px;color:#829ab1;\">{html.escape(freshness)}</div>"
+            )
+        return table
 
     def _event_block(
         self,
@@ -168,6 +175,11 @@ class EmailFormatter:
             parts.append(
                 f"<div style=\"margin-bottom:12px;font-size:14px;color:#334e68;\">{' | '.join(html.escape(x) for x in compact)}</div>"
             )
+            freshness = self._quotes_freshness_summary(quotes)
+            if freshness:
+                parts.append(
+                    f"<div style=\"margin:-6px 0 12px 0;font-size:12px;color:#829ab1;\">{html.escape(freshness)}</div>"
+                )
         event_block = self._event_block(events, max_items=5)
         if event_block:
             parts.append(event_block)
@@ -195,3 +207,24 @@ class EmailFormatter:
             f"{body}"
             "</div>"
         )
+
+    def _quotes_freshness_summary(self, quotes: list[QuoteData]) -> str:
+        if not quotes:
+            return ""
+        latest = max(quotes, key=lambda quote: self._coerce_utc_ts(quote.timestamp))
+        latest_local = self._coerce_utc_ts(latest.timestamp).astimezone(self.local_tz).strftime("%H:%M %Z")
+        source_counts: dict[str, int] = {}
+        for quote in quotes:
+            source = (quote.source or "unknown").lower()
+            source_counts[source] = source_counts.get(source, 0) + 1
+        source_summary = ", ".join(
+            f"{source}({count})"
+            for source, count in sorted(source_counts.items(), key=lambda item: item[0])
+        )
+        return f"Quotes as of {latest_local} | sources: {source_summary}"
+
+    @staticmethod
+    def _coerce_utc_ts(dt):
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)

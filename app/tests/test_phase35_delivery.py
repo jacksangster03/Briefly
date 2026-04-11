@@ -101,6 +101,48 @@ def test_email_formatter_embeds_inline_chart_cids():
     assert "PORTFOLIO FOCUS" in rendered.plain_text
 
 
+def test_email_formatter_includes_quote_freshness_metadata():
+    formatter = EmailFormatter("Europe/Madrid")
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 4, 12, 8, 45, tzinfo=timezone.utc),
+        session_mode="sunday",
+        market_setup=MarketSetup(
+            index_quotes=[
+                QuoteData(
+                    symbol="SPY",
+                    display_name="S&P 500",
+                    current_price=500.0,
+                    change_percent=0.8,
+                    source="yfinance",
+                    timestamp=datetime(2026, 4, 12, 8, 40, tzinfo=timezone.utc),
+                ),
+            ]
+        ),
+        watchlist_quotes=[
+            QuoteData(
+                symbol="NVDA",
+                display_name="Nvidia",
+                current_price=101.0,
+                change_percent=2.5,
+                source="finnhub",
+                timestamp=datetime(2026, 4, 12, 8, 39, tzinfo=timezone.utc),
+            ),
+            QuoteData(
+                symbol="MSFT",
+                display_name="Microsoft",
+                current_price=99.0,
+                change_percent=-0.6,
+                source="yfinance",
+                timestamp=datetime(2026, 4, 12, 8, 38, tzinfo=timezone.utc),
+            ),
+        ],
+    )
+
+    rendered = formatter.format_morning_briefing(briefing)
+    assert "Quotes as of" in rendered.html_body
+    assert "sources: finnhub(1), yfinance(1)" in rendered.html_body
+
+
 @patch("app.messaging.email.smtplib.SMTP")
 def test_email_messenger_send_rich_attaches_inline_images(mock_smtp):
     settings = Settings(

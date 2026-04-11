@@ -300,6 +300,88 @@ class TestSectorSnapshot:
         assert "Technology" in full
         assert "XLK" in full
 
+    def test_sector_scan_shows_freshness_and_collapses_empty_sectors(self):
+        formatter = TelegramFormatter("Europe/Madrid")
+        briefing = MorningBriefing(
+            generated_at=datetime(2026, 4, 11, 19, 0, tzinfo=timezone.utc),
+            session_mode="saturday",
+            sector_scan=[
+                SectorSnapshot(
+                    sector_key="technology",
+                    display_name="Technology",
+                    etf_symbol="XLK",
+                    etf_quote=QuoteData(
+                        symbol="XLK",
+                        current_price=200.0,
+                        change=1.5,
+                        change_percent=0.75,
+                        source="yfinance",
+                        timestamp=datetime(2026, 4, 11, 18, 59, tzinfo=timezone.utc),
+                    ),
+                    top_events=[
+                        NormalisedEvent(
+                            title="MSFT Azure revenue up 30%",
+                            tickers=["MSFT"],
+                            final_score=0.7,
+                        ),
+                    ],
+                ),
+                SectorSnapshot(
+                    sector_key="semiconductors",
+                    display_name="Semiconductors",
+                    etf_symbol="SMH",
+                    etf_quote=QuoteData(
+                        symbol="SMH",
+                        current_price=260.0,
+                        change=2.1,
+                        change_percent=0.82,
+                        source="yfinance",
+                        timestamp=datetime(2026, 4, 11, 18, 58, tzinfo=timezone.utc),
+                    ),
+                    top_events=[],
+                ),
+            ],
+        )
+        messages = formatter.format_morning_briefing(briefing)
+        full = "\n".join(messages)
+        assert "As of" in full
+        assert "via yfinance" in full
+        assert "vs Friday close" in full
+        assert "No high-trust developments:" in full
+        assert "<b>Semiconductors</b>" not in full
+
+    def test_watchlist_quotes_include_freshness_summary(self):
+        formatter = TelegramFormatter("Europe/Madrid")
+        briefing = MorningBriefing(
+            generated_at=datetime(2026, 4, 11, 19, 0, tzinfo=timezone.utc),
+            session_mode="saturday",
+            watchlist_quotes=[
+                QuoteData(
+                    symbol="NVDA",
+                    display_name="Nvidia",
+                    current_price=100.0,
+                    change=2.0,
+                    change_percent=2.0,
+                    source="yfinance",
+                    timestamp=datetime(2026, 4, 11, 18, 59, tzinfo=timezone.utc),
+                ),
+                QuoteData(
+                    symbol="MSFT",
+                    display_name="Microsoft",
+                    current_price=50.0,
+                    change=-0.2,
+                    change_percent=-0.4,
+                    source="finnhub",
+                    timestamp=datetime(2026, 4, 11, 18, 57, tzinfo=timezone.utc),
+                ),
+            ],
+        )
+        messages = formatter.format_morning_briefing(briefing)
+        full = "\n".join(messages)
+        assert "Quotes as of" in full
+        assert "sources: finnhub(1), yfinance(1)" in full
+        assert "vs Friday close" in full
+
 
 class _DummyMarketData:
     def get_quotes(self, symbols):

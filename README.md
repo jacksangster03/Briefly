@@ -31,6 +31,10 @@ The current product is no longer just a headline feed:
   - section-level trust gating for `TOP THEMES` and `SECTOR SCAN`
   - weekend-specific source/title penalties under thin source mixes
   - cross-section event de-duplication to reduce repeated headlines
+- **Phase 3.6b quote transparency + density control**
+  - quote freshness lines (`as of <local time>`, provider source mix) in watchlist/sector output
+  - explicit close-reference wording on weekend quote lines
+  - compact handling for empty sector sections to avoid long blank runs
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths

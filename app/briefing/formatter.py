@@ -92,7 +92,7 @@ class TelegramFormatter:
                 sections.append(week_ahead)
 
         # Sector scan
-        sector = self._format_sector_scan(briefing.sector_scan)
+        sector = self._format_sector_scan(briefing.sector_scan, briefing.session_mode)
         if sector:
             sections.append(sector)
 
@@ -102,7 +102,11 @@ class TelegramFormatter:
             sections.append(earnings)
 
         # Watchlist
-        watchlist = self._format_watchlist(briefing.watchlist_events, briefing.watchlist_quotes)
+        watchlist = self._format_watchlist(
+            briefing.watchlist_events,
+            briefing.watchlist_quotes,
+            briefing.session_mode,
+        )
         if watchlist:
             sections.append(watchlist)
 
@@ -278,16 +282,35 @@ class TelegramFormatter:
                 lines.append(f"   <i>{' | '.join(meta)}</i>")
         return "\n".join(lines)
 
-    def _format_sector_scan(self, sectors: list[SectorSnapshot]) -> str:
+    def _format_sector_scan(
+        self,
+        sectors: list[SectorSnapshot],
+        session_mode: str = "weekday",
+    ) -> str:
         if not sectors:
             return ""
         lines = [f"<b>{SECTION_HEADERS['sectors']}</b>"]
-        for snap in sectors:
+
+        non_empty_sectors = [snap for snap in sectors if snap.top_events]
+        empty_with_quotes = [snap for snap in sectors if not snap.top_events and snap.etf_quote]
+
+        if not non_empty_sectors:
+            lines.append("  <i>No high-trust sector developments in this cycle.</i>")
+            if empty_with_quotes:
+                compact = self._format_empty_sector_compact(empty_with_quotes, session_mode)
+                if compact:
+                    lines.append(compact)
+            return "\n".join(lines)
+
+        for snap in non_empty_sectors:
             # Sector ETF performance
             if snap.etf_quote:
                 q = snap.etf_quote
                 pct_str = format_change(q.change, q.change_percent)
                 lines.append(f"\n<b>{snap.display_name}</b> ({snap.etf_symbol} {pct_str})")
+                freshness = self._format_quote_freshness_line(q, session_mode)
+                if freshness:
+                    lines.append(f"  <i>{freshness}</i>")
             else:
                 lines.append(f"\n<b>{snap.display_name}</b>")
 
@@ -298,6 +321,11 @@ class TelegramFormatter:
                     lines.append(f"  {prefix} | {evt.title[:110]}")
                 else:
                     lines.append(f"  {evt.title[:120]}")
+
+        compact = self._format_empty_sector_compact(empty_with_quotes, session_mode)
+        if compact:
+            lines.append("")
+            lines.append(compact)
 
         return "\n".join(lines)
 
@@ -330,7 +358,10 @@ class TelegramFormatter:
         return "\n".join(lines)
 
     def _format_watchlist(
-        self, events: list[NormalisedEvent], quotes: list[QuoteData]
+        self,
+        events: list[NormalisedEvent],
+        quotes: list[QuoteData],
+        session_mode: str = "weekday",
     ) -> str:
         parts = [f"<b>{SECTION_HEADERS['watchlist']}</b>"]
 
@@ -339,6 +370,9 @@ class TelegramFormatter:
             q_lines = [format_compact_price(q.display_name or q.symbol, q.change_percent)
                        for q in quotes[:10]]
             parts.append(" | ".join(q_lines))
+            freshness = self._format_quotes_freshness_summary(quotes, session_mode)
+            if freshness:
+                parts.append(f"<i>{freshness}</i>")
 
         # Watchlist-relevant events
         if events:
@@ -350,6 +384,68 @@ class TelegramFormatter:
                     parts.append(f"  {evt.title[:150]}")
 
         return "\n".join(parts) if len(parts) > 1 else ""
+
+    def _format_empty_sector_compact(
+        self,
+        sectors: list[SectorSnapshot],
+        session_mode: str,
+    ) -> str:
+        if not sectors:
+            return ""
+        ranked = sorted(
+            sectors,
+            key=lambda snap: abs(snap.etf_quote.change_percent) if snap.etf_quote else 0.0,
+            reverse=True,
+        )
+        bits: list[str] = []
+        for snap in ranked[:5]:
+            quote = snap.etf_quote
+            if not quote:
+                continue
+            pct = f"{quote.change_percent:+.2f}%"
+            bits.append(f"{snap.display_name} ({snap.etf_symbol} {pct})")
+        if not bits:
+            return ""
+        reference = "vs Friday close" if session_mode in {"saturday", "sunday"} else "vs prior close"
+        return f"  <i>No high-trust developments: {' | '.join(bits)} ({reference})</i>"
+
+    def _format_quotes_freshness_summary(
+        self,
+        quotes: list[QuoteData],
+        session_mode: str,
+    ) -> str:
+        if not quotes:
+            return ""
+        latest = max(quotes, key=lambda quote: self._coerce_utc_ts(quote.timestamp))
+        latest_ts = self._coerce_utc_ts(latest.timestamp)
+        local_label = latest_ts.astimezone(self.local_tz).strftime("%H:%M %Z")
+        source_counts: dict[str, int] = {}
+        for quote in quotes:
+            source = (quote.source or "unknown").lower()
+            source_counts[source] = source_counts.get(source, 0) + 1
+        source_summary = ", ".join(
+            f"{source}({count})"
+            for source, count in sorted(source_counts.items(), key=lambda item: item[0])
+        )
+        reference = "vs Friday close" if session_mode in {"saturday", "sunday"} else "vs prior close"
+        return f"Quotes as of {local_label} | sources: {source_summary} | {reference}"
+
+    def _format_quote_freshness_line(
+        self,
+        quote: QuoteData,
+        session_mode: str,
+    ) -> str:
+        ts = self._coerce_utc_ts(quote.timestamp)
+        local_label = ts.astimezone(self.local_tz).strftime("%H:%M %Z")
+        source = (quote.source or "unknown").lower()
+        reference = "vs Friday close" if session_mode in {"saturday", "sunday"} else "vs prior close"
+        return f"As of {local_label} via {source} | {reference}"
+
+    @staticmethod
+    def _coerce_utc_ts(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
 
     def _format_single_event(self, evt: NormalisedEvent) -> str:
         """Format a single event for intraday/alert context.
