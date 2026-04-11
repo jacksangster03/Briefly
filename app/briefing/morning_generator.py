@@ -5,10 +5,12 @@ and assembly of the pre-market morning briefing.
 from __future__ import annotations
 
 from datetime import datetime
+import re
 
 from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
+from app.briefing.chart_builder import MorningChartBuilder
 from app.briefing.theme_builder import build_top_themes
 from app.logger import get_logger
 from app.personalization.delivery_rules import load_alert_rules
@@ -18,6 +20,7 @@ from app.schemas.briefings import MarketSetup, MorningBriefing, session_mode_for
 from app.schemas.events import NormalisedEvent, SectorSnapshot
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
+from app.universe.ticker_metadata import company_name_for_ticker
 
 logger = get_logger("morning_gen")
 
@@ -38,6 +41,140 @@ MACRO_BLEED_TERMS = (
     "war",
 )
 MAX_PORTFOLIO_FOCUS = 5
+PORTFOLIO_DIRECT_MIN_SCORE = 2.0
+PORTFOLIO_READTHROUGH_MIN_SCORE = 1.6
+PORTFOLIO_CATALYST_EVENT_TYPES = {
+    "earnings",
+    "guidance",
+    "fda_decision",
+    "m_and_a",
+    "current_report",
+    "annual_report",
+    "quarterly_report",
+    "ownership_disclosure",
+    "macro_release",
+    "fed_decision",
+    "geopolitical",
+    "regulatory",
+    "filing",
+}
+PORTFOLIO_CATALYST_TERMS = (
+    "earnings",
+    "guidance",
+    "outlook",
+    "forecast",
+    "sec filing",
+    "8-k",
+    "10-q",
+    "10-k",
+    "fda",
+    "approval",
+    "investigation",
+    "probe",
+    "settlement",
+    "contract",
+    "order",
+    "partnership",
+    "acquisition",
+    "merger",
+    "capex",
+    "production",
+    "output",
+    "supply",
+    "demand",
+    "pipeline",
+    "hormuz",
+    "tariff",
+    "sanction",
+    "recall",
+    "launch",
+)
+PORTFOLIO_READTHROUGH_TERMS = (
+    "inflation",
+    "cpi",
+    "ppi",
+    "jobs",
+    "payroll",
+    "jobless",
+    "fomc",
+    "powell",
+    "federal reserve",
+    "rate cut",
+    "rate hike",
+    "treasury yield",
+    "oil",
+    "crude",
+    "hormuz",
+    "opec",
+    "sanction",
+    "ceasefire",
+    "tariff",
+    "export restriction",
+    "supply chain",
+)
+PORTFOLIO_HARD_BLOCK_PATTERNS = (
+    "travel and security",
+    "picked a winner",
+    "grabbing gains",
+    "grab headlines",
+    "move to california",
+    "despite high taxes",
+    "going out of business",
+    "youtuber",
+    "still paying",
+    "salary",
+    "dirt cheap",
+    "outraged",
+)
+PORTFOLIO_SOFT_PENALTY_PATTERNS = (
+    "analysts love",
+    "can't agree on a direction",
+    "stock is a buy",
+    "stock is cheap",
+    "betting against",
+    "name-drops",
+    "says he owns",
+    "reiterates buy",
+    "buy rating",
+    "price target",
+    "wall street",
+)
+PORTFOLIO_SOFT_PENALTY_REGEXES = [
+    re.compile(r"\b(?:best|top|worst)\b.{0,35}\bstock\b"),
+    re.compile(r"\b(?:buy|sell|hold)\b.{0,25}\bstock\b"),
+    re.compile(r"\b(?:is|are)\b.{0,25}\b(?:cheap|undervalued|overvalued)\b"),
+]
+WATCHLIST_MIN_EDITORIAL_SCORE = 1.0
+WATCHLIST_HARD_BLOCK_PATTERNS = (
+    "travel and security",
+    "picked a winner",
+    "grabbing gains",
+    "grab headlines",
+    "move to california",
+    "despite high taxes",
+    "going out of business",
+    "youtuber",
+    "still paying",
+    "salary",
+    "your friends will find out and it will be embarrassing",
+)
+WATCHLIST_SOFT_PENALTY_PATTERNS = (
+    "dirt cheap",
+    "analysts love",
+    "can't agree on a direction",
+    "betting against",
+    "name-drops",
+    "reiterates buy",
+    "buy rating",
+    "price target",
+    "wall street",
+    "outraged",
+)
+WATCHLIST_SOFT_PENALTY_REGEXES = [
+    re.compile(r"\b(?:best|top|worst)\b.{0,35}\bstock\b"),
+    re.compile(r"\b(?:buy|sell|hold)\b.{0,25}\bstock\b"),
+    re.compile(r"\b(?:is|are)\b.{0,25}\b(?:cheap|undervalued|overvalued)\b"),
+]
 
 
 class MorningBriefingGenerator:
@@ -104,6 +241,12 @@ class MorningBriefingGenerator:
         briefing.earnings_calendar = self._fetch_earnings()
         briefing.watchlist_events = self._filter_watchlist_events(scored)
         briefing.watchlist_quotes = self._fetch_watchlist_quotes()
+        briefing.portfolio_quotes = self._fetch_portfolio_quotes()
+        if self._should_build_charts():
+            briefing.chart_assets = MorningChartBuilder(
+                profile=self.profile,
+                market_data=self.market_svc,
+            ).build(briefing)
         sent_ids: set[str] = set()
         for event in briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus:
             sent_ids.add(event.cluster_id or event.content_hash or event.event_id)
@@ -237,7 +380,7 @@ class MorningBriefingGenerator:
                 break
             if not is_actionable_event(event):
                 continue
-            if any(ticker in portfolio_symbols for ticker in event.tickers):
+            if self._portfolio_focus_worthy(event, portfolio_symbols, require_direct=True):
                 _push(event)
 
         for event in scored_events:
@@ -247,18 +390,171 @@ class MorningBriefingGenerator:
                 continue
             if event.final_score < 0.62:
                 continue
-            if concentrated_sectors and any(sector in concentrated_sectors for sector in event.sectors):
+            if not (concentrated_sectors and any(sector in concentrated_sectors for sector in event.sectors)):
+                continue
+            if self._portfolio_focus_worthy(event, portfolio_symbols, require_direct=False):
                 _push(event)
 
         return selected
 
+    @staticmethod
+    def _normalise_text(value: str) -> str:
+        return (
+            (value or "")
+            .lower()
+            .replace("’", "'")
+            .replace("‘", "'")
+            .replace("`", "'")
+            .replace("—", "-")
+            .replace("–", "-")
+            .replace("\xa0", " ")
+        )
+
+    def _portfolio_focus_worthy(
+        self,
+        event: NormalisedEvent,
+        portfolio_symbols: set[str],
+        *,
+        require_direct: bool,
+    ) -> bool:
+        score, has_direct, has_readthrough = self._portfolio_focus_editorial_score(
+            event,
+            portfolio_symbols,
+        )
+        if require_direct and not has_direct:
+            return False
+        if require_direct:
+            return score >= PORTFOLIO_DIRECT_MIN_SCORE
+        return has_readthrough and score >= PORTFOLIO_READTHROUGH_MIN_SCORE
+
+    def _portfolio_focus_editorial_score(
+        self,
+        event: NormalisedEvent,
+        portfolio_symbols: set[str],
+    ) -> tuple[float, bool, bool]:
+        title_lower = self._normalise_text(event.title)
+        text_lower = self._normalise_text(f"{event.title} {event.summary}")
+        held_hits = [ticker for ticker in event.tickers if ticker in portfolio_symbols]
+        has_direct = bool(held_hits)
+        has_catalyst = self._is_material_portfolio_catalyst(event, text_lower)
+        has_readthrough = self._has_portfolio_readthrough_signal(event, text_lower)
+        title_mentions_held = self._title_mentions_tickers_or_companies(title_lower, held_hits)
+
+        # Held ticker appeared only indirectly (often in a side mention): reject
+        # unless the event carries a hard catalyst.
+        if has_direct and not title_mentions_held and not has_catalyst:
+            return -99.0, has_direct, has_readthrough
+
+        # Keep explicit low-value framing out of scarce PORTFOLIO FOCUS slots,
+        # unless there is a genuinely material catalyst.
+        if any(pattern in text_lower for pattern in PORTFOLIO_HARD_BLOCK_PATTERNS) and not has_catalyst:
+            return -99.0, has_direct, has_readthrough
+
+        score = 0.0
+        if has_direct:
+            score += 1.8
+        if title_mentions_held:
+            score += 0.8
+        if has_catalyst:
+            score += 1.2
+        if has_readthrough:
+            score += 0.6
+        if event.cluster_size >= 3:
+            score += 0.2
+
+        for pattern in PORTFOLIO_SOFT_PENALTY_PATTERNS:
+            if pattern in text_lower:
+                score -= 0.65
+        if any(rx.search(title_lower) for rx in PORTFOLIO_SOFT_PENALTY_REGEXES):
+            score -= 0.8
+        if "?" in title_lower and not has_catalyst:
+            score -= 0.35
+
+        return score, has_direct, has_readthrough
+
+    @staticmethod
+    def _is_material_portfolio_catalyst(event: NormalisedEvent, text_lower: str) -> bool:
+        if event.source == "sec_edgar":
+            return True
+        if event.event_type in PORTFOLIO_CATALYST_EVENT_TYPES:
+            return True
+        return any(term in text_lower for term in PORTFOLIO_CATALYST_TERMS)
+
+    @staticmethod
+    def _has_portfolio_readthrough_signal(event: NormalisedEvent, text_lower: str) -> bool:
+        if event.event_type in {"macro_release", "fed_decision", "geopolitical", "regulatory"}:
+            return True
+        return any(term in text_lower for term in PORTFOLIO_READTHROUGH_TERMS)
+
+    @staticmethod
+    def _title_mentions_tickers_or_companies(title_lower: str, tickers: list[str]) -> bool:
+        for ticker in tickers:
+            if re.search(rf"\b{re.escape(ticker.lower())}\b", title_lower):
+                return True
+            company = company_name_for_ticker(ticker).lower()
+            if company != ticker.lower() and company in title_lower:
+                return True
+        return False
+
     def _filter_watchlist_events(self, scored: list[NormalisedEvent]) -> list[NormalisedEvent]:
         """Filter events relevant to the user's watchlist."""
         watchlist_set = set(self.profile.all_watchlist_tickers)
-        return [
-            e for e in scored
-            if is_actionable_event(e) and any(t in watchlist_set for t in e.tickers)
-        ][: self.rules.max_watchlist_events]
+        selected: list[NormalisedEvent] = []
+        seen_tracking_ids: set[str] = set()
+        for event in scored:
+            if len(selected) >= self.rules.max_watchlist_events:
+                break
+            if not is_actionable_event(event):
+                continue
+            watchlist_hits = [ticker for ticker in event.tickers if ticker in watchlist_set]
+            if not watchlist_hits:
+                continue
+            if not self._watchlist_event_worthy(event, watchlist_hits):
+                continue
+
+            tracking_id = event.cluster_id or event.content_hash or event.event_id
+            if tracking_id in seen_tracking_ids:
+                continue
+            seen_tracking_ids.add(tracking_id)
+            selected.append(event)
+        return selected
+
+    def _watchlist_event_worthy(
+        self,
+        event: NormalisedEvent,
+        watchlist_hits: list[str],
+    ) -> bool:
+        title_lower = self._normalise_text(event.title)
+        text_lower = self._normalise_text(f"{event.title} {event.summary}")
+        has_catalyst = self._is_material_portfolio_catalyst(event, text_lower)
+        title_mentions_watchlist = self._title_mentions_tickers_or_companies(title_lower, watchlist_hits)
+
+        if not title_mentions_watchlist and not has_catalyst:
+            return False
+
+        if any(pattern in text_lower for pattern in WATCHLIST_HARD_BLOCK_PATTERNS) and not has_catalyst:
+            return False
+
+        score = 0.0
+        score += 1.0  # direct watchlist hit
+        if title_mentions_watchlist:
+            score += 0.5
+        if has_catalyst:
+            score += 0.8
+        if event.cluster_size >= 3:
+            score += 0.2
+        if event.source == "sec_edgar":
+            score += 0.3
+
+        for pattern in WATCHLIST_SOFT_PENALTY_PATTERNS:
+            if pattern in text_lower:
+                score -= 0.4
+        if any(rx.search(title_lower) for rx in WATCHLIST_SOFT_PENALTY_REGEXES):
+            score -= 0.6
+        if "?" in title_lower and not has_catalyst:
+            score -= 0.3
+
+        return score >= WATCHLIST_MIN_EDITORIAL_SCORE
 
     def _fetch_watchlist_quotes(self) -> list:
         """Fetch quotes for primary watchlist tickers."""
@@ -266,3 +562,20 @@ class MorningBriefingGenerator:
         if not tickers:
             return []
         return self.market_svc.get_quotes(tickers)
+
+    def _fetch_portfolio_quotes(self) -> list:
+        """Fetch quotes for top held positions for richer delivery surfaces."""
+        tickers = self.profile.portfolio_symbols[:6]
+        if not tickers:
+            return []
+        return self.market_svc.get_quotes(tickers)
+
+    def _should_build_charts(self) -> bool:
+        """Avoid extra work unless at least one delivery/debug surface can use charts."""
+        if not getattr(self.settings, "enable_charts", True):
+            return False
+        return bool(
+            self.settings.email_configured
+            or getattr(self.settings, "telegram_send_charts", False)
+            or self.settings.show_output
+        )

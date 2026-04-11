@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # rendered message payload to the terminal. Independent of dry_run so
     # live sends can also be inspected locally. Set via CLI --show-output.
     show_output: bool = False
+    enable_charts: bool = True
+    telegram_send_charts: bool = False
+    # all | telegram | email
+    delivery_channel: str = "all"
 
     # -- Paths ----------------------------------------------------------------
     configs_dir: str = str(PROJECT_ROOT / "configs")
@@ -95,6 +99,13 @@ class Settings(BaseSettings):
     @property
     def email_configured(self) -> bool:
         return bool(self.email_user and self.email_password and self.email_to)
+
+    @property
+    def normalized_delivery_channel(self) -> str:
+        channel = (self.delivery_channel or "all").strip().lower()
+        if channel in {"all", "telegram", "email"}:
+            return channel
+        return "all"
 
 
 def get_settings() -> Settings:

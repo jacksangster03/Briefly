@@ -22,6 +22,11 @@ The current product is no longer just a headline feed:
   - holdings import from YAML or CSV
   - holdings persistence in SQLite
   - holdings-aware relevance scoring and intraday tie-breaks
+- **Phase 3.5 rich delivery**
+  - historical price retrieval for chart rendering
+  - static PNG chart cards for morning/weekend briefs
+  - HTML email rendering with inline charts
+  - optional Telegram hero-chart delivery (text-first by default)
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths
@@ -63,6 +68,16 @@ python -m app.cli quote NVDA
 python -m app.cli news
 ```
 
+Channel-control examples:
+
+```bash
+# send only email (skip Telegram) for this run
+python -m app.cli --email-only morning
+
+# send only Telegram (skip email) for this run
+python -m app.cli --telegram-only morning
+```
+
 ### Dry-run and output inspection
 
 Use `--dry-run` to avoid live delivery:
@@ -80,6 +95,15 @@ python -m app.cli --show-output --dry-run morning
 python -m app.cli --show-output --dry-run intraday
 python -m app.cli --show-output --dry-run breaking
 ```
+
+Combine with channel controls when validating one surface at a time:
+
+```bash
+python -m app.cli --dry-run --show-output --email-only morning
+python -m app.cli --dry-run --show-output --telegram-only morning
+```
+
+For morning runs, `--show-output` now also prints a rich-email preview summary and lists any generated chart cards, even if email delivery is not configured yet.
 
 This is useful when:
 - you want to inspect the exact rendered message locally
@@ -149,6 +173,14 @@ Important settings include:
 - `TELEGRAM_CHAT_ID`
 - `PROVIDER_TIMEOUT`
 - `PROVIDER_MAX_RETRIES`
+- `ENABLE_CHARTS`
+- `TELEGRAM_SEND_CHARTS`
+- `DELIVERY_CHANNEL` (`all`, `telegram`, `email`)
+
+Recommended delivery defaults:
+- keep Telegram text-first: `TELEGRAM_SEND_CHARTS=false`
+- use rich charts in email: `ENABLE_CHARTS=true`
+- leave channel routing at `DELIVERY_CHANNEL=all` and override per-run with CLI flags
 
 General runtime settings are defined in:
 - [app/settings.py](/Users/jack/market-briefing-bot/app/settings.py)

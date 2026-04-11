@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
+from app.briefing.email_formatter import EmailFormatter
 from app.briefing.formatter import TelegramFormatter
 from app.briefing.breaking_generator import BreakingAlertGenerator
 from app.briefing.intraday_generator import IntradayGenerator
@@ -44,12 +45,29 @@ def _build_services(settings: Settings):
 def _get_messengers(settings: Settings, profile: UserProfile):
     """Return configured messengers in priority order."""
     messengers = []
-    tg = TelegramMessenger(settings)
-    if tg.is_configured() or settings.dry_run:
-        messengers.append(tg)
-    email = EmailMessenger(settings)
-    if email.is_configured():
-        messengers.append(email)
+    channel = settings.normalized_delivery_channel
+
+    include_telegram = channel in {"all", "telegram"}
+    include_email = channel in {"all", "email"}
+
+    if include_telegram:
+        tg = TelegramMessenger(settings)
+        if tg.is_configured() or settings.dry_run:
+            messengers.append(tg)
+
+    if include_email:
+        email = EmailMessenger(settings)
+        # Keep default behavior unchanged (only include configured email),
+        # but allow explicit email-only dry-run testing without credentials.
+        if email.is_configured() or (settings.dry_run and channel == "email"):
+            messengers.append(email)
+
+    if not messengers:
+        logger.warning(
+            "No delivery channels active for this run (delivery_channel=%s, dry_run=%s)",
+            channel,
+            settings.dry_run,
+        )
     return messengers
 
 
@@ -73,6 +91,46 @@ def _print_terminal_output(messages: list[str], msg_type: str) -> None:
     print(f"{banner}\n")
 
 
+def _print_email_output(subject: str, plain_text: str, inline_assets, msg_type: str) -> None:
+    """Print a concise preview of rich email output for local verification."""
+    banner = "=" * 60
+    print(f"\n{banner}")
+    print(f"[EMAIL OUTPUT] {msg_type}")
+    print(banner)
+    print(subject)
+    if inline_assets:
+        print(f"Inline charts: {', '.join(asset.title for asset in inline_assets)}")
+    print(plain_text[:2400])
+    print(f"{banner}\n")
+
+
+def _record_delivery(
+    *,
+    channel: str,
+    msg_type: str,
+    success: bool,
+    content_preview: str,
+    events: list | None = None,
+) -> None:
+    """Persist a delivery attempt to SentMessage."""
+    with get_session() as session:
+        import hashlib
+
+        record = SentMessage(
+            message_type=msg_type,
+            channel=channel,
+            event_ids=[
+                evt.cluster_id or evt.content_hash or evt.event_id
+                for evt in (events or [])
+            ],
+            content_preview=content_preview[:500],
+            content_hash=hashlib.sha256(content_preview.encode()).hexdigest()[:16],
+            sent_at=datetime.now(timezone.utc),
+            success=success,
+        )
+        session.add(record)
+
+
 def _deliver(
     messengers,
     messages: list[str],
@@ -88,22 +146,13 @@ def _deliver(
         is_dry_run = bool(getattr(messenger, "dry_run", False))
         try:
             if not is_dry_run:
-                with get_session() as session:
-                    import hashlib
-                    content = "\n".join(messages)
-                    record = SentMessage(
-                        message_type=msg_type,
-                        channel=messenger.name,
-                        event_ids=[
-                            evt.cluster_id or evt.content_hash or evt.event_id
-                            for evt in (events or [])
-                        ],
-                        content_preview=content[:500],
-                        content_hash=hashlib.sha256(content.encode()).hexdigest()[:16],
-                        sent_at=datetime.now(timezone.utc),
-                        success=success,
-                    )
-                    session.add(record)
+                _record_delivery(
+                    channel=messenger.name,
+                    msg_type=msg_type,
+                    success=success,
+                    content_preview="\n".join(messages),
+                    events=events,
+                )
         except Exception:
             logger.debug("Failed to record sent message", exc_info=True)
         if success and not is_dry_run:
@@ -111,6 +160,60 @@ def _deliver(
                 record_sent_events(events or [])
             except Exception:
                 logger.debug("Failed to record sent events", exc_info=True)
+
+
+def _deliver_rich_email(
+    messenger: EmailMessenger,
+    email_content,
+    msg_type: str,
+    events: list | None = None,
+    settings: Settings | None = None,
+) -> None:
+    """Deliver a rich HTML email with inline assets and record the result."""
+    if settings and settings.show_output:
+        _print_email_output(
+            email_content.subject,
+            email_content.plain_text,
+            email_content.inline_assets,
+            msg_type,
+        )
+
+    success = messenger.send_rich(
+        subject=email_content.subject,
+        plain_text=email_content.plain_text,
+        html_body=email_content.html_body,
+        inline_assets=email_content.inline_assets,
+    )
+    is_dry_run = bool(getattr(messenger, "dry_run", False))
+    try:
+        if not is_dry_run:
+            _record_delivery(
+                channel=messenger.name,
+                msg_type=msg_type,
+                success=success,
+                content_preview=email_content.plain_text,
+                events=events,
+            )
+    except Exception:
+        logger.debug("Failed to record rich email message", exc_info=True)
+    if success and not is_dry_run:
+        try:
+            record_sent_events(events or [])
+        except Exception:
+            logger.debug("Failed to record sent events for rich email", exc_info=True)
+
+
+def _send_telegram_chart_preview(
+    messenger: TelegramMessenger,
+    chart_assets,
+    settings: Settings,
+) -> None:
+    """Optionally send the first morning chart to Telegram before text content."""
+    if not getattr(settings, "telegram_send_charts", False) or not chart_assets:
+        return
+    hero = chart_assets[0]
+    if not messenger.send_photo(hero, caption=hero.title):
+        logger.debug("Telegram chart preview failed for %s", hero.title)
 
 
 # -- Morning Briefing ---------------------------------------------------------
@@ -137,6 +240,7 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
     briefing = generator.generate()
     formatter = TelegramFormatter(profile.timezone)
     messages = formatter.format_morning_briefing(briefing)
+    email_content = EmailFormatter(profile.timezone).format_morning_briefing(briefing)
 
     messengers = _get_messengers(settings, profile)
     display_events = []
@@ -151,7 +255,28 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
             continue
         seen_tracking_ids.add(tracking_id)
         display_events.append(evt)
-    _deliver(messengers, messages, "morning_brief", display_events, settings=settings)
+
+    telegram_messengers = [m for m in messengers if isinstance(m, TelegramMessenger)]
+    email_messengers = [m for m in messengers if isinstance(m, EmailMessenger)]
+
+    for messenger in telegram_messengers:
+        _send_telegram_chart_preview(messenger, briefing.chart_assets, settings)
+    if telegram_messengers:
+        _deliver(telegram_messengers, messages, "morning_brief", display_events, settings=settings)
+    if (
+        settings.show_output
+        and settings.normalized_delivery_channel != "telegram"
+        and not email_messengers
+        and briefing.chart_assets
+    ):
+        _print_email_output(
+            email_content.subject,
+            email_content.plain_text,
+            email_content.inline_assets,
+            "morning_email_preview",
+        )
+    for messenger in email_messengers:
+        _deliver_rich_email(messenger, email_content, "morning_brief", display_events, settings=settings)
 
     logger.info(
         "Morning briefing delivered: %d messages, %d events",

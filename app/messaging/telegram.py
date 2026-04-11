@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from io import BytesIO
+
 import requests
 
 from app.logger import get_logger
 from app.messaging.base import BaseMessenger
+from app.schemas.delivery import ChartAsset
 from app.settings import Settings
 
 logger = get_logger("telegram")
@@ -65,4 +68,39 @@ class TelegramMessenger(BaseMessenger):
                 return False
         except requests.exceptions.RequestException as exc:
             logger.error("Telegram request failed: %s", exc)
+            return False
+
+    def send_photo(self, asset: ChartAsset, caption: str = "") -> bool:
+        """Send a single chart image to Telegram."""
+        if self.dry_run:
+            logger.info("[DRY RUN] Would send Telegram photo '%s' (%d bytes)", asset.title, len(asset.content))
+            return True
+
+        if not self.is_configured():
+            logger.warning("Telegram not configured; photo not sent")
+            return False
+
+        url = f"{API_BASE}/bot{self.token}/sendPhoto"
+        files = {
+            "photo": (
+                asset.filename or "chart.png",
+                BytesIO(asset.content),
+                asset.content_type,
+            )
+        }
+        data = {
+            "chat_id": self.chat_id,
+            "caption": caption or asset.title,
+        }
+
+        try:
+            resp = requests.post(url, data=data, files=files, timeout=30)
+            if resp.ok:
+                logger.info("Telegram photo sent: %s", asset.title)
+                return True
+            error = resp.json().get("description", resp.text[:200])
+            logger.error("Telegram photo send failed: %s", error)
+            return False
+        except requests.exceptions.RequestException as exc:
+            logger.error("Telegram photo request failed: %s", exc)
             return False

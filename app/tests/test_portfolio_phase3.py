@@ -6,6 +6,7 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy.orm import sessionmaker
 
+from app.briefing.morning_generator import MorningBriefingGenerator
 from app.briefing.formatter import TelegramFormatter
 from app.briefing.intraday_generator import IntradayGenerator
 from app.db import session as db_session
@@ -277,3 +278,169 @@ def test_intraday_generator_prioritizes_held_name_tie_break():
     ]
     prioritized = generator._prioritize_for_portfolio(events)
     assert prioritized[0].title == "Nvidia wins major hyperscaler order"
+
+
+def _build_morning_generator_with_holdings(
+    *,
+    holdings: list[PortfolioHolding],
+    sector_weights: dict[str, float] | None = None,
+    watchlist_primary: list[str] | None = None,
+) -> MorningBriefingGenerator:
+    return MorningBriefingGenerator(
+        settings=Settings(),
+        profile=UserProfile(
+            watchlist_primary=watchlist_primary or [],
+            portfolio_holdings=holdings,
+            portfolio_sector_weights=sector_weights or {},
+        ),
+        universe=SectorUniverse([], [], []),
+        market_data=object(),  # not used by _build_portfolio_focus
+        news_data=object(),    # not used by _build_portfolio_focus
+        macro_data=object(),   # not used by _build_portfolio_focus
+    )
+
+
+def test_portfolio_focus_filters_clickbait_held_name_but_keeps_direct_catalyst():
+    generator = _build_morning_generator_with_holdings(
+        holdings=[
+            PortfolioHolding(profile_name="default_user", symbol="AMZN", weight_pct=7.0, bucket="core"),
+        ],
+        sector_weights={"consumer_discretionary": 0.35},
+    )
+    events = [
+        NormalisedEvent(
+            title="Amazon is still paying Jeff Bezos an $80,000 yearly salary—but $1.6 million for travel and security",
+            summary="Side-angle commentary with limited operating relevance.",
+            tickers=["AMZN"],
+            sectors=["consumer_discretionary"],
+            final_score=0.82,
+            event_type="company_news",
+        ),
+        NormalisedEvent(
+            title="Amazon raises AI infrastructure capex outlook for 2026",
+            summary="Management lifted spending guidance tied to data-center buildout.",
+            tickers=["AMZN"],
+            sectors=["consumer_discretionary"],
+            final_score=0.80,
+            event_type="guidance",
+        ),
+    ]
+
+    selected = generator._build_portfolio_focus(events)
+    titles = [event.title for event in selected]
+    assert "Amazon raises AI infrastructure capex outlook for 2026" in titles
+    assert (
+        "Amazon is still paying Jeff Bezos an $80,000 yearly salary—but $1.6 million for travel and security"
+        not in titles
+    )
+
+
+def test_portfolio_focus_filters_incidental_held_mentions():
+    generator = _build_morning_generator_with_holdings(
+        holdings=[
+            PortfolioHolding(profile_name="default_user", symbol="NVDA", weight_pct=8.0, bucket="core"),
+            PortfolioHolding(profile_name="default_user", symbol="TSLA", weight_pct=4.0, bucket="satellite"),
+        ],
+        sector_weights={"semiconductors": 0.45, "consumer_discretionary": 0.25},
+    )
+    events = [
+        NormalisedEvent(
+            title="Nvidia And Tesla Grab Headlines, But This Stock Is Grabbing Gains",
+            summary="Roundup-style framing with no direct operating catalyst.",
+            tickers=["NVDA", "TSLA"],
+            sectors=["semiconductors"],
+            final_score=0.79,
+            event_type="company_news",
+        ),
+        NormalisedEvent(
+            title="Nvidia secures hyperscaler supply agreement for next-gen AI racks",
+            summary="Direct operating contract likely to support near-term demand visibility.",
+            tickers=["NVDA"],
+            sectors=["semiconductors"],
+            final_score=0.78,
+            event_type="company_news",
+        ),
+    ]
+
+    selected = generator._build_portfolio_focus(events)
+    titles = [event.title for event in selected]
+    assert "Nvidia secures hyperscaler supply agreement for next-gen AI racks" in titles
+    assert "Nvidia And Tesla Grab Headlines, But This Stock Is Grabbing Gains" not in titles
+
+
+def test_portfolio_focus_keeps_meaningful_macro_readthrough():
+    generator = _build_morning_generator_with_holdings(
+        holdings=[
+            PortfolioHolding(profile_name="default_user", symbol="NVDA", weight_pct=8.5, bucket="core"),
+        ],
+        sector_weights={"semiconductors": 0.60},
+    )
+    macro_event = NormalisedEvent(
+        title="US expands AI-chip export restrictions to China suppliers",
+        summary="New controls could tighten supply-chain planning across semiconductor names.",
+        tickers=[],
+        sectors=["semiconductors"],
+        final_score=0.73,
+        event_type="regulatory",
+    )
+
+    selected = generator._build_portfolio_focus([macro_event])
+    assert [event.title for event in selected] == [macro_event.title]
+
+
+def test_portfolio_focus_filters_move_to_california_side_angle():
+    generator = _build_morning_generator_with_holdings(
+        holdings=[
+            PortfolioHolding(profile_name="default_user", symbol="NVDA", weight_pct=8.5, bucket="core"),
+        ],
+        sector_weights={"semiconductors": 0.55},
+    )
+    events = [
+        NormalisedEvent(
+            title="Nvidia CEO Says 'Move to California' Despite High Taxes",
+            summary="Commentary angle not tied to operating catalyst.",
+            tickers=["NVDA"],
+            sectors=["semiconductors"],
+            final_score=0.79,
+            event_type="company_news",
+        ),
+        NormalisedEvent(
+            title="Nvidia secures AI server supply expansion with hyperscaler partner",
+            summary="Agreement increases near-term demand visibility.",
+            tickers=["NVDA"],
+            sectors=["semiconductors"],
+            final_score=0.77,
+            event_type="company_news",
+        ),
+    ]
+    selected = generator._build_portfolio_focus(events)
+    titles = [event.title for event in selected]
+    assert "Nvidia secures AI server supply expansion with hyperscaler partner" in titles
+    assert "Nvidia CEO Says 'Move to California' Despite High Taxes" not in titles
+
+
+def test_watchlist_filters_side_angle_and_keeps_catalyst():
+    generator = _build_morning_generator_with_holdings(
+        holdings=[],
+        watchlist_primary=["NVDA"],
+    )
+    events = [
+        NormalisedEvent(
+            title="Nvidia CEO Says 'Move to California' Despite High Taxes",
+            summary="Side-angle commentary.",
+            tickers=["NVDA"],
+            final_score=0.81,
+            event_type="company_news",
+        ),
+        NormalisedEvent(
+            title="Nvidia raises AI chip output guidance after demand surge",
+            summary="Direct operating update and revised outlook.",
+            tickers=["NVDA"],
+            final_score=0.76,
+            event_type="guidance",
+        ),
+    ]
+    selected = generator._filter_watchlist_events(events)
+    assert [event.title for event in selected] == [
+        "Nvidia raises AI chip output guidance after demand surge"
+    ]

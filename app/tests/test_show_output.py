@@ -17,8 +17,9 @@ from unittest.mock import MagicMock
 from click.testing import CliRunner
 
 from app.cli import cli
-from app.main import _deliver, _print_terminal_output
+from app.main import _deliver, _get_messengers, _print_terminal_output
 from app.messaging.telegram import TelegramMessenger
+from app.personalization.user_profile import UserProfile
 from app.settings import Settings
 
 
@@ -152,3 +153,68 @@ def test_cli_no_show_output_keeps_flag_off(monkeypatch):
     result = runner.invoke(cli, ["--dry-run", "morning"])
     assert result.exit_code == 0, result.output
     assert captured["show_output"] is False
+
+
+def test_cli_email_only_sets_delivery_channel(monkeypatch):
+    captured: dict = {}
+
+    def _fake_run(settings):
+        captured["delivery_channel"] = settings.delivery_channel
+
+    monkeypatch.setattr("app.main.run_morning_briefing", _fake_run)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--dry-run", "--email-only", "morning"])
+    assert result.exit_code == 0, result.output
+    assert captured["delivery_channel"] == "email"
+
+
+def test_cli_telegram_only_sets_delivery_channel(monkeypatch):
+    captured: dict = {}
+
+    def _fake_run(settings):
+        captured["delivery_channel"] = settings.delivery_channel
+
+    monkeypatch.setattr("app.main.run_morning_briefing", _fake_run)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--dry-run", "--telegram-only", "morning"])
+    assert result.exit_code == 0, result.output
+    assert captured["delivery_channel"] == "telegram"
+
+
+def test_cli_channel_overrides_are_mutually_exclusive():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--email-only", "--telegram-only", "morning"])
+    assert result.exit_code != 0
+    assert "Use only one channel override" in result.output
+
+
+def test_get_messengers_respects_email_only_setting():
+    settings = Settings(
+        delivery_channel="email",
+        dry_run=False,
+        telegram_bot_token="tg-token",
+        telegram_chat_id="12345",
+        email_user="user@example.com",
+        email_password="secret",
+        email_to="to@example.com",
+    )
+    profile = UserProfile()
+    messengers = _get_messengers(settings, profile)
+    names = [messenger.name for messenger in messengers]
+    assert names == ["email"]
+
+
+def test_get_messengers_respects_telegram_only_setting():
+    settings = Settings(
+        delivery_channel="telegram",
+        dry_run=False,
+        telegram_bot_token="tg-token",
+        telegram_chat_id="12345",
+        email_user="user@example.com",
+        email_password="secret",
+        email_to="to@example.com",
+    )
+    profile = UserProfile()
+    messengers = _get_messengers(settings, profile)
+    names = [messenger.name for messenger in messengers]
+    assert names == ["telegram"]

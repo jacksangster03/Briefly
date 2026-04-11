@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from app.data_sources.base import BaseProvider
 from app.logger import get_logger
-from app.schemas.events import QuoteData
+from app.schemas.events import PricePoint, QuoteData
 
 logger = get_logger("yfinance")
 
@@ -81,3 +81,44 @@ class YFinanceProvider(BaseProvider):
             if quote:
                 results.append(quote)
         return results
+
+    # -- Price history -------------------------------------------------------
+
+    def get_price_history(
+        self,
+        symbol: str,
+        period: str = "1mo",
+        interval: str = "1d",
+    ) -> list[PricePoint]:
+        """Fetch simple OHLC history for chart rendering."""
+        if not self._ensure_import():
+            return []
+
+        try:
+            ticker = self._yf.Ticker(symbol)
+            history = ticker.history(period=period, interval=interval, auto_adjust=False)
+        except Exception as exc:
+            logger.warning("yfinance history failed for %s: %s", symbol, exc)
+            return []
+
+        if history is None or history.empty:
+            return []
+
+        points: list[PricePoint] = []
+        for index, row in history.iterrows():
+            ts = index.to_pydatetime() if hasattr(index, "to_pydatetime") else index
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            points.append(
+                PricePoint(
+                    symbol=symbol,
+                    timestamp=ts,
+                    open=round(float(row.get("Open", 0.0) or 0.0), 2),
+                    high=round(float(row.get("High", 0.0) or 0.0), 2),
+                    low=round(float(row.get("Low", 0.0) or 0.0), 2),
+                    close=round(float(row.get("Close", 0.0) or 0.0), 2),
+                    volume=float(row.get("Volume", 0.0) or 0.0) or None,
+                    source="yfinance",
+                )
+            )
+        return points

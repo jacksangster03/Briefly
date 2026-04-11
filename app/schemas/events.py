@@ -27,6 +27,19 @@ class QuoteData(BaseModel):
     source: str = ""
 
 
+class PricePoint(BaseModel):
+    """Historical price observation used for simple chart rendering."""
+
+    symbol: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now())
+    open: float = 0.0
+    high: float = 0.0
+    low: float = 0.0
+    close: float = 0.0
+    volume: float | None = None
+    source: str = ""
+
+
 class MacroDataPoint(BaseModel):
     """Single observation from a macroeconomic time series."""
 

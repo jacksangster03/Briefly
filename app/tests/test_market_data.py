@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
 from app.data_sources.providers.finnhub import FinnhubProvider
-from app.schemas.events import QuoteData
+from app.schemas.events import PricePoint, QuoteData
 from app.settings import Settings
 
 
@@ -135,3 +135,14 @@ def test_fetch_company_news_keeps_going_once_any_ticker_hits():
     service.fetch_company_news(["AAPL", "MSFT", "NVDA", "AMZN"])
     # AAPL hit → never abort; scan full batch.
     assert calls == ["AAPL", "MSFT", "NVDA", "AMZN"]
+
+
+def test_market_data_price_history_uses_yfinance_provider():
+    settings = Settings()
+    service = MarketDataService(settings)
+    expected = [PricePoint(symbol="NVDA", close=101.5)]
+
+    service.yfinance.get_price_history = lambda symbol, period="1mo", interval="1d": expected  # type: ignore[assignment]
+
+    history = service.get_price_history("NVDA", period="1mo", interval="1d")
+    assert history == expected

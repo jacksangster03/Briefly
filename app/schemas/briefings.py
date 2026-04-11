@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.delivery import ChartAsset
 from app.schemas.events import (
     EarningsEvent,
     MacroDataPoint,
@@ -57,6 +58,8 @@ class MorningBriefing(BaseModel):
     earnings_calendar: list[EarningsEvent] = Field(default_factory=list)
     watchlist_events: list[NormalisedEvent] = Field(default_factory=list)
     watchlist_quotes: list[QuoteData] = Field(default_factory=list)
+    portfolio_quotes: list[QuoteData] = Field(default_factory=list)
+    chart_assets: list[ChartAsset] = Field(default_factory=list)
     event_count: int = 0
     events_fetched: int = 0
     events_after_dedup: int = 0

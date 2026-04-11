@@ -19,8 +19,20 @@ from app.settings import get_settings
     help="Print rendered message payloads to the terminal for manual inspection. "
          "Works with or without --dry-run.",
 )
+@click.option(
+    "--email-only",
+    is_flag=True,
+    default=False,
+    help="Send only through email for this run (no Telegram sends).",
+)
+@click.option(
+    "--telegram-only",
+    is_flag=True,
+    default=False,
+    help="Send only through Telegram for this run (no email sends).",
+)
 @click.pass_context
-def cli(ctx, dry_run, show_output):
+def cli(ctx, dry_run, show_output, email_only, telegram_only):
     """market-briefing-bot: Market intelligence delivered to your phone."""
     setup_logging()
     ctx.ensure_object(dict)
@@ -28,6 +40,12 @@ def cli(ctx, dry_run, show_output):
     if dry_run is not None:
         settings.dry_run = dry_run
     settings.show_output = show_output
+    if email_only and telegram_only:
+        raise click.UsageError("Use only one channel override: --email-only or --telegram-only.")
+    if email_only:
+        settings.delivery_channel = "email"
+    elif telegram_only:
+        settings.delivery_channel = "telegram"
     ctx.obj["settings"] = settings
 
 
@@ -122,6 +140,7 @@ def status(ctx):
     click.echo("market-briefing-bot status")
     click.echo(f"  Timezone:    {settings.timezone}")
     click.echo(f"  Dry run:     {settings.dry_run}")
+    click.echo(f"  Delivery:    {settings.normalized_delivery_channel}")
     click.echo(f"  Database:    {settings.database_url}")
     click.echo(f"  Finnhub:     {'configured' if settings.finnhub_configured else 'not set'}")
     click.echo(f"  FRED:        {'configured' if settings.fred_configured else 'not set'}")

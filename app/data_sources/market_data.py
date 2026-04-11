@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.data_sources.providers.finnhub import FinnhubProvider
 from app.data_sources.providers.yfinance_provider import YFinanceProvider
 from app.logger import get_logger
-from app.schemas.events import QuoteData
+from app.schemas.events import PricePoint, QuoteData
 from app.settings import Settings
 
 logger = get_logger("market_data")
@@ -59,3 +59,18 @@ class MarketDataService:
         """Single-symbol convenience wrapper."""
         quotes = self.get_quotes([symbol])
         return quotes[0] if quotes else None
+
+    def get_price_history(
+        self,
+        symbol: str,
+        period: str = "1mo",
+        interval: str = "1d",
+    ) -> list[PricePoint]:
+        """Fetch historical price data for charts.
+
+        History is sourced from yfinance only for now. This keeps charting
+        resilient even when the primary quote/news provider is degraded.
+        """
+        if not self.yfinance.is_configured():
+            return []
+        return self.yfinance.get_price_history(symbol, period=period, interval=interval)
