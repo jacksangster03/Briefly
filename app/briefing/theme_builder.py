@@ -6,6 +6,8 @@ The headline is the core; the summary adds context and cluster breadth.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from app.processing.cleaners import truncate
 from app.processing.pipeline import is_actionable_event
 from app.schemas.events import NormalisedEvent
@@ -14,6 +16,7 @@ from app.schemas.events import NormalisedEvent
 def build_top_themes(
     events: list[NormalisedEvent],
     max_themes: int = 5,
+    editorial_gate: Callable[[NormalisedEvent], bool] | None = None,
 ) -> list[NormalisedEvent]:
     themes: list[NormalisedEvent] = []
     seen_clusters: set[str] = set()
@@ -26,6 +29,8 @@ def build_top_themes(
             and evt.source != "sec_edgar"
             and evt.event_type not in {"macro_release", "fed_decision", "geopolitical", "regulatory"}
         ):
+            continue
+        if editorial_gate and not editorial_gate(evt):
             continue
         if evt.cluster_id and evt.cluster_id in seen_clusters:
             continue

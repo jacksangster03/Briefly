@@ -43,6 +43,8 @@ MACRO_BLEED_TERMS = (
 MAX_PORTFOLIO_FOCUS = 5
 PORTFOLIO_DIRECT_MIN_SCORE = 2.0
 PORTFOLIO_READTHROUGH_MIN_SCORE = 1.6
+TRUST_TOP_THEMES_MIN_SCORE = 1.0
+TRUST_SECTOR_SCAN_MIN_SCORE = 0.9
 PORTFOLIO_CATALYST_EVENT_TYPES = {
     "earnings",
     "guidance",
@@ -175,6 +177,44 @@ WATCHLIST_SOFT_PENALTY_REGEXES = [
     re.compile(r"\b(?:buy|sell|hold)\b.{0,25}\bstock\b"),
     re.compile(r"\b(?:is|are)\b.{0,25}\b(?:cheap|undervalued|overvalued)\b"),
 ]
+TRUST_HARD_BLOCK_PATTERNS = (
+    "travel and security",
+    "picked a winner",
+    "grabbing gains",
+    "grab headlines",
+    "move to california",
+    "despite high taxes",
+    "going out of business",
+    "youtuber",
+    "still paying",
+    "salary",
+    "your friends will find out and it will be embarrassing",
+)
+TRUST_SOFT_PENALTY_PATTERNS = (
+    "dirt cheap",
+    "analysts love",
+    "can't agree on a direction",
+    "betting against",
+    "name-drops",
+    "reiterates buy",
+    "buy rating",
+    "price target",
+    "wall street",
+    "outraged",
+)
+TRUST_SOFT_PENALTY_REGEXES = [
+    re.compile(r"\b(?:best|top|worst)\b.{0,35}\bstock\b"),
+    re.compile(r"\b(?:buy|sell|hold)\b.{0,25}\bstock\b"),
+    re.compile(r"\b(?:is|are)\b.{0,25}\b(?:cheap|undervalued|overvalued)\b"),
+]
+WEEKEND_LOW_TRUST_SOURCES = (
+    "motley fool",
+    "fool.com",
+    "investorplace",
+    "benzinga",
+    "zacks",
+    "thestreet",
+)
 
 
 class MorningBriefingGenerator:
@@ -235,13 +275,14 @@ class MorningBriefingGenerator:
         briefing.events_after_dedup = len(scored)
 
         # 7. Assemble sections
-        briefing.top_themes = build_top_themes(scored, max_themes=self.rules.max_themes)
+        briefing.top_themes = self._build_top_themes(scored, briefing.session_mode)
         briefing.portfolio_focus = self._build_portfolio_focus(scored)
-        briefing.sector_scan = self._build_sector_scan(scored)
+        briefing.sector_scan = self._build_sector_scan(scored, briefing.session_mode)
         briefing.earnings_calendar = self._fetch_earnings()
         briefing.watchlist_events = self._filter_watchlist_events(scored)
         briefing.watchlist_quotes = self._fetch_watchlist_quotes()
         briefing.portfolio_quotes = self._fetch_portfolio_quotes()
+        self._dedupe_cross_section_events(briefing)
         if self._should_build_charts():
             briefing.chart_assets = MorningChartBuilder(
                 profile=self.profile,
@@ -292,7 +333,27 @@ class MorningBriefingGenerator:
 
         return setup
 
-    def _build_sector_scan(self, scored_events: list[NormalisedEvent]) -> list[SectorSnapshot]:
+    def _build_top_themes(
+        self,
+        scored_events: list[NormalisedEvent],
+        session_mode: str,
+    ) -> list[NormalisedEvent]:
+        """Build top themes with an editorial trust gate."""
+        return build_top_themes(
+            scored_events,
+            max_themes=self.rules.max_themes,
+            editorial_gate=lambda evt: self._is_editorially_trustworthy(
+                evt,
+                session_mode,
+                section="top_themes",
+            ),
+        )
+
+    def _build_sector_scan(
+        self,
+        scored_events: list[NormalisedEvent],
+        session_mode: str = "weekday",
+    ) -> list[SectorSnapshot]:
         """Build sector snapshots with ETF quotes and top events per sector.
 
         Each event is placed in only one sector: the first matching sector
@@ -327,6 +388,8 @@ class MorningBriefingGenerator:
                 if not (ticker_matches or has_sector_tag):
                     continue
                 if self._looks_like_macro_bleed(event) and ticker_matches < 2 and event.source != "sec_edgar":
+                    continue
+                if not self._is_editorially_trustworthy(event, session_mode, section="sector_scan"):
                     continue
                 sector_events.append(event)
                 placed_event_ids.add(event.event_id)
@@ -555,6 +618,99 @@ class MorningBriefingGenerator:
             score -= 0.3
 
         return score >= WATCHLIST_MIN_EDITORIAL_SCORE
+
+    def _is_editorially_trustworthy(
+        self,
+        event: NormalisedEvent,
+        session_mode: str,
+        *,
+        section: str,
+    ) -> bool:
+        """Apply section-level trust gating for top themes and sector scan."""
+        title_lower = self._normalise_text(event.title)
+        text_lower = self._normalise_text(f"{event.title} {event.summary}")
+        source_name = self._normalise_text(str(event.raw_data.get("source_name", "")))
+        url_lower = self._normalise_text(event.url)
+        is_weekend = session_mode in {"saturday", "sunday"}
+        has_catalyst = self._is_material_portfolio_catalyst(event, text_lower)
+        has_readthrough = self._has_portfolio_readthrough_signal(event, text_lower)
+
+        # Hard blocks for obvious low-value framing unless there is a hard catalyst.
+        if any(pattern in text_lower for pattern in TRUST_HARD_BLOCK_PATTERNS) and not has_catalyst:
+            return False
+
+        score = 0.0
+        if event.source == "sec_edgar":
+            score += 1.2
+        if event.factual_confidence_score >= 0.80:
+            score += 0.8
+        elif event.factual_confidence_score >= 0.65:
+            score += 0.5
+        else:
+            score += 0.2
+        if event.cluster_size >= 3:
+            score += 0.35
+        if has_catalyst:
+            score += 0.8
+        if has_readthrough:
+            score += 0.35
+        if event.final_score >= 0.75:
+            score += 0.2
+
+        for pattern in TRUST_SOFT_PENALTY_PATTERNS:
+            if pattern in text_lower:
+                score -= 0.45
+        if any(rx.search(title_lower) for rx in TRUST_SOFT_PENALTY_REGEXES):
+            score -= 0.6
+
+        if is_weekend:
+            if any(marker in source_name or marker in url_lower for marker in WEEKEND_LOW_TRUST_SOURCES):
+                score -= 0.55
+            if "?" in title_lower and not has_catalyst:
+                score -= 0.25
+            if (
+                event.factual_confidence_score < 0.60
+                and event.cluster_size <= 2
+                and not has_catalyst
+                and not has_readthrough
+            ):
+                return False
+
+        threshold = TRUST_TOP_THEMES_MIN_SCORE if section == "top_themes" else TRUST_SECTOR_SCAN_MIN_SCORE
+        return score >= threshold
+
+    def _dedupe_cross_section_events(self, briefing: MorningBriefing) -> None:
+        """Keep a story from repeating across multiple morning sections."""
+        seen_keys: set[str] = set()
+        briefing.portfolio_focus = self._dedupe_event_list(briefing.portfolio_focus, seen_keys)
+        briefing.top_themes = self._dedupe_event_list(briefing.top_themes, seen_keys)
+
+        for snapshot in briefing.sector_scan:
+            snapshot.top_events = self._dedupe_event_list(snapshot.top_events, seen_keys)
+
+        briefing.watchlist_events = self._dedupe_event_list(briefing.watchlist_events, seen_keys)
+
+    def _dedupe_event_list(
+        self,
+        events: list[NormalisedEvent],
+        seen_keys: set[str],
+    ) -> list[NormalisedEvent]:
+        deduped: list[NormalisedEvent] = []
+        for event in events:
+            key = self._event_dedupe_key(event)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(event)
+        return deduped
+
+    def _event_dedupe_key(self, event: NormalisedEvent) -> str:
+        if event.cluster_id:
+            return f"cluster:{event.cluster_id}"
+        if event.content_hash:
+            return f"hash:{event.content_hash}"
+        title_key = self._normalise_text(event.title).strip()
+        return f"title:{title_key}"
 
     def _fetch_watchlist_quotes(self) -> list:
         """Fetch quotes for primary watchlist tickers."""

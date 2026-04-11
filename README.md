@@ -27,6 +27,10 @@ The current product is no longer just a headline feed:
   - static PNG chart cards for morning/weekend briefs
   - HTML email rendering with inline charts
   - optional Telegram hero-chart delivery (text-first by default)
+- **Phase 3.6 editorial trust**
+  - section-level trust gating for `TOP THEMES` and `SECTOR SCAN`
+  - weekend-specific source/title penalties under thin source mixes
+  - cross-section event de-duplication to reduce repeated headlines
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths
@@ -304,6 +308,10 @@ The repo is now beyond basic plumbing:
   - operational debugging tools like `--show-output`
 
 The biggest remaining quality gap is still editorial/source quality in some surfaced headlines, not the core plumbing.
+
+Recent improvement note:
+- weekend side-angle headlines are now less likely to surface in `TOP THEMES` / `SECTOR SCAN`
+- repeated stories are de-duplicated across morning sections in a deterministic order
 
 ## License
 
