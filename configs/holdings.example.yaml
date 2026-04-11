@@ -1,0 +1,18 @@
+profile: default_user
+as_of_date: 2026-04-11
+holdings:
+  - symbol: NVDA
+    weight_pct: 8.5
+    bucket: core
+  - symbol: MSFT
+    weight_pct: 7.0
+    bucket: core
+  - symbol: AAPL
+    weight_pct: 6.5
+    bucket: core
+  - symbol: AMZN
+    weight_pct: 5.0
+    bucket: core
+  - symbol: TSLA
+    weight_pct: 3.5
+    bucket: satellite

@@ -13,6 +13,7 @@ SECTION_HEADERS = {
     "macro": "MACRO CONTEXT",
     "themes": "TOP THEMES",
     "weekend_themes": "WEEKEND DEVELOPMENTS",
+    "portfolio_focus": "PORTFOLIO FOCUS",
     "sectors": "SECTOR SCAN",
     "earnings": "EARNINGS CALENDAR",
     "watchlist": "WATCHLIST",

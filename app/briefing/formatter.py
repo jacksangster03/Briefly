@@ -82,6 +82,10 @@ class TelegramFormatter:
         if themes:
             sections.append(themes)
 
+        portfolio_focus = self._format_portfolio_focus(briefing.portfolio_focus)
+        if portfolio_focus:
+            sections.append(portfolio_focus)
+
         if is_weekend:
             week_ahead = self._format_week_ahead(briefing)
             if week_ahead:
@@ -295,6 +299,24 @@ class TelegramFormatter:
                 else:
                     lines.append(f"  {evt.title[:120]}")
 
+        return "\n".join(lines)
+
+    def _format_portfolio_focus(self, events: list[NormalisedEvent]) -> str:
+        if not events:
+            return ""
+        lines = [f"<b>{SECTION_HEADERS['portfolio_focus']}</b>"]
+        for event in events[:5]:
+            lines.append(f"- <b>{event.title}</b>")
+            if event.summary and not self._summary_duplicates_title(event.summary, event.title):
+                lines.append(f"  {truncate(self._strip_cluster_suffix(event.summary), 180)}")
+            meta = self._build_event_meta(
+                event,
+                include_company=True,
+                include_time=True,
+                include_cluster=True,
+            )
+            if meta:
+                lines.append(f"  <i>{' | '.join(meta)}</i>")
         return "\n".join(lines)
 
     def _format_earnings(self, earnings: list[EarningsEvent]) -> str:

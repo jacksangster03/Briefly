@@ -21,6 +21,64 @@ class ProviderError(Exception):
     pass
 
 
+class _ProviderCircuitBreaker:
+    """Session-level circuit breaker for providers.
+
+    When a provider fails repeatedly within a single process, further calls
+    short-circuit immediately instead of burning the full retry + timeout
+    budget on every subsequent request. Keyed by provider name so that
+    multiple instances of the same provider (e.g. one in MarketDataService,
+    one in NewsDataService) share a single breaker state.
+
+    This is a process-level construct: state resets when the process exits,
+    so manual CLI runs get a clean slate each invocation. Within a
+    long-running scheduler process, breakers auto-close after
+    ``COOLDOWN_SECONDS`` to give the provider a chance to recover.
+    """
+
+    # provider name -> (opened_at_monotonic, consecutive_terminal_failures)
+    _state: dict[str, tuple[float, int]] = {}
+
+    TRIP_AFTER_FAILURES: int = 2
+    COOLDOWN_SECONDS: float = 300.0
+
+    @classmethod
+    def is_open(cls, name: str) -> bool:
+        entry = cls._state.get(name)
+        if not entry:
+            return False
+        opened_at, failures = entry
+        if failures < cls.TRIP_AFTER_FAILURES:
+            return False
+        if time.monotonic() - opened_at >= cls.COOLDOWN_SECONDS:
+            cls._state.pop(name, None)
+            return False
+        return True
+
+    @classmethod
+    def record_failure(cls, name: str) -> None:
+        entry = cls._state.get(name)
+        failures = (entry[1] if entry else 0) + 1
+        cls._state[name] = (time.monotonic(), failures)
+        if failures == cls.TRIP_AFTER_FAILURES:
+            logger.warning(
+                "%s circuit breaker tripped after %d consecutive failures; "
+                "short-circuiting further calls for up to %ds",
+                name, failures, int(cls.COOLDOWN_SECONDS),
+            )
+
+    @classmethod
+    def record_success(cls, name: str) -> None:
+        cls._state.pop(name, None)
+
+    @classmethod
+    def reset(cls, name: str | None = None) -> None:
+        if name is None:
+            cls._state.clear()
+        else:
+            cls._state.pop(name, None)
+
+
 class BaseProvider(ABC):
     """Abstract base for all data providers.
 
@@ -58,6 +116,15 @@ class BaseProvider(ABC):
         json: dict | None = None,
         **kwargs,
     ) -> Any:
+        if _ProviderCircuitBreaker.is_open(self.name):
+            logger.info(
+                "%s circuit breaker open; skipping %s without network call",
+                self.name, url,
+            )
+            raise ProviderError(
+                f"{self.name} circuit breaker open; skipping {url}"
+            )
+
         last_exc = None
         for attempt in range(1, self.max_retries + 1):
             start = time.monotonic()
@@ -86,6 +153,7 @@ class BaseProvider(ABC):
 
                 resp.raise_for_status()
                 self._log_health(url, latency_ms, status_code, True)
+                _ProviderCircuitBreaker.record_success(self.name)
                 return resp.json()
 
             except requests.exceptions.Timeout as exc:
@@ -106,6 +174,7 @@ class BaseProvider(ABC):
                 self._log_health(url, latency_ms, status_code, False, str(exc)[:500])
                 last_exc = exc
 
+        _ProviderCircuitBreaker.record_failure(self.name)
         raise ProviderError(
             f"{self.name} failed after {self.max_retries} attempts on {url}: {last_exc}"
         )

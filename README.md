@@ -1,171 +1,278 @@
 # market-briefing-bot
 
-Production-grade market intelligence messenger. Delivers a morning briefing, hourly intraday updates, and breaking alerts to your phone via Telegram.
+Market intelligence delivered to your phone. The bot generates a morning briefing, curated intraday updates, and breaking alerts, then sends them through Telegram with SQLite-backed state, YAML configuration, and provider fallback logic.
 
-## What it does
+The current product is no longer just a headline feed:
+- it deduplicates and clusters overlapping stories
+- it formats messages for mobile reading
+- it handles weekends differently from live weekday sessions
+- it supports watchlists and persisted portfolio holdings
+- it includes operational safeguards for flaky providers
 
-- **Morning briefing** before US market open: market setup, macro context, top themes, sector scan, earnings calendar, watchlist
-- **Hourly intraday updates** during market hours: only new, material developments (no spam, no repeats)
-- **Breaking alerts** for high-threshold events: earnings shocks, FDA decisions, M&A, macro surprises
+## Current capabilities
 
-Messages are optimised for phone reading: numbers first, concise, no hype, clear sections.
+- **Morning briefing**
+  - market setup, macro context, top themes, sector scan, watchlist, and a portfolio-first section
+- **Intraday updates**
+  - only new, material developments above threshold
+  - weekend-aware formatting when cash equity markets are closed
+- **Breaking alerts**
+  - high-threshold event checks with clearer market context
+- **Portfolio-aware intelligence**
+  - holdings import from YAML or CSV
+  - holdings persistence in SQLite
+  - holdings-aware relevance scoring and intraday tie-breaks
+- **Operational resilience**
+  - quote fallback to `yfinance`
+  - fail-fast behavior for degraded quote/news paths
+  - provider circuit breaker to prevent repeated timeout stalls in one process
+- **Manual inspection mode**
+  - `--show-output` prints the rendered Telegram payload to the terminal even on live runs
 
 ## Quick start
 
 ```bash
-# Clone and install
-git clone https://github.com/your-user/market-briefing-bot.git
+git clone https://github.com/jacksangster03/market-briefing-bot.git
 cd market-briefing-bot
 pip install -e ".[dev]"
 
-# Configure
 cp .env.example .env
-# Edit .env with your API keys (at minimum: FINNHUB_API_KEY)
-
 cp configs/user_profile.example.yaml configs/user_profile.yaml
 cp configs/watchlists.example.yaml configs/watchlists.yaml
-# Customise your profile and watchlist
 
-# Initialise database
 make setup
-
-# Test run (dry run, output to console)
-DRY_RUN=true python -m app.cli morning
-
-# Run tests
 make test
 ```
 
-## Required API keys
+At minimum, configure:
+- `FINNHUB_API_KEY`
+- `FRED_API_KEY`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
 
-| Provider | Key | Free tier | Purpose |
-|---|---|---|---|
-| **Finnhub** | `FINNHUB_API_KEY` | 60 calls/min | Quotes, news, earnings calendar |
-| **FRED** | `FRED_API_KEY` | Unlimited | Treasury yields, macro indicators |
-| **SEC EDGAR** | `SEC_USER_AGENT` | No key needed | Company filings (8-K, 10-K, etc.) |
-
-## Optional API keys
-
-| Provider | Key | Purpose | Degrades if missing |
-|---|---|---|---|
-| NewsAPI | `NEWSAPI_KEY` | Broad headline enrichment | Fewer news sources |
-| Telegram | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Message delivery | Must use dry-run mode |
-| Email | `EMAIL_*` vars | Backup delivery channel | No email fallback |
-| Polygon | `POLYGON_API_KEY` | Premium market data | Not used in V1 |
-| Alpaca | `ALPACA_API_KEY` | Paper trading | Trading module disabled |
-
-## Architecture
-
-```
-Providers (Finnhub, FRED, SEC, NewsAPI, yfinance)
-    |
-Data Services (market, news, macro) with fallback chains
-    |
-Processing Pipeline (normalise, dedupe, score, rank)
-    |
-Briefing Generators (morning, intraday, breaking)
-    |
-Formatter (Telegram-optimised, mobile-first)
-    |
-Messaging (Telegram, Email, pluggable Slack/Discord)
-    |
-SQLite persistence + YAML config (user profile, sectors, watchlists)
-```
-
-### Key design decisions
-
-- **Provider-agnostic**: each data service has a fallback chain. Finnhub primary, yfinance fallback for quotes.
-- **Free-first**: runs meaningfully with only free-tier API keys.
-- **Personalisation via config**: user profile, sector weights, watchlists, delivery preferences are all YAML. No hardcoded preferences in business logic.
-- **Multi-dimensional scoring**: source credibility, event type importance, personal relevance, novelty, and factual confidence are tracked separately, then combined into a final score.
-- **Deduplication pipeline**: exact hash, normalised headline matching, ticker + time window clustering, already-sent check against DB.
-
-## CLI commands
+## Core commands
 
 ```bash
-python -m app.cli morning      # Run morning briefing
-python -m app.cli intraday     # Run one intraday update
-python -m app.cli breaking     # Run one breaking alert check
-python -m app.cli scheduler    # Start full scheduler
-python -m app.cli init-db      # Initialise database
-python -m app.cli status       # Show config status
-python -m app.cli quote NVDA   # Fetch a single quote
-python -m app.cli news         # Fetch latest market news
+python -m app.cli morning
+python -m app.cli intraday
+python -m app.cli breaking
+python -m app.cli scheduler
+python -m app.cli init-db
+python -m app.cli status
+python -m app.cli quote NVDA
+python -m app.cli news
 ```
 
-Add `--dry-run` to any command to preview output without sending messages.
+### Dry-run and output inspection
+
+Use `--dry-run` to avoid live delivery:
+
+```bash
+python -m app.cli --dry-run morning
+python -m app.cli --dry-run intraday
+python -m app.cli --dry-run breaking
+```
+
+Use `--show-output` to always print the rendered Telegram payload to the terminal:
+
+```bash
+python -m app.cli --show-output --dry-run morning
+python -m app.cli --show-output --dry-run intraday
+python -m app.cli --show-output --dry-run breaking
+```
+
+This is useful when:
+- you want to inspect the exact rendered message locally
+- you want live delivery **and** terminal output during testing
+- you are debugging scoring/formatter behavior without relying on Telegram history
+
+## Portfolio holdings workflow
+
+Example holdings config:
+
+- [configs/holdings.example.yaml](/Users/jack/market-briefing-bot/configs/holdings.example.yaml)
+
+Import holdings into the SQLite state store:
+
+```bash
+python -m app.cli import-holdings --file configs/holdings.example.yaml --profile default_user
+```
+
+Supported formats:
+- YAML (`.yaml`, `.yml`)
+- CSV (`.csv`)
+
+Once imported, later morning/intraday runs load holdings automatically and use them for:
+- direct holding relevance boosts
+- sector exposure read-through
+- `PORTFOLIO FOCUS` selection in the morning briefing
+- intraday prioritization when two stories are close in quality/score
+
+## Provider behavior and resilience
+
+### Normal provider flow
+
+- **Finnhub**
+  - primary source for quotes, market news, company news, and earnings calendar
+- **NewsAPI**
+  - headline enrichment / fallback source
+- **FRED**
+  - macro indicators and Treasury context
+- **SEC EDGAR**
+  - filings
+- **yfinance**
+  - quote fallback when primary quote data is unavailable
+
+### Degraded-provider behavior
+
+The bot now includes several protections to keep runs responsive:
+
+- quote fetches use a tighter timeout/retry budget than news fetches
+- quote batches abort early after consecutive misses instead of timing out symbol-by-symbol for the whole universe
+- a session-level provider circuit breaker short-circuits repeated calls after consecutive terminal failures
+- `yfinance` fills quote gaps when Finnhub quotes are unhealthy
+
+This matters most for:
+- manual testing from terminal
+- live morning runs during provider incidents
+- long-running scheduler sessions that would otherwise keep burning timeout budget on every cycle
 
 ## Configuration
 
-### User profile (`configs/user_profile.yaml`)
+### Environment (`.env`)
 
-Controls timezone, geographic coverage weights, sector preferences, delivery schedule, and message style.
+Important settings include:
+- `FINNHUB_API_KEY`
+- `NEWSAPI_KEY`
+- `FRED_API_KEY`
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `PROVIDER_TIMEOUT`
+- `PROVIDER_MAX_RETRIES`
 
-### Watchlists (`configs/watchlists.yaml`)
+General runtime settings are defined in:
+- [app/settings.py](/Users/jack/market-briefing-bot/app/settings.py)
 
-Three tiers: primary (highest boost), secondary, monitor. Tickers on your watchlist get boosted relevance in all briefings and a dedicated section in the morning brief.
+### YAML config
 
-### Sectors (`configs/sectors.yaml`)
+- user profile:
+  - [configs/user_profile.example.yaml](/Users/jack/market-briefing-bot/configs/user_profile.example.yaml)
+- watchlists:
+  - [configs/watchlists.example.yaml](/Users/jack/market-briefing-bot/configs/watchlists.example.yaml)
+- schedules:
+  - [configs/schedules.yaml](/Users/jack/market-briefing-bot/configs/schedules.yaml)
+- sectors:
+  - [configs/sectors.yaml](/Users/jack/market-briefing-bot/configs/sectors.yaml)
+- alert thresholds:
+  - [configs/alert_rules.yaml](/Users/jack/market-briefing-bot/configs/alert_rules.yaml)
+- holdings:
+  - [configs/holdings.example.yaml](/Users/jack/market-briefing-bot/configs/holdings.example.yaml)
 
-Sector definitions with representative ETFs and key company tickers. Used for the sector scan section and event-to-sector mapping.
+## Product architecture
 
-### Schedules (`configs/schedules.yaml`)
+```text
+Providers
+  Finnhub / NewsAPI / FRED / SEC / yfinance
 
-Morning briefing time, intraday update window, breaking alert polling interval.
+Data services
+  market_data / news_data / macro_data
 
-## Scoring system
+Processing pipeline
+  cleaners -> ticker resolution -> sector enrichment -> dedupe
+  -> credibility -> personal relevance -> clustering -> scoring
 
-Every event is scored across five dimensions:
+Briefing generation
+  morning / intraday / breaking
 
-1. **Source credibility**: SEC filings (0.95) > Finnhub (0.75) > NewsAPI (0.55) > social (0.25)
-2. **Event type weight**: earnings/FDA/M&A (0.90+) > filings (0.60-0.80) > general news (0.45)
-3. **Personal relevance**: sector match, watchlist match, region match
-4. **Novelty**: whether the user has already seen this event
-5. **Factual confidence**: set by source tier, adjusted by corroboration
+Formatting + delivery
+  TelegramFormatter -> Telegram / Email
 
-The composite `final_score` determines inclusion in briefings and alert delivery.
+Persistence
+  SQLite for sent messages, provider health, events, market snapshots, holdings
+```
 
-## Docker
+Key code areas:
+- [app/main.py](/Users/jack/market-briefing-bot/app/main.py)
+- [app/processing/pipeline.py](/Users/jack/market-briefing-bot/app/processing/pipeline.py)
+- [app/processing/relevance_scoring.py](/Users/jack/market-briefing-bot/app/processing/relevance_scoring.py)
+- [app/briefing/formatter.py](/Users/jack/market-briefing-bot/app/briefing/formatter.py)
+- [app/portfolio/importer.py](/Users/jack/market-briefing-bot/app/portfolio/importer.py)
+- [app/portfolio/service.py](/Users/jack/market-briefing-bot/app/portfolio/service.py)
+
+## Testing
+
+Run the full suite:
 
 ```bash
-# Full scheduler
-docker compose up -d
-
-# One-shot morning briefing
-docker compose run morning
+make test
 ```
 
-## Project structure
+Useful focused commands:
 
-```
-market-briefing-bot/
-  app/
-    main.py              # Top-level orchestration
-    cli.py               # Click CLI
-    settings.py          # pydantic-settings config
-    scheduler.py         # APScheduler setup
-    db/                  # SQLAlchemy models and session
-    schemas/             # Pydantic data models
-    data_sources/        # Provider implementations
-      providers/         # Finnhub, FRED, SEC, NewsAPI, yfinance
-    processing/          # Dedupe, scoring, cleaning
-    briefing/            # Morning/intraday/breaking generators + formatter
-    messaging/           # Telegram, Email delivery
-    personalization/     # User profile loader
-    universe/            # Sector/ticker universe
-    tests/               # pytest suite
-  configs/               # YAML configuration files
-  scripts/               # Standalone runner scripts
-  data/                  # SQLite DB, caches, raw data
+```bash
+python -m pytest app/tests/test_portfolio_phase3.py -q
+python -m pytest app/tests/test_market_data.py -q
+python -m pytest app/tests/test_show_output.py -q
+python -m pytest app/tests/test_circuit_breaker.py -q
 ```
 
-## Roadmap
+The test suite currently covers:
+- scoring and ranking
+- formatting and weekend presentation
+- scheduler window behavior
+- holdings import/persistence/scoring
+- manual `--show-output` mode
+- market-data fallback behavior
+- provider circuit breaker behavior
 
-- **Phase 1** (current): Morning briefing, intraday updates, breaking alerts, free-first providers, Telegram delivery, SQLite
-- **Phase 2**: Improved dedup (semantic similarity), event clustering, source credibility refinement, better formatting
-- **Phase 3**: AI summariser abstraction, portfolio tracker, watchlist personalisation, region-aware ranking
-- **Phase 4**: Paper trading module, signal engine, risk manager, backtesting scaffold
+## Typical workflows
 
-## Licence
+### 1. Preview a morning briefing locally
+
+```bash
+python -m app.cli --show-output --dry-run morning
+```
+
+### 2. Send a real morning briefing and still inspect terminal output
+
+```bash
+python -m app.cli --show-output morning
+```
+
+### 3. Import holdings, then preview the portfolio-aware morning brief
+
+```bash
+python -m app.cli import-holdings --file configs/holdings.example.yaml --profile default_user
+python -m app.cli --show-output --dry-run morning
+```
+
+### 4. Start the live scheduler
+
+```bash
+python -m app.cli scheduler
+```
+
+The scheduler only runs while that process is alive. `Ctrl+C` stops automatic sends.
+
+## Current phase
+
+The repo is now beyond basic plumbing:
+
+- **Phase 2** is materially complete
+  - better formatting
+  - ticker/entity trust improvements
+  - weekend mode
+  - breaking schedule precision
+  - cleaner alert presentation
+- **Phase 3 backend foundation** is now in place
+  - holdings import and persistence
+  - portfolio-aware relevance
+  - `PORTFOLIO FOCUS`
+  - intraday prioritization
+  - operational debugging tools like `--show-output`
+
+The biggest remaining quality gap is still editorial/source quality in some surfaced headlines, not the core plumbing.
+
+## License
 
 MIT

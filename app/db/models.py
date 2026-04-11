@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.types import JSON
 
 from app.db.base import Base
@@ -111,3 +111,23 @@ class MarketSnapshot(Base):
     previous_close = Column(Float, nullable=True)
     snapshot_type = Column(String(30), default="quote")  # quote | sector_etf | macro
     timestamp = Column(DateTime, default=_utcnow)
+
+
+class PortfolioHolding(Base):
+    """Persisted portfolio holdings used for personalization."""
+
+    __tablename__ = "portfolio_holdings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    weight_pct = Column(Float, nullable=True)
+    shares = Column(Float, nullable=True)
+    avg_cost = Column(Float, nullable=True)
+    account = Column(String(80), nullable=True)
+    bucket = Column(String(40), nullable=True)
+    sector_override = Column(String(40), nullable=True)
+    as_of_date = Column(Date, nullable=True)
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)

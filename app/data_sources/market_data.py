@@ -15,11 +15,17 @@ class MarketDataService:
     """Fetches quotes from Finnhub (primary) with yfinance fallback."""
 
     def __init__(self, settings: Settings):
+        # Quote calls are numerous (indices + sectors + watchlist) and each
+        # Finnhub request is per-symbol. Keep quote timeout/retries tighter
+        # than news-fetch settings so one flaky endpoint doesn't stall the
+        # whole briefing cycle for many minutes.
+        quote_timeout = max(5, min(settings.provider_timeout, 12))
+        quote_retries = 1
         self.finnhub = (
             FinnhubProvider(
                 api_key=settings.finnhub_api_key,
-                timeout=settings.provider_timeout,
-                max_retries=settings.provider_max_retries,
+                timeout=quote_timeout,
+                max_retries=quote_retries,
             )
             if settings.finnhub_configured
             else None

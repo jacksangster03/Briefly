@@ -35,6 +35,12 @@ def compute_personal_relevance(
     primary_set = set(t.upper() for t in profile.watchlist_primary)
     secondary_set = set(t.upper() for t in profile.watchlist_secondary)
     monitor_set = set(t.upper() for t in profile.watchlist_monitor)
+    portfolio_set = set(t.upper() for t in profile.portfolio_symbols)
+    portfolio_weights = profile.portfolio_weight_by_ticker
+    bucket_by_ticker = {
+        holding.symbol: (holding.bucket or "")
+        for holding in profile.portfolio_holdings
+    }
 
     for evt in events:
         scores = []
@@ -58,6 +64,36 @@ def compute_personal_relevance(
                 watchlist_score = max(watchlist_score, 0.50)
         if watchlist_score > 0:
             scores.append(watchlist_score)
+
+        # Portfolio relevance: direct position hits outrank watchlist-only
+        # relevance; sector read-through is a secondary signal.
+        portfolio_score = 0.0
+        for ticker in evt.tickers:
+            t = ticker.upper()
+            if t not in portfolio_set:
+                continue
+            weight = portfolio_weights.get(t, 0.0)
+            direct = 0.82
+            if weight >= 6.0:
+                direct = 1.0
+            elif weight >= 3.0:
+                direct = 0.92
+            elif weight > 0:
+                direct = 0.86
+            bucket = bucket_by_ticker.get(t, "")
+            if bucket == "core":
+                direct = min(1.0, direct + 0.04)
+            elif bucket == "satellite":
+                direct = max(0.0, direct - 0.06)
+            portfolio_score = max(portfolio_score, direct)
+
+        if portfolio_score == 0 and evt.sectors and profile.portfolio_sector_weights:
+            concentration = max(profile.portfolio_sector_weights.get(sector, 0.0) for sector in evt.sectors)
+            if concentration > 0:
+                portfolio_score = min(0.75, 0.40 + (0.50 * concentration))
+
+        if portfolio_score > 0:
+            scores.append(portfolio_score)
 
         # Region relevance
         if evt.regions:

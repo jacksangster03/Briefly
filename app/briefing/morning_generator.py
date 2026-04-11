@@ -37,6 +37,7 @@ MACRO_BLEED_TERMS = (
     "middle east",
     "war",
 )
+MAX_PORTFOLIO_FOCUS = 5
 
 
 class MorningBriefingGenerator:
@@ -98,13 +99,18 @@ class MorningBriefingGenerator:
 
         # 7. Assemble sections
         briefing.top_themes = build_top_themes(scored, max_themes=self.rules.max_themes)
+        briefing.portfolio_focus = self._build_portfolio_focus(scored)
         briefing.sector_scan = self._build_sector_scan(scored)
         briefing.earnings_calendar = self._fetch_earnings()
         briefing.watchlist_events = self._filter_watchlist_events(scored)
         briefing.watchlist_quotes = self._fetch_watchlist_quotes()
-        briefing.events_sent = len(briefing.top_themes) + sum(
-            len(s.top_events) for s in briefing.sector_scan
-        ) + len(briefing.watchlist_events)
+        sent_ids: set[str] = set()
+        for event in briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus:
+            sent_ids.add(event.cluster_id or event.content_hash or event.event_id)
+        for snapshot in briefing.sector_scan:
+            for event in snapshot.top_events:
+                sent_ids.add(event.cluster_id or event.content_hash or event.event_id)
+        briefing.events_sent = len(sent_ids)
 
         logger.info(
             "Morning briefing ready: %d fetched, %d deduped, %d themes, %d sectors, %d watchlist",
@@ -204,6 +210,47 @@ class MorningBriefingGenerator:
         if not self.news_svc.finnhub or not self.news_svc.finnhub.is_configured():
             return []
         return self.news_svc.finnhub.get_earnings_calendar(days_ahead=1)[: self.rules.max_earnings]
+
+    def _build_portfolio_focus(self, scored_events: list[NormalisedEvent]) -> list[NormalisedEvent]:
+        """Select concise portfolio-first items for the morning briefing."""
+        if not self.profile.has_portfolio:
+            return []
+
+        portfolio_symbols = set(self.profile.portfolio_symbols)
+        concentrated_sectors = {
+            sector
+            for sector, weight in self.profile.portfolio_sector_weights.items()
+            if weight >= 0.2
+        }
+        selected: list[NormalisedEvent] = []
+        seen_tracking_ids: set[str] = set()
+
+        def _push(event: NormalisedEvent) -> None:
+            tracking_id = event.cluster_id or event.content_hash or event.event_id
+            if tracking_id in seen_tracking_ids:
+                return
+            seen_tracking_ids.add(tracking_id)
+            selected.append(event)
+
+        for event in scored_events:
+            if len(selected) >= MAX_PORTFOLIO_FOCUS:
+                break
+            if not is_actionable_event(event):
+                continue
+            if any(ticker in portfolio_symbols for ticker in event.tickers):
+                _push(event)
+
+        for event in scored_events:
+            if len(selected) >= MAX_PORTFOLIO_FOCUS:
+                break
+            if not is_actionable_event(event):
+                continue
+            if event.final_score < 0.62:
+                continue
+            if concentrated_sectors and any(sector in concentrated_sectors for sector in event.sectors):
+                _push(event)
+
+        return selected
 
     def _filter_watchlist_events(self, scored: list[NormalisedEvent]) -> list[NormalisedEvent]:
         """Filter events relevant to the user's watchlist."""

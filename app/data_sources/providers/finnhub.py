@@ -61,10 +61,23 @@ class FinnhubProvider(BaseProvider):
     def get_quotes(self, symbols: list[str]) -> list[QuoteData]:
         """Fetch quotes for a list of symbols. Skips failures."""
         results = []
+        consecutive_misses = 0
         for sym in symbols:
             quote = self.get_quote(sym)
             if quote:
                 results.append(quote)
+                consecutive_misses = 0
+                continue
+
+            consecutive_misses += 1
+            # Fail fast when endpoint appears unhealthy for the whole batch.
+            # This prevents N symbols from each waiting on timeout/retry.
+            if not results and consecutive_misses >= 2:
+                logger.warning(
+                    "Finnhub quote endpoint appears unhealthy; aborting batch after %d consecutive misses",
+                    consecutive_misses,
+                )
+                break
         return results
 
     # -- Market news ----------------------------------------------------------

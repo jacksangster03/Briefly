@@ -20,6 +20,10 @@ class TelegramMessenger(BaseMessenger):
         self.token = settings.telegram_bot_token
         self.chat_id = settings.telegram_chat_id
         self.dry_run = settings.dry_run
+        # When the top-level pipeline prints messages via --show-output,
+        # this messenger skips its own dry-run echo so the terminal
+        # doesn't show the same payload twice.
+        self.show_output = settings.show_output
 
     def is_configured(self) -> bool:
         return bool(self.token and self.chat_id)
@@ -27,14 +31,15 @@ class TelegramMessenger(BaseMessenger):
     def send(self, text: str, parse_mode: str = "HTML") -> bool:
         if self.dry_run:
             logger.info("[DRY RUN] Would send Telegram message (%d chars)", len(text))
-            print(f"\n{'='*60}")
-            print("[DRY RUN] Telegram message:")
-            print(f"{'='*60}")
-            # Strip HTML tags for console preview
-            import re
-            preview = re.sub(r"<[^>]+>", "", text)
-            print(preview)
-            print(f"{'='*60}\n")
+            if not self.show_output:
+                print(f"\n{'='*60}")
+                print("[DRY RUN] Telegram message:")
+                print(f"{'='*60}")
+                # Strip HTML tags for console preview
+                import re
+                preview = re.sub(r"<[^>]+>", "", text)
+                print(preview)
+                print(f"{'='*60}\n")
             return True
 
         if not self.is_configured():

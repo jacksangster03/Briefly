@@ -16,11 +16,19 @@ class NewsDataService:
     """Aggregates news from Finnhub, NewsAPI, and SEC EDGAR."""
 
     def __init__(self, settings: Settings):
+        # Finnhub's /news endpoint has been intermittently unresponsive; the
+        # default 30s * 2-retry budget can stall a manual run for 2 minutes
+        # before the NewsAPI/SEC fallbacks get to contribute. Bound the
+        # worst-case wait to ~15s so the briefing cycle stays responsive
+        # under provider instability, while keeping a floor so a single
+        # slow round-trip still has room to succeed.
+        news_timeout = max(10, min(settings.provider_timeout, 15))
+        news_retries = 1
         self.finnhub = (
             FinnhubProvider(
                 api_key=settings.finnhub_api_key,
-                timeout=settings.provider_timeout,
-                max_retries=settings.provider_max_retries,
+                timeout=news_timeout,
+                max_retries=news_retries,
             )
             if settings.finnhub_configured
             else None
@@ -62,13 +70,38 @@ class NewsDataService:
         return all_events
 
     def fetch_company_news(self, symbols: list[str], days_back: int = 1) -> list[NormalisedEvent]:
-        """Fetch company-specific news for a list of tickers."""
+        """Fetch company-specific news for a list of tickers.
+
+        When the Finnhub ``/company-news`` endpoint is unhealthy, every
+        ticker in a 20-wide watchlist would otherwise burn a full retry
+        budget before returning, turning a manual run into a multi-minute
+        stall. Mirror the ``get_quotes`` pattern and abort the batch once
+        two consecutive symbols come back empty without ever succeeding.
+        Symbols that have already produced news stay un-penalised so a
+        single slow day for one ticker does not truncate the batch.
+        """
         all_events: list[NormalisedEvent] = []
 
         if self.finnhub and self.finnhub.is_configured():
+            consecutive_empty = 0
+            any_hit = False
             for symbol in symbols:
                 events = self.finnhub.get_company_news(symbol, days_back=days_back)
-                all_events.extend(events)
+                if events:
+                    all_events.extend(events)
+                    consecutive_empty = 0
+                    any_hit = True
+                    continue
+
+                consecutive_empty += 1
+                if not any_hit and consecutive_empty >= 2:
+                    logger.warning(
+                        "Finnhub company-news endpoint appears unhealthy; "
+                        "aborting batch after %d consecutive misses (remaining: %d)",
+                        consecutive_empty,
+                        max(0, len(symbols) - symbols.index(symbol) - 1),
+                    )
+                    break
 
         logger.info("Company news for %d tickers: %d items", len(symbols), len(all_events))
         return all_events

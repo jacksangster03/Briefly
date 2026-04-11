@@ -52,6 +52,7 @@ class MorningBriefing(BaseModel):
     market_setup: MarketSetup = Field(default_factory=MarketSetup)
     macro_context: list[MacroDataPoint] = Field(default_factory=list)
     top_themes: list[NormalisedEvent] = Field(default_factory=list)
+    portfolio_focus: list[NormalisedEvent] = Field(default_factory=list)
     sector_scan: list[SectorSnapshot] = Field(default_factory=list)
     earnings_calendar: list[EarningsEvent] = Field(default_factory=list)
     watchlist_events: list[NormalisedEvent] = Field(default_factory=list)

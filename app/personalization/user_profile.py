@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from app.logger import get_logger
+from app.schemas.portfolio import PortfolioHolding
 from app.settings import Settings
 
 logger = get_logger("user_profile")
@@ -30,6 +31,8 @@ class UserProfile:
         watchlist_primary: list[str] | None = None,
         watchlist_secondary: list[str] | None = None,
         watchlist_monitor: list[str] | None = None,
+        portfolio_holdings: list[PortfolioHolding] | None = None,
+        portfolio_sector_weights: dict[str, float] | None = None,
     ):
         self.name = name
         self.timezone = timezone
@@ -44,11 +47,53 @@ class UserProfile:
         self.watchlist_primary = watchlist_primary or []
         self.watchlist_secondary = watchlist_secondary or []
         self.watchlist_monitor = watchlist_monitor or []
+        self.portfolio_holdings = portfolio_holdings or []
+        self.portfolio_sector_weights = portfolio_sector_weights or {}
 
     @property
     def all_watchlist_tickers(self) -> list[str]:
         """All tickers across primary, secondary, and monitor watchlists."""
         return self.watchlist_primary + self.watchlist_secondary + self.watchlist_monitor
+
+    @property
+    def portfolio_symbols(self) -> list[str]:
+        """Unique held symbols, ordered by descending position weight when available."""
+        weighted = sorted(
+            self.portfolio_holdings,
+            key=lambda p: (p.weight_pct is not None, p.weight_pct or 0.0),
+            reverse=True,
+        )
+        symbols: list[str] = []
+        seen: set[str] = set()
+        for position in weighted:
+            if position.symbol in seen:
+                continue
+            seen.add(position.symbol)
+            symbols.append(position.symbol)
+        return symbols
+
+    @property
+    def portfolio_weight_by_ticker(self) -> dict[str, float]:
+        """Aggregated position weights by ticker (percent, not fraction)."""
+        totals: dict[str, float] = {}
+        for position in self.portfolio_holdings:
+            if position.weight_pct is None:
+                continue
+            totals[position.symbol] = totals.get(position.symbol, 0.0) + position.weight_pct
+        return totals
+
+    def portfolio_top_positions(self, limit: int = 5) -> list[PortfolioHolding]:
+        """Top positions by configured weight."""
+        ranked = sorted(
+            self.portfolio_holdings,
+            key=lambda p: (p.weight_pct is not None, p.weight_pct or 0.0),
+            reverse=True,
+        )
+        return ranked[:limit]
+
+    @property
+    def has_portfolio(self) -> bool:
+        return bool(self.portfolio_holdings)
 
     @property
     def morning_brief_time(self) -> str:
@@ -124,11 +169,98 @@ def load_user_profile(settings: Settings) -> UserProfile:
         profile.watchlist_secondary = wl.get("secondary", [])
         profile.watchlist_monitor = wl.get("monitor", [])
 
+    _load_portfolio_context(profile, configs_dir)
+
     logger.info(
-        "Loaded profile '%s' (tz=%s, %d watchlist tickers, %d sectors)",
+        "Loaded profile '%s' (tz=%s, %d watchlist tickers, %d sectors, %d holdings)",
         profile.name,
         profile.timezone,
         len(profile.all_watchlist_tickers),
         len(profile.sector_weights),
+        len(profile.portfolio_holdings),
     )
     return profile
+
+
+def _load_portfolio_context(profile: UserProfile, configs_dir: Path) -> None:
+    """Load persisted holdings and derive simple portfolio exposure context."""
+    try:
+        from app.portfolio.importer import load_holdings_file
+        from app.portfolio.service import load_active_holdings, replace_holdings_snapshot
+    except Exception:
+        logger.debug("Portfolio modules unavailable", exc_info=True)
+        return
+
+    try:
+        holdings = load_active_holdings(profile.name)
+    except Exception:
+        logger.debug("No persisted holdings available yet", exc_info=True)
+        holdings = []
+    if not holdings:
+        bootstrap_path = configs_dir / "holdings.yaml"
+        if bootstrap_path.exists():
+            try:
+                snapshot = load_holdings_file(
+                    bootstrap_path,
+                    default_profile=profile.name,
+                )
+                if snapshot.holdings:
+                    replace_holdings_snapshot(
+                        profile_name=snapshot.profile_name or profile.name,
+                        holdings=snapshot.holdings,
+                        as_of_date=snapshot.as_of_date,
+                    )
+                    holdings = load_active_holdings(snapshot.profile_name or profile.name)
+                    logger.info(
+                        "Bootstrapped %d holdings from %s",
+                        len(holdings),
+                        bootstrap_path.name,
+                    )
+            except Exception:
+                logger.warning("Failed to bootstrap holdings from %s", bootstrap_path, exc_info=True)
+
+    profile.portfolio_holdings = holdings
+    profile.portfolio_sector_weights = _derive_portfolio_sector_weights(holdings, configs_dir)
+
+
+def _derive_portfolio_sector_weights(
+    holdings: list[PortfolioHolding],
+    configs_dir: Path,
+) -> dict[str, float]:
+    """Infer portfolio sector concentration from holdings + sectors config."""
+    if not holdings:
+        return {}
+
+    sectors_path = configs_dir / "sectors.yaml"
+    if not sectors_path.exists():
+        return {}
+
+    with open(sectors_path) as handle:
+        cfg = yaml.safe_load(handle) or {}
+
+    ticker_to_sector: dict[str, str] = {}
+    for sector_key, data in (cfg.get("sectors") or {}).items():
+        for ticker in data.get("key_names", []):
+            ticker_to_sector[ticker.upper()] = sector_key
+
+    weight_values = [position.weight_pct for position in holdings if position.weight_pct is not None]
+    use_equal_weights = not weight_values
+
+    sector_totals: dict[str, float] = {}
+    for position in holdings:
+        sector = position.sector_override or ticker_to_sector.get(position.symbol)
+        if not sector:
+            continue
+        if use_equal_weights:
+            weight = 1.0
+        else:
+            weight = position.weight_pct or 0.0
+        sector_totals[sector] = sector_totals.get(sector, 0.0) + weight
+
+    total = sum(sector_totals.values())
+    if total <= 0:
+        return {}
+    return {
+        sector: weight / total
+        for sector, weight in sector_totals.items()
+    }

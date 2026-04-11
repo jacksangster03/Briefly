@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     dry_run: bool = True
     allow_live_trading: bool = False
     log_level: str = "INFO"
+    # Manual/test helper: when True, the delivery pipeline prints the
+    # rendered message payload to the terminal. Independent of dry_run so
+    # live sends can also be inspected locally. Set via CLI --show-output.
+    show_output: bool = False
 
     # -- Paths ----------------------------------------------------------------
     configs_dir: str = str(PROJECT_ROOT / "configs")

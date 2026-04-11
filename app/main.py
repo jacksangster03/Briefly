@@ -8,6 +8,7 @@ Each function here represents a complete workflow:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from app.briefing.formatter import TelegramFormatter
@@ -52,13 +53,36 @@ def _get_messengers(settings: Settings, profile: UserProfile):
     return messengers
 
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _print_terminal_output(messages: list[str], msg_type: str) -> None:
+    """Print rendered Telegram payloads to stdout for manual inspection.
+
+    Strips HTML tags so the terminal view matches what a reader would see,
+    and labels each chunk so multi-message briefings stay readable.
+    """
+    banner = "=" * 60
+    print(f"\n{banner}")
+    print(f"[OUTPUT] {msg_type} ({len(messages)} message{'s' if len(messages) != 1 else ''})")
+    print(banner)
+    for idx, msg in enumerate(messages, 1):
+        if len(messages) > 1:
+            print(f"\n--- part {idx}/{len(messages)} ---")
+        print(_HTML_TAG_RE.sub("", msg))
+    print(f"{banner}\n")
+
+
 def _deliver(
     messengers,
     messages: list[str],
     msg_type: str,
     events: list | None = None,
+    settings: Settings | None = None,
 ):
     """Deliver messages via all configured channels and record to DB."""
+    if settings and settings.show_output:
+        _print_terminal_output(messages, msg_type)
     for messenger in messengers:
         success = messenger.send_messages(messages)
         is_dry_run = bool(getattr(messenger, "dry_run", False))
@@ -117,7 +141,7 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
     messengers = _get_messengers(settings, profile)
     display_events = []
     seen_tracking_ids = set()
-    for evt in briefing.top_themes + briefing.watchlist_events + [
+    for evt in briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus + [
         sector_evt
         for sector in briefing.sector_scan
         for sector_evt in sector.top_events
@@ -127,7 +151,7 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
             continue
         seen_tracking_ids.add(tracking_id)
         display_events.append(evt)
-    _deliver(messengers, messages, "morning_brief", display_events)
+    _deliver(messengers, messages, "morning_brief", display_events, settings=settings)
 
     logger.info(
         "Morning briefing delivered: %d messages, %d events",
@@ -159,7 +183,7 @@ def run_intraday_update(settings: Settings | None = None) -> None:
     messages = formatter.format_intraday_update(update)
 
     messengers = _get_messengers(settings, profile)
-    _deliver(messengers, messages, "intraday", update.new_events)
+    _deliver(messengers, messages, "intraday", update.new_events, settings=settings)
 
     logger.info(
         "Intraday update: %d fetched, %d deduped, %d sent",
@@ -197,7 +221,7 @@ def run_breaking_check(settings: Settings | None = None) -> None:
 
     for alert in alerts:
         messages = formatter.format_breaking_alert(alert)
-        _deliver(messengers, messages, "breaking", [alert.event])
+        _deliver(messengers, messages, "breaking", [alert.event], settings=settings)
         logger.info(
             "Breaking alert sent: %s (score=%.3f)",
             alert.event.title[:60],

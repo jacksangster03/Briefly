@@ -13,6 +13,7 @@ from app.personalization.delivery_rules import load_alert_rules
 from app.personalization.user_profile import UserProfile
 from app.processing.pipeline import process_event_stream, select_intraday_events
 from app.schemas.briefings import IntradayUpdate, session_mode_for
+from app.schemas.events import NormalisedEvent
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
 
@@ -55,13 +56,14 @@ class IntradayGenerator:
             self.settings,
             sector_lookup=self.universe.sectors_for_ticker,
         )
+        prioritized = self._prioritize_for_portfolio(scored)
         effective_min_score = min_score if min_score is not None else self.rules.min_final_score
         effective_max_events = max_events if max_events is not None else self.rules.max_events_per_update
         if effective_min_score != self.rules.min_final_score:
             self.rules.min_final_score = effective_min_score
         if effective_max_events != self.rules.max_events_per_update:
             self.rules.max_events_per_update = effective_max_events
-        top = select_intraday_events(scored, self.rules)
+        top = select_intraday_events(prioritized, self.rules)
 
         # Market snapshot
         snapshot = self.market_svc.get_quotes(self.universe.all_index_symbols[:4])
@@ -86,3 +88,29 @@ class IntradayGenerator:
             fetched, len(scored), len(top),
         )
         return update
+
+    def _prioritize_for_portfolio(self, events: list[NormalisedEvent]) -> list[NormalisedEvent]:
+        """Apply a small portfolio-aware tie-break boost before selection."""
+        if not self.profile.has_portfolio:
+            return events
+
+        portfolio_symbols = set(self.profile.portfolio_symbols)
+        weight_by_ticker = self.profile.portfolio_weight_by_ticker
+        concentrated_sectors = {
+            sector
+            for sector, weight in self.profile.portfolio_sector_weights.items()
+            if weight >= 0.2
+        }
+
+        def _priority(event: NormalisedEvent) -> float:
+            bonus = 0.0
+            held_hits = [ticker for ticker in event.tickers if ticker in portfolio_symbols]
+            if held_hits:
+                max_weight = max(weight_by_ticker.get(ticker, 0.0) for ticker in held_hits)
+                bonus += 0.05
+                bonus += min(0.05, max_weight / 200.0)
+            elif concentrated_sectors and any(sector in concentrated_sectors for sector in event.sectors):
+                bonus += 0.02
+            return event.final_score + bonus
+
+        return sorted(events, key=_priority, reverse=True)

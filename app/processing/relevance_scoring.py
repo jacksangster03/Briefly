@@ -105,16 +105,19 @@ def score_event(
         _keyword_impact(event),
     )
 
-    # 3. Personal relevance (max of sector, watchlist, region signals)
+    # 3. Personal relevance (max of sector, watchlist, region, portfolio signals)
     sector_score = _sector_relevance(event, profile)
     watchlist_score = _watchlist_relevance(event, profile)
     region_score = _region_relevance(event, profile)
+    portfolio_score = _portfolio_relevance(event, profile)
     scores["personal_relevance"] = max(
         sector_score,
         watchlist_score,
         region_score,
+        portfolio_score,
         event.personal_relevance_score or 0.0,
     )
+    event.raw_data["portfolio_relevance"] = round(portfolio_score, 4)
 
     # 4. Novelty
     if sent_hashes and event.content_hash in sent_hashes:
@@ -179,12 +182,13 @@ def _sector_relevance(event: NormalisedEvent, profile: UserProfile) -> float:
 def _watchlist_relevance(event: NormalisedEvent, profile: UserProfile) -> float:
     if not event.tickers:
         return 0.0
-    primary = set(profile.watchlist_primary)
-    secondary = set(profile.watchlist_secondary)
+    primary = set(t.upper() for t in profile.watchlist_primary)
+    secondary = set(t.upper() for t in profile.watchlist_secondary)
     for ticker in event.tickers:
-        if ticker in primary:
+        upper = ticker.upper()
+        if upper in primary:
             return 1.0
-        if ticker in secondary:
+        if upper in secondary:
             return 0.75
     return 0.0
 
@@ -197,6 +201,47 @@ def _region_relevance(event: NormalisedEvent, profile: UserProfile) -> float:
     )
 
 
+def _portfolio_relevance(event: NormalisedEvent, profile: UserProfile) -> float:
+    """Estimate event relevance against actual held positions/exposure."""
+    if not profile.portfolio_holdings:
+        return 0.0
+
+    holdings = set(profile.portfolio_symbols)
+    weight_by_ticker = profile.portfolio_weight_by_ticker
+    bucket_by_ticker = {
+        p.symbol: (p.bucket or "")
+        for p in profile.portfolio_holdings
+    }
+
+    direct_score = 0.0
+    for ticker in event.tickers:
+        upper = ticker.upper()
+        if upper not in holdings:
+            continue
+        weight = weight_by_ticker.get(upper, 0.0)
+        score = 0.82
+        if weight >= 6.0:
+            score = 1.0
+        elif weight >= 3.0:
+            score = 0.93
+        elif weight > 0:
+            score = 0.86
+        bucket = bucket_by_ticker.get(upper, "")
+        if bucket == "core":
+            score = min(1.0, score + 0.04)
+        elif bucket == "satellite":
+            score = max(0.0, score - 0.06)
+        direct_score = max(direct_score, score)
+
+    sector_readthrough = 0.0
+    if event.sectors and profile.portfolio_sector_weights:
+        concentration = max(profile.portfolio_sector_weights.get(sector, 0.0) for sector in event.sectors)
+        if concentration > 0:
+            sector_readthrough = min(0.75, 0.40 + (0.50 * concentration))
+
+    return max(direct_score, sector_readthrough)
+
+
 def _build_explanation(
     scores: dict[str, float],
     event: NormalisedEvent,
@@ -207,14 +252,24 @@ def _build_explanation(
     parts.append(f"source={event.source} ({scores['source_credibility']:.2f})")
     parts.append(f"type={event.event_type} ({scores['event_type_weight']:.2f})")
     parts.append(f"relevance={scores['personal_relevance']:.2f}")
+    portfolio_relevance = float(event.raw_data.get("portfolio_relevance", 0.0))
+    if portfolio_relevance > 0:
+        parts.append(f"portfolio={portfolio_relevance:.2f}")
 
     if event.tickers:
         in_watchlist = [
             t for t in event.tickers
-            if t in set(profile.watchlist_primary + profile.watchlist_secondary)
+            if t.upper() in set(
+                item.upper() for item in (profile.watchlist_primary + profile.watchlist_secondary)
+            )
         ]
         if in_watchlist:
             parts.append(f"watchlist=[{','.join(in_watchlist)}]")
+        in_portfolio = [
+            t for t in event.tickers if t.upper() in set(profile.portfolio_symbols)
+        ]
+        if in_portfolio:
+            parts.append(f"portfolio_holdings=[{','.join(in_portfolio)}]")
 
     parts.append(f"novelty={scores['novelty']:.2f}")
     parts.append(f"confidence={scores['factual_confidence']:.2f}")
