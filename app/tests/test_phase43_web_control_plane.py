@@ -1,4 +1,4 @@
-"""Phase 4.3 tests: FastAPI + HTMX portfolio control panel."""
+"""Phase 4.3 tests: FastAPI + HTMX Briefly control center."""
 
 from __future__ import annotations
 
@@ -92,7 +92,8 @@ def client(test_settings):
 def test_ui_settings_page_renders(client):
     response = client.get("/ui/settings?profile=default_user")
     assert response.status_code == 200
-    assert "Portfolio Control Panel" in response.text
+    assert "Briefly" in response.text
+    assert "Control Center" in response.text
     assert "Saved values are persisted in SQLite as" in response.text
     assert "Home Region Focus" in response.text
     assert "Briefing Impact Preview" in response.text

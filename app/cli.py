@@ -1,4 +1,4 @@
-"""CLI interface for market-briefing-bot using Click."""
+"""CLI interface for Briefly using Click."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ from app.settings import get_settings
 )
 @click.pass_context
 def cli(ctx, dry_run, show_output, email_only, telegram_only):
-    """market-briefing-bot: Market intelligence delivered to your phone."""
+    """Briefly: Portfolio intelligence with market briefing delivery."""
     setup_logging()
     ctx.ensure_object(dict)
     settings = get_settings()
@@ -85,17 +85,17 @@ def scheduler(ctx):
 @click.option(
     "--host",
     default=None,
-    help="Bind host for control panel server (default from WEB_HOST).",
+    help="Bind host for Briefly control-center server (default from WEB_HOST).",
 )
 @click.option(
     "--port",
     type=int,
     default=None,
-    help="Bind port for control panel server (default from WEB_PORT).",
+    help="Bind port for Briefly control-center server (default from WEB_PORT).",
 )
 @click.pass_context
 def web_panel(ctx, host: str | None, port: int | None):
-    """Run the local FastAPI + HTMX portfolio control panel."""
+    """Run the local FastAPI + HTMX Briefly control center."""
     import uvicorn
 
     from app.web.app import create_web_app
@@ -109,7 +109,8 @@ def web_panel(ctx, host: str | None, port: int | None):
 
     app = create_web_app(settings)
     click.echo(
-        f"Starting control panel at http://{settings.web_host}:{settings.web_port}/ui/settings"
+        f"Starting Briefly control center at "
+        f"http://{settings.web_host}:{settings.web_port}/ui/settings"
     )
     uvicorn.run(
         app,
@@ -267,7 +268,7 @@ def init_database(ctx):
 def status(ctx):
     """Show current configuration status."""
     settings = ctx.obj["settings"]
-    click.echo("market-briefing-bot status")
+    click.echo("Briefly status")
     click.echo(f"  Timezone:    {settings.timezone}")
     click.echo(f"  Dry run:     {settings.dry_run}")
     click.echo(f"  Delivery:    {settings.normalized_delivery_channel}")
@@ -306,7 +307,7 @@ def preflight(ctx):
         ),
     ]
 
-    click.echo("phase-4 preflight")
+    click.echo("Briefly preflight")
     click.echo(f"  Delivery channel: {settings.normalized_delivery_channel}")
     click.echo(f"  Dry run:          {settings.dry_run}")
     click.echo(f"  LLM render:       {'enabled' if llm_enabled else 'disabled'} ({llm_mode})")

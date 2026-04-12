@@ -1,6 +1,15 @@
 # Architecture
 
-`market-briefing-bot` is organized as a layered market-intelligence pipeline:
+`Briefly` is organized as a layered portfolio-intelligence platform with three product modules:
+
+1. Market Briefing
+   Morning, intraday, and breaking intelligence delivery.
+2. Portfolio Control
+   Holdings snapshots and profile-level personalization controls.
+3. Trading Lab (planned)
+   Future execution/sentiment workflows built on the same deterministic core.
+
+Shared platform pipeline:
 
 1. Providers
    Free-first adapters for Finnhub, FRED, SEC EDGAR, NewsAPI, and yfinance fallback.

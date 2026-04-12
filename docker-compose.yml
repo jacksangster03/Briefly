@@ -1,7 +1,7 @@
 services:
-  briefing-bot:
+  briefly:
     build: .
-    container_name: market-briefing-bot
+    container_name: briefly-platform
     env_file: .env
     volumes:
       - ./data:/app/data
@@ -10,10 +10,10 @@ services:
     restart: unless-stopped
     command: python -m app.cli scheduler
 
-  # One-shot morning briefing (use: docker compose run morning)
-  morning:
+  # One-shot morning briefing (use: docker compose run briefly-morning)
+  briefly-morning:
     build: .
-    container_name: mbb-morning
+    container_name: briefly-morning
     env_file: .env
     volumes:
       - ./data:/app/data

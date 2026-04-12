@@ -21,7 +21,7 @@ SECTION_HEADERS = {
     "intraday_title": "INTRADAY UPDATE",
     "weekend_intraday_title": "WEEKEND UPDATE",
     "breaking_title": "BREAKING",
-    "footer": "market-briefing-bot",
+    "footer": "Briefly",
 }
 
 # Directional arrows for price changes

@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for market-briefing-bot persistence."""
+"""SQLAlchemy ORM models for Briefly persistence."""
 
 from __future__ import annotations
 

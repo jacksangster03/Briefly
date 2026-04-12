@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>market-briefing-bot Control Panel</title>
+  <title>Briefly Control Center</title>
   <script>
     (() => {
-      const stored = window.localStorage.getItem("mbb-ui-theme");
+      const stored = window.localStorage.getItem("briefly-ui-theme");
       if (stored === "light" || stored === "dark") {
         document.documentElement.setAttribute("data-theme", stored);
       } else {
@@ -116,6 +116,30 @@
       max-width: 840px;
     }
 
+    .module-strip {
+      margin-top: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .module-pill {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: var(--muted);
+      background: var(--card);
+    }
+
+    .module-pill.active {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: rgba(245, 159, 0, 0.08);
+    }
+
     .theme-toggle {
       margin-top: 2px;
       border: 1px solid var(--border);
@@ -150,9 +174,14 @@
   <div class="shell">
     <header class="topbar">
       <div>
-        <p class="eyebrow">market-briefing-bot</p>
-        <h1 class="title">Portfolio Control Panel</h1>
-        <p class="subtitle">Single-user local control plane for profile settings and holdings snapshots.</p>
+        <p class="eyebrow">Briefly</p>
+        <h1 class="title">Control Center</h1>
+        <p class="subtitle">Single-user local control plane for the Briefly platform: market briefing, portfolio control, and trading lab planning.</p>
+        <div class="module-strip" aria-label="Briefly modules">
+          <span class="module-pill">Market Briefing</span>
+          <span class="module-pill active">Portfolio Control</span>
+          <span class="module-pill">Trading Lab (Planned)</span>
+        </div>
       </div>
       <button id="themeToggle" class="theme-toggle" type="button">Switch Theme</button>
     </header>
@@ -168,7 +197,7 @@
 
       function setTheme(theme) {
         document.documentElement.setAttribute("data-theme", theme);
-        window.localStorage.setItem("mbb-ui-theme", theme);
+        window.localStorage.setItem("briefly-ui-theme", theme);
         const button = document.getElementById("themeToggle");
         if (button) {
           button.textContent = theme === "dark" ? "Light Mode" : "Dark Mode";

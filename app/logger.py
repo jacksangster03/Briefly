@@ -1,4 +1,4 @@
-"""Structured logging setup for market-briefing-bot."""
+"""Structured logging setup for Briefly."""
 
 from __future__ import annotations
 
@@ -18,12 +18,12 @@ def setup_logging() -> logging.Logger:
     """
     global _CONFIGURED
     if _CONFIGURED:
-        return logging.getLogger("mbb")
+        return logging.getLogger("briefly")
 
     settings = get_settings()
     log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
 
-    logger = logging.getLogger("mbb")
+    logger = logging.getLogger("briefly")
     logger.setLevel(log_level)
     logger.propagate = False
 
@@ -41,7 +41,7 @@ def setup_logging() -> logging.Logger:
     # File handler
     log_dir = Path(settings.logs_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
-    fh = logging.FileHandler(log_dir / "mbb.log", encoding="utf-8")
+    fh = logging.FileHandler(log_dir / "briefly.log", encoding="utf-8")
     fh.setLevel(log_level)
     fh.setFormatter(fmt)
     logger.addHandler(fh)
@@ -51,6 +51,6 @@ def setup_logging() -> logging.Logger:
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Return a child logger under the mbb namespace."""
+    """Return a child logger under the Briefly namespace."""
     setup_logging()
-    return logging.getLogger(f"mbb.{name}")
+    return logging.getLogger(f"briefly.{name}")

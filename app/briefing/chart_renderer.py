@@ -12,7 +12,7 @@ from app.logger import get_logger
 from app.schemas.delivery import ChartAsset
 from app.schemas.events import PricePoint, QuoteData
 
-_mpl_config = Path(tempfile.gettempdir()) / "mbb-mpl"
+_mpl_config = Path(tempfile.gettempdir()) / "briefly-mpl"
 _mpl_config.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("MPLCONFIGDIR", str(_mpl_config))
 

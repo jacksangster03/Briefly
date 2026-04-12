@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "market-briefing-bot"
+name = "briefly"
 version = "0.1.0"
-description = "Production-grade market intelligence messenger: morning briefings, intraday updates, breaking alerts."
+description = "Briefly portfolio intelligence platform: market briefings, portfolio control, and delivery workflows."
 requires-python = ">=3.11"
 license = {text = "MIT"}
 readme = "README.md"
@@ -36,11 +36,12 @@ dev = [
     "mypy>=1.7.0",
 ]
 all = [
-    "market-briefing-bot[yfinance,dev]",
+    "briefly[yfinance,dev]",
 ]
 
 [project.scripts]
 mbb = "app.cli:cli"
+briefly = "app.cli:cli"
 
 [tool.setuptools.packages.find]
 include = ["app*"]

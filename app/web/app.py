@@ -1,4 +1,4 @@
-"""Phase 4.3 FastAPI + HTMX control panel."""
+"""Phase 4.3 FastAPI + HTMX Briefly control center."""
 
 from __future__ import annotations
 
@@ -37,9 +37,9 @@ class PreferenceUpdateRequest(BaseModel):
 
 
 def create_web_app(settings: Settings | None = None) -> FastAPI:
-    """Create the control panel app with API + HTMX routes."""
+    """Create the Briefly control-center app with API + HTMX routes."""
     app = FastAPI(
-        title="market-briefing-bot control panel",
+        title="Briefly control center",
         version="4.3",
         docs_url="/api/docs",
         redoc_url="/api/redoc",

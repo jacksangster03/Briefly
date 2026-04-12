@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     bls_base_url: str = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
     bea_api_key: str = ""
     bea_base_url: str = "https://apps.bea.gov/api/data"
-    sec_user_agent: str = "market-briefing-bot contact@example.com"
+    sec_user_agent: str = "Briefly contact@example.com"
     polygon_api_key: str = ""
     alpaca_api_key: str = ""
     alpaca_api_secret: str = ""

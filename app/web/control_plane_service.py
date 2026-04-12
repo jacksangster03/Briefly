@@ -139,7 +139,7 @@ def import_holdings_from_upload(
     if suffix not in {".yaml", ".yml", ".csv"}:
         raise ValueError(f"Unsupported holdings file type: {suffix}")
 
-    with tempfile.TemporaryDirectory(prefix="mbb_holdings_") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="briefly_holdings_") as temp_dir:
         temp_path = Path(temp_dir) / f"upload{suffix}"
         temp_path.write_bytes(content)
         snapshot = load_holdings_file(temp_path, default_profile=normalized_profile)

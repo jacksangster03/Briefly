@@ -224,7 +224,7 @@ def test_preflight_reports_pass_for_dry_run_defaults():
     runner = CliRunner()
     result = runner.invoke(cli, ["--dry-run", "preflight"])
     assert result.exit_code == 0, result.output
-    assert "phase-4 preflight" in result.output
+    assert "Briefly preflight" in result.output
     assert "result: PASS" in result.output
 
 

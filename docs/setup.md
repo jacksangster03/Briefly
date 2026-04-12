@@ -3,10 +3,12 @@
 ## Local setup
 
 ```bash
-cd /Users/jack/market-briefing-bot
+cd /Users/jack/briefly
 pip install -e ".[all]"
 make setup
 ```
+
+If the repository has not been renamed yet, use `/Users/jack/market-briefing-bot`.
 
 Create and fill:
 

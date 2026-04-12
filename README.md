@@ -1,13 +1,29 @@
-# market-briefing-bot
+# Briefly
 
-Market intelligence delivered to your phone. The bot generates a morning briefing, curated intraday updates, and breaking alerts, then sends them through Telegram with SQLite-backed state, YAML configuration, and provider fallback logic.
+Briefly is a portfolio-intelligence platform with three coordinated modules:
+- **Market Briefing** for morning, intraday, and breaking intelligence delivery
+- **Portfolio Control** for holdings snapshots and profile-level personalization
+- **Trading Lab (planned)** for future execution/sentiment workflows
 
-The current product is no longer just a headline feed:
+It currently generates morning briefings, curated intraday updates, and breaking alerts, then delivers through Telegram/email with SQLite-backed state, YAML configuration, and resilient provider fallback logic.
+
+The product is no longer just a headline feed:
 - it deduplicates and clusters overlapping stories
 - it formats messages for mobile reading
 - it handles weekends differently from live weekday sessions
-- it supports watchlists and persisted portfolio holdings
+- it supports watchlists, region/sector focus, and persisted portfolio holdings
 - it includes operational safeguards for flaky providers
+
+## Product modules
+
+- **Market Briefing**
+  - event processing pipeline, ranking, sectioned rendering, Telegram/email delivery
+- **Portfolio Control**
+  - holdings import/persistence, preference overrides, local web control center
+- **Trading Lab (planned)**
+  - future trading/sentiment workflows on top of deterministic intelligence core
+
+See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for the module map.
 
 ## Current capabilities
 
@@ -53,7 +69,7 @@ The current product is no longer just a headline feed:
   - per-profile, DB-backed overrides for channels, watchlists, sector weights, and morning sections
   - runtime profile load merges YAML defaults with persisted overrides
   - per-message routing (`morning` / `intraday` / `breaking`) can be customized by profile
-- **Phase 4.3 web control panel (FastAPI + HTMX)**
+- **Phase 4.3 web control center (FastAPI + HTMX)**
   - local-first settings UI for holdings, watchlists, sector weights, delivery routing, and morning section visibility
   - searchable watchlist builders (chip-based add/remove) instead of long multiselect lists
   - region-focus controls (`home_region` + `coverage_weights`) alongside sector weights
@@ -72,8 +88,14 @@ The current product is no longer just a headline feed:
 ## Quick start
 
 ```bash
-git clone https://github.com/jacksangster03/market-briefing-bot.git
-cd market-briefing-bot
+# preferred after GitHub repo rename
+git clone https://github.com/jacksangster03/briefly.git
+cd briefly
+
+# if the repository has not been renamed yet, keep using:
+# git clone https://github.com/jacksangster03/market-briefing-bot.git
+# cd market-briefing-bot
+
 pip install -e ".[dev]"
 
 cp .env.example .env
@@ -155,7 +177,7 @@ This is useful when:
 
 Example holdings config:
 
-- [configs/holdings.example.yaml](/Users/jack/market-briefing-bot/configs/holdings.example.yaml)
+- [configs/holdings.example.yaml](/Users/jack/briefly/configs/holdings.example.yaml)
 
 Import holdings into the SQLite state store:
 
@@ -190,7 +212,7 @@ Once imported, later morning/intraday runs load holdings automatically and use t
 
 ### Degraded-provider behavior
 
-The bot now includes several protections to keep runs responsive:
+Briefly now includes several protections to keep runs responsive:
 
 - quote fetches use a tighter timeout/retry budget than news fetches
 - quote batches abort early after consecutive misses instead of timing out symbol-by-symbol for the whole universe
@@ -227,7 +249,7 @@ Important settings include:
 - `LLM_EMAIL_MAX_CHARS`
 - `LLM_EMAIL_MIN_SOURCE_URLS`
 - `DELIVERY_CHANNEL` (`all`, `telegram`, `email`)
-- `WEB_HOST`, `WEB_PORT` (Phase 4.3 local control panel bind)
+- `WEB_HOST`, `WEB_PORT` (Phase 4.3 local control-center bind)
 
 Recommended delivery defaults:
 - keep Telegram text-first: `TELEGRAM_SEND_CHARTS=false`
@@ -261,22 +283,22 @@ python -m app.cli --show-output --email-only morning
 ```
 
 General runtime settings are defined in:
-- [app/settings.py](/Users/jack/market-briefing-bot/app/settings.py)
+- [app/settings.py](/Users/jack/briefly/app/settings.py)
 
 ### YAML config
 
 - user profile:
-  - [configs/user_profile.example.yaml](/Users/jack/market-briefing-bot/configs/user_profile.example.yaml)
+  - [configs/user_profile.example.yaml](/Users/jack/briefly/configs/user_profile.example.yaml)
 - watchlists:
-  - [configs/watchlists.example.yaml](/Users/jack/market-briefing-bot/configs/watchlists.example.yaml)
+  - [configs/watchlists.example.yaml](/Users/jack/briefly/configs/watchlists.example.yaml)
 - schedules:
-  - [configs/schedules.yaml](/Users/jack/market-briefing-bot/configs/schedules.yaml)
+  - [configs/schedules.yaml](/Users/jack/briefly/configs/schedules.yaml)
 - sectors:
-  - [configs/sectors.yaml](/Users/jack/market-briefing-bot/configs/sectors.yaml)
+  - [configs/sectors.yaml](/Users/jack/briefly/configs/sectors.yaml)
 - alert thresholds:
-  - [configs/alert_rules.yaml](/Users/jack/market-briefing-bot/configs/alert_rules.yaml)
+  - [configs/alert_rules.yaml](/Users/jack/briefly/configs/alert_rules.yaml)
 - holdings:
-  - [configs/holdings.example.yaml](/Users/jack/market-briefing-bot/configs/holdings.example.yaml)
+  - [configs/holdings.example.yaml](/Users/jack/briefly/configs/holdings.example.yaml)
 
 ### Phase 4.2 control-plane usage
 
@@ -325,7 +347,7 @@ Supported keys:
 - `sections.morning.market_setup`, `sections.morning.macro_context`, `sections.morning.top_themes`
 - `sections.morning.portfolio_focus`, `sections.morning.sector_scan`, `sections.morning.watchlist`
 
-### Phase 4.3 web control panel usage
+### Phase 4.3 web control center usage
 
 Start the local panel:
 
@@ -356,6 +378,9 @@ curl -X PUT "http://127.0.0.1:8080/api/v1/profile/default_user/preferences" \
 ## Product architecture
 
 ```text
+Briefly modules
+  Market Briefing / Portfolio Control / Trading Lab (planned)
+
 Providers
   Finnhub / NewsAPI / FRED / SEC / yfinance
 
@@ -373,7 +398,7 @@ Formatting + delivery
   TelegramFormatter -> deterministic EmailFormatter
   -> optional LLMEmailRenderer (shadow/live) -> Telegram / Email
 
-Control plane
+Portfolio control plane
   CLI prefs + FastAPI/HTMX local panel -> preferences + holdings services
 
 Persistence
@@ -382,15 +407,15 @@ Persistence
 ```
 
 Key code areas:
-- [app/main.py](/Users/jack/market-briefing-bot/app/main.py)
-- [app/processing/pipeline.py](/Users/jack/market-briefing-bot/app/processing/pipeline.py)
-- [app/processing/relevance_scoring.py](/Users/jack/market-briefing-bot/app/processing/relevance_scoring.py)
-- [app/briefing/formatter.py](/Users/jack/market-briefing-bot/app/briefing/formatter.py)
-- [app/portfolio/importer.py](/Users/jack/market-briefing-bot/app/portfolio/importer.py)
-- [app/portfolio/service.py](/Users/jack/market-briefing-bot/app/portfolio/service.py)
-- [app/personalization/preferences_service.py](/Users/jack/market-briefing-bot/app/personalization/preferences_service.py)
-- [app/web/app.py](/Users/jack/market-briefing-bot/app/web/app.py)
-- [app/web/control_plane_service.py](/Users/jack/market-briefing-bot/app/web/control_plane_service.py)
+- [app/main.py](/Users/jack/briefly/app/main.py)
+- [app/processing/pipeline.py](/Users/jack/briefly/app/processing/pipeline.py)
+- [app/processing/relevance_scoring.py](/Users/jack/briefly/app/processing/relevance_scoring.py)
+- [app/briefing/formatter.py](/Users/jack/briefly/app/briefing/formatter.py)
+- [app/portfolio/importer.py](/Users/jack/briefly/app/portfolio/importer.py)
+- [app/portfolio/service.py](/Users/jack/briefly/app/portfolio/service.py)
+- [app/personalization/preferences_service.py](/Users/jack/briefly/app/personalization/preferences_service.py)
+- [app/web/app.py](/Users/jack/briefly/app/web/app.py)
+- [app/web/control_plane_service.py](/Users/jack/briefly/app/web/control_plane_service.py)
 
 ## Testing
 
@@ -417,7 +442,7 @@ The test suite currently covers:
 - scheduler window behavior
 - holdings import/persistence/scoring
 - profile control-plane overrides (Phase 4.2)
-- web control panel + control-plane API (Phase 4.3)
+- web control center + control-plane API (Phase 4.3)
 - manual `--show-output` mode
 - market-data fallback behavior
 - provider circuit breaker behavior
@@ -461,7 +486,7 @@ python -m app.cli prefs-set --profile default_user --key delivery.breaking_chann
 python -m app.cli --show-output morning
 ```
 
-### 6. Run the local control panel
+### 6. Run the local control center
 
 ```bash
 python -m app.cli web --host 127.0.0.1 --port 8080
@@ -493,7 +518,7 @@ The repo is now beyond basic plumbing:
   - persisted profile-level overrides for channels, watchlists, sector weights, and section visibility
   - runtime merge of YAML defaults + DB overrides
   - CLI surface for inspect/set/unset/reset workflows
-- **Phase 4.3 web control panel** is now in place
+- **Phase 4.3 web control center** is now in place
   - FastAPI + HTMX local UI for holdings imports and profile preference management
   - control-plane API endpoints for state, updates, search, and upload flows
   - single-user localhost-first operations without a separate frontend build
