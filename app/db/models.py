@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, Integer, String, Text
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.types import JSON
 
 from app.db.base import Base
@@ -128,6 +128,23 @@ class PortfolioHolding(Base):
     bucket = Column(String(40), nullable=True)
     sector_override = Column(String(40), nullable=True)
     as_of_date = Column(Date, nullable=True)
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+class UserPreference(Base):
+    """Per-profile control-plane overrides for watchlist, delivery, and sections."""
+
+    __tablename__ = "user_preferences"
+    __table_args__ = (
+        UniqueConstraint("profile_name", "pref_key", name="uq_user_pref_profile_key"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    pref_key = Column(String(120), nullable=False, index=True)
+    pref_value = Column(JSON, nullable=False, default=dict)
     active = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow)

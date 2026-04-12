@@ -43,13 +43,16 @@ def _build_services(settings: Settings):
     )
 
 
-def _get_messengers(settings: Settings, profile: UserProfile):
+def _get_messengers(settings: Settings, profile: UserProfile, *, message_type: str = ""):
     """Return configured messengers in priority order."""
     messengers = []
     channel = settings.normalized_delivery_channel
+    preferred_channels = set(profile.channels_for(message_type))
+    if not preferred_channels:
+        preferred_channels = {"telegram", "email"}
 
-    include_telegram = channel in {"all", "telegram"}
-    include_email = channel in {"all", "email"}
+    include_telegram = channel in {"all", "telegram"} and "telegram" in preferred_channels
+    include_email = channel in {"all", "email"} and "email" in preferred_channels
 
     if include_telegram:
         tg = TelegramMessenger(settings)
@@ -217,6 +220,28 @@ def _send_telegram_chart_preview(
         logger.debug("Telegram chart preview failed for %s", hero.title)
 
 
+def _apply_morning_section_preferences(briefing, profile: UserProfile) -> None:
+    """Apply per-profile morning section visibility overrides."""
+    if not profile.morning_section_enabled("market_setup"):
+        briefing.market_setup.index_quotes = []
+        briefing.market_setup.macro_quotes = []
+        briefing.market_setup.treasury_10y = None
+        briefing.market_setup.treasury_2y = None
+        briefing.market_setup.vix = None
+    if not profile.morning_section_enabled("macro_context"):
+        briefing.macro_context = []
+    if not profile.morning_section_enabled("top_themes"):
+        briefing.top_themes = []
+    if not profile.morning_section_enabled("portfolio_focus"):
+        briefing.portfolio_focus = []
+        briefing.portfolio_quotes = []
+    if not profile.morning_section_enabled("sector_scan"):
+        briefing.sector_scan = []
+    if not profile.morning_section_enabled("watchlist"):
+        briefing.watchlist_events = []
+        briefing.watchlist_quotes = []
+
+
 # -- Morning Briefing ---------------------------------------------------------
 
 def run_morning_briefing(settings: Settings | None = None) -> None:
@@ -239,11 +264,12 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
     )
 
     briefing = generator.generate()
+    _apply_morning_section_preferences(briefing, profile)
     formatter = TelegramFormatter(profile.timezone)
     messages = formatter.format_morning_briefing(briefing)
     email_content = EmailFormatter(profile.timezone).format_morning_briefing(briefing)
 
-    messengers = _get_messengers(settings, profile)
+    messengers = _get_messengers(settings, profile, message_type="morning")
     display_events = []
     seen_tracking_ids = set()
     for evt in briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus + [
@@ -322,7 +348,7 @@ def run_intraday_update(settings: Settings | None = None) -> None:
     formatter = TelegramFormatter(profile.timezone)
     messages = formatter.format_intraday_update(update)
 
-    messengers = _get_messengers(settings, profile)
+    messengers = _get_messengers(settings, profile, message_type="intraday")
     _deliver(messengers, messages, "intraday", update.new_events, settings=settings)
 
     logger.info(
@@ -357,7 +383,7 @@ def run_breaking_check(settings: Settings | None = None) -> None:
         return
 
     formatter = TelegramFormatter(profile.timezone)
-    messengers = _get_messengers(settings, profile)
+    messengers = _get_messengers(settings, profile, message_type="breaking")
 
     for alert in alerts:
         messages = formatter.format_breaking_alert(alert)

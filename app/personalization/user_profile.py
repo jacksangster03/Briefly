@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -33,6 +34,9 @@ class UserProfile:
         watchlist_monitor: list[str] | None = None,
         portfolio_holdings: list[PortfolioHolding] | None = None,
         portfolio_sector_weights: dict[str, float] | None = None,
+        delivery_channels: dict[str, list[str]] | None = None,
+        morning_section_flags: dict[str, bool] | None = None,
+        preference_overrides: dict[str, Any] | None = None,
     ):
         self.name = name
         self.timezone = timezone
@@ -49,6 +53,9 @@ class UserProfile:
         self.watchlist_monitor = watchlist_monitor or []
         self.portfolio_holdings = portfolio_holdings or []
         self.portfolio_sector_weights = portfolio_sector_weights or {}
+        self.delivery_channels = delivery_channels or {}
+        self.morning_section_flags = morning_section_flags or {}
+        self.preference_overrides = preference_overrides or {}
 
     @property
     def all_watchlist_tickers(self) -> list[str]:
@@ -122,6 +129,31 @@ class UserProfile:
     def numbers_first(self) -> bool:
         return self.style.get("numbers_first", True)
 
+    def channels_for(self, message_type: str) -> list[str]:
+        """Return preferred delivery channels for a message type."""
+        key_map = {
+            "morning": "morning",
+            "morning_brief": "morning",
+            "intraday": "intraday",
+            "breaking": "breaking",
+        }
+        normalized = key_map.get((message_type or "").strip().lower(), "")
+        if not normalized:
+            return []
+        channels = self.delivery_channels.get(normalized)
+        if not channels:
+            raw = self.delivery.get(f"{normalized}_channels")
+            if isinstance(raw, list):
+                channels = [str(item).strip().lower() for item in raw if str(item).strip()]
+        if not channels:
+            return []
+        allowed = {"telegram", "email"}
+        return [channel for channel in channels if channel in allowed]
+
+    def morning_section_enabled(self, section_key: str) -> bool:
+        """Check whether a morning section is enabled by preference."""
+        return self.morning_section_flags.get(section_key, True)
+
 
 def load_user_profile(settings: Settings) -> UserProfile:
     """Load user profile from YAML config files.
@@ -169,6 +201,7 @@ def load_user_profile(settings: Settings) -> UserProfile:
         profile.watchlist_secondary = wl.get("secondary", [])
         profile.watchlist_monitor = wl.get("monitor", [])
 
+    _load_profile_overrides(profile)
     _load_portfolio_context(profile, configs_dir)
 
     logger.info(
@@ -180,6 +213,63 @@ def load_user_profile(settings: Settings) -> UserProfile:
         len(profile.portfolio_holdings),
     )
     return profile
+
+
+def _load_profile_overrides(profile: UserProfile) -> None:
+    """Load persisted preference overrides from the Phase 4.2 control plane."""
+    try:
+        from app.personalization.preferences_service import get_preferences
+    except Exception:
+        logger.debug("Preference service unavailable", exc_info=True)
+        return
+
+    try:
+        overrides = get_preferences(profile.name)
+    except Exception:
+        logger.debug("No persisted preference overrides available yet", exc_info=True)
+        return
+
+    if not overrides:
+        return
+
+    profile.preference_overrides = overrides
+    for key, value in overrides.items():
+        if key == "watchlist.primary":
+            profile.watchlist_primary = [str(item).upper() for item in (value or [])]
+            continue
+        if key == "watchlist.secondary":
+            profile.watchlist_secondary = [str(item).upper() for item in (value or [])]
+            continue
+        if key == "watchlist.monitor":
+            profile.watchlist_monitor = [str(item).upper() for item in (value or [])]
+            continue
+        if key == "sector.weights" and isinstance(value, dict):
+            profile.sector_weights = {
+                str(sector).lower(): float(weight)
+                for sector, weight in value.items()
+            }
+            continue
+        if key == "delivery.morning_channels":
+            profile.delivery_channels["morning"] = [str(item).lower() for item in (value or [])]
+            continue
+        if key == "delivery.intraday_channels":
+            profile.delivery_channels["intraday"] = [str(item).lower() for item in (value or [])]
+            continue
+        if key == "delivery.breaking_channels":
+            profile.delivery_channels["breaking"] = [str(item).lower() for item in (value or [])]
+            continue
+        if key in {
+            "delivery.morning_brief_time",
+            "delivery.hourly_updates",
+            "delivery.breaking_alerts",
+            "delivery.quiet_hours_start",
+            "delivery.quiet_hours_end",
+        }:
+            profile.delivery[key.replace("delivery.", "")] = value
+            continue
+        if key.startswith("sections.morning."):
+            section = key.replace("sections.morning.", "", 1)
+            profile.morning_section_flags[section] = bool(value)
 
 
 def _load_portfolio_context(profile: UserProfile, configs_dir: Path) -> None:

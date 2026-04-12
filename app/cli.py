@@ -124,6 +124,98 @@ def import_holdings(ctx, file_path: Path | None, profile_name: str):
     )
 
 
+@cli.command("prefs-show")
+@click.option(
+    "--profile",
+    "profile_name",
+    default="default_user",
+    show_default=True,
+    help="Profile name to inspect.",
+)
+def prefs_show(profile_name: str):
+    """Show persisted Phase 4.2 preference overrides for a profile."""
+    import json
+
+    from app.personalization.preferences_service import get_preferences
+
+    init_db()
+    prefs = get_preferences(profile_name)
+    click.echo(f"Preferences for profile '{profile_name}':")
+    if not prefs:
+        click.echo("  (none)")
+        return
+    for key in sorted(prefs.keys()):
+        click.echo(f"  {key} = {json.dumps(prefs[key], ensure_ascii=False)}")
+
+
+@cli.command("prefs-set")
+@click.option(
+    "--profile",
+    "profile_name",
+    default="default_user",
+    show_default=True,
+    help="Profile name to update.",
+)
+@click.option("--key", "pref_key", required=True, help="Preference key (e.g. delivery.morning_channels).")
+@click.option(
+    "--value",
+    "raw_value",
+    required=True,
+    help="Preference value (JSON or raw string). Example: '[\"email\"]'",
+)
+def prefs_set(profile_name: str, pref_key: str, raw_value: str):
+    """Set one persisted preference override."""
+    import json
+
+    from app.personalization.preferences_service import parse_cli_value, set_preference
+
+    init_db()
+    parsed = parse_cli_value(raw_value)
+    normalized = set_preference(profile_name, pref_key, parsed)
+    click.echo(
+        f"Set {pref_key} for profile '{profile_name}' to "
+        f"{json.dumps(normalized, ensure_ascii=False)}"
+    )
+
+
+@cli.command("prefs-unset")
+@click.option(
+    "--profile",
+    "profile_name",
+    default="default_user",
+    show_default=True,
+    help="Profile name to update.",
+)
+@click.option("--key", "pref_key", required=True, help="Preference key to remove.")
+def prefs_unset(profile_name: str, pref_key: str):
+    """Unset one persisted preference override."""
+    from app.personalization.preferences_service import unset_preference
+
+    init_db()
+    removed = unset_preference(profile_name, pref_key)
+    if removed:
+        click.echo(f"Unset {pref_key} for profile '{profile_name}'")
+    else:
+        click.echo(f"No active override for {pref_key} on profile '{profile_name}'")
+
+
+@cli.command("prefs-reset")
+@click.option(
+    "--profile",
+    "profile_name",
+    default="default_user",
+    show_default=True,
+    help="Profile name to reset.",
+)
+def prefs_reset(profile_name: str):
+    """Clear all persisted preference overrides for a profile."""
+    from app.personalization.preferences_service import clear_preferences
+
+    init_db()
+    count = clear_preferences(profile_name)
+    click.echo(f"Cleared {count} preference override(s) for profile '{profile_name}'")
+
+
 @cli.command("init-db")
 @click.pass_context
 def init_database(ctx):

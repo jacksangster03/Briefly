@@ -49,6 +49,10 @@ The current product is no longer just a headline feed:
   - OpenAI-compatible base URL support (`LLM_API_BASE_URL`)
   - shadow mode for safe rollout before enabling live LLM email rendering
   - deterministic formatter fallback on any LLM request/validation failure
+- **Phase 4.2 control plane (persisted profile overrides)**
+  - per-profile, DB-backed overrides for channels, watchlists, sector weights, and morning sections
+  - runtime profile load merges YAML defaults with persisted overrides
+  - per-message routing (`morning` / `intraday` / `breaking`) can be customized by profile
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths
@@ -87,6 +91,10 @@ python -m app.cli scheduler
 python -m app.cli init-db
 python -m app.cli status
 python -m app.cli preflight
+python -m app.cli prefs-show --profile default_user
+python -m app.cli prefs-set --profile default_user --key delivery.morning_channels --value '["email"]'
+python -m app.cli prefs-unset --profile default_user --key delivery.morning_channels
+python -m app.cli prefs-reset --profile default_user
 python -m app.cli quote NVDA
 python -m app.cli news
 ```
@@ -257,6 +265,50 @@ General runtime settings are defined in:
 - holdings:
   - [configs/holdings.example.yaml](/Users/jack/market-briefing-bot/configs/holdings.example.yaml)
 
+### Phase 4.2 control-plane usage
+
+Phase 4.2 keeps config defaults in YAML while allowing live profile overrides in SQLite.
+
+Inspect active overrides:
+
+```bash
+python -m app.cli prefs-show --profile default_user
+```
+
+Set overrides:
+
+```bash
+# route morning to email for this profile
+python -m app.cli prefs-set --profile default_user --key delivery.morning_channels --value '["email"]'
+
+# keep intraday + breaking on Telegram
+python -m app.cli prefs-set --profile default_user --key delivery.intraday_channels --value '["telegram"]'
+python -m app.cli prefs-set --profile default_user --key delivery.breaking_channels --value '["telegram"]'
+
+# hide one morning section
+python -m app.cli prefs-set --profile default_user --key sections.morning.watchlist --value false
+
+# override watchlist + sector weights without editing YAML
+python -m app.cli prefs-set --profile default_user --key watchlist.primary --value '["NVDA","MSFT","TSLA"]'
+python -m app.cli prefs-set --profile default_user --key sector.weights --value '{"technology": 1.3, "energy": 1.1}'
+```
+
+Unset one key or clear all overrides:
+
+```bash
+python -m app.cli prefs-unset --profile default_user --key sections.morning.watchlist
+python -m app.cli prefs-reset --profile default_user
+```
+
+Supported keys:
+- `watchlist.primary`, `watchlist.secondary`, `watchlist.monitor`
+- `sector.weights`
+- `delivery.morning_channels`, `delivery.intraday_channels`, `delivery.breaking_channels`
+- `delivery.morning_brief_time`, `delivery.hourly_updates`, `delivery.breaking_alerts`
+- `delivery.quiet_hours_start`, `delivery.quiet_hours_end`
+- `sections.morning.market_setup`, `sections.morning.macro_context`, `sections.morning.top_themes`
+- `sections.morning.portfolio_focus`, `sections.morning.sector_scan`, `sections.morning.watchlist`
+
 ## Product architecture
 
 ```text
@@ -278,7 +330,8 @@ Formatting + delivery
   -> optional LLMEmailRenderer (shadow/live) -> Telegram / Email
 
 Persistence
-  SQLite for sent messages, provider health, events, market snapshots, holdings
+  SQLite for sent messages, provider health, events, market snapshots,
+  holdings, and user preference overrides
 ```
 
 Key code areas:
@@ -288,6 +341,7 @@ Key code areas:
 - [app/briefing/formatter.py](/Users/jack/market-briefing-bot/app/briefing/formatter.py)
 - [app/portfolio/importer.py](/Users/jack/market-briefing-bot/app/portfolio/importer.py)
 - [app/portfolio/service.py](/Users/jack/market-briefing-bot/app/portfolio/service.py)
+- [app/personalization/preferences_service.py](/Users/jack/market-briefing-bot/app/personalization/preferences_service.py)
 
 ## Testing
 
@@ -304,6 +358,7 @@ python -m pytest app/tests/test_portfolio_phase3.py -q
 python -m pytest app/tests/test_market_data.py -q
 python -m pytest app/tests/test_show_output.py -q
 python -m pytest app/tests/test_circuit_breaker.py -q
+python -m pytest app/tests/test_phase42_control_plane.py -q
 ```
 
 The test suite currently covers:
@@ -311,6 +366,7 @@ The test suite currently covers:
 - formatting and weekend presentation
 - scheduler window behavior
 - holdings import/persistence/scoring
+- profile control-plane overrides (Phase 4.2)
 - manual `--show-output` mode
 - market-data fallback behavior
 - provider circuit breaker behavior
@@ -345,6 +401,15 @@ python -m app.cli scheduler
 
 The scheduler only runs while that process is alive. `Ctrl+C` stops automatic sends.
 
+### 5. Route channels by profile without editing `.env`
+
+```bash
+python -m app.cli prefs-set --profile default_user --key delivery.morning_channels --value '["email"]'
+python -m app.cli prefs-set --profile default_user --key delivery.intraday_channels --value '["telegram"]'
+python -m app.cli prefs-set --profile default_user --key delivery.breaking_channels --value '["telegram"]'
+python -m app.cli --show-output morning
+```
+
 ## Current phase
 
 The repo is now beyond basic plumbing:
@@ -365,6 +430,10 @@ The repo is now beyond basic plumbing:
   - deterministic selection + optional LLM render for morning/weekend email
   - shadow mode rollout controls
   - strict validation against deterministic payload and safe fallback
+- **Phase 4.2 control plane** is now in place
+  - persisted profile-level overrides for channels, watchlists, sector weights, and section visibility
+  - runtime merge of YAML defaults + DB overrides
+  - CLI surface for inspect/set/unset/reset workflows
 
 The biggest remaining quality gap is still editorial/source quality in some surfaced headlines, not the core plumbing.
 
