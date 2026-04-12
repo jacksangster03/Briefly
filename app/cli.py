@@ -169,6 +169,11 @@ def preflight(ctx):
             (not llm_enabled) or bool(settings.openai_api_key),
             "required only when ENABLE_LLM_EMAIL_RENDER=true",
         ),
+        (
+            "LLM API base URL",
+            settings.llm_api_base_url.startswith("http"),
+            settings.llm_api_base_url,
+        ),
     ]
 
     click.echo("phase-4 preflight")
@@ -177,6 +182,7 @@ def preflight(ctx):
     click.echo(f"  LLM render:       {'enabled' if llm_enabled else 'disabled'} ({llm_mode})")
     click.echo(f"  LLM model:        {settings.llm_email_model}")
     click.echo(f"  LLM body cap:     {settings.llm_email_max_chars} chars")
+    click.echo(f"  Min sources:      {settings.llm_email_min_source_urls}")
     click.echo("")
 
     for label, ok, detail in checks:

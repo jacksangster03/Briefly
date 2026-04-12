@@ -62,8 +62,10 @@ class Settings(BaseSettings):
     enable_llm_email_render: bool = False
     llm_render_shadow_mode: bool = True
     llm_email_model: str = "gpt-4o-mini"
+    llm_api_base_url: str = "https://api.openai.com/v1"
     llm_email_timeout_seconds: int = 25
     llm_email_max_chars: int = 3200
+    llm_email_min_source_urls: int = 2
     # all | telegram | email
     delivery_channel: str = "all"
 

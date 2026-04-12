@@ -221,7 +221,7 @@ class LLMEmailRenderer:
         )
 
     def _request_llm(self, prompt_payload: dict[str, Any]) -> dict[str, Any]:
-        endpoint = "https://api.openai.com/v1/chat/completions"
+        endpoint = f"{self.settings.llm_api_base_url.rstrip('/')}/chat/completions"
         response = requests.post(
             endpoint,
             headers={
@@ -253,6 +253,16 @@ class LLMEmailRenderer:
         )
         response.raise_for_status()
         payload = response.json()
+        usage = payload.get("usage", {})
+        if usage:
+            prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+            completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+            logger.info(
+                "LLM email usage: prompt=%s completion=%s model=%s",
+                prompt_tokens,
+                completion_tokens,
+                self.settings.llm_email_model,
+            )
         message_content = payload["choices"][0]["message"]["content"]
         return self._extract_json_object(message_content)
 
@@ -314,6 +324,19 @@ class LLMEmailRenderer:
 
         if not normalized_source_urls and payload.ordered_allowed_urls:
             normalized_source_urls = payload.ordered_allowed_urls[: min(3, len(payload.ordered_allowed_urls))]
+
+        required_sources = max(
+            0,
+            min(
+                int(self.settings.llm_email_min_source_urls),
+                len(payload.ordered_allowed_urls),
+            ),
+        )
+        if required_sources > 0:
+            if len(normalized_source_urls) < required_sources:
+                errors.append(
+                    f"Insufficient source URLs ({len(normalized_source_urls)} < {required_sources})"
+                )
 
         unknown_numeric_tokens = sorted(
             token

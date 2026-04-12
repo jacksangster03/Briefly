@@ -25,6 +25,12 @@ The current product is no longer just a headline feed:
 - **Phase 3.5 rich delivery**
   - historical price retrieval for chart rendering
   - static PNG chart cards for morning/weekend briefs
+  - chart pack now includes:
+    - Market Snapshot
+    - Macro Risk Strip
+    - Top Holdings Performance
+    - Sector Exposure vs Performance
+    - Event-Linked Trend
   - HTML email rendering with inline charts
   - optional Telegram hero-chart delivery (text-first by default)
 - **Phase 3.6 editorial trust**
@@ -39,6 +45,8 @@ The current product is no longer just a headline feed:
   - deterministic selection stays upstream (no LLM ranking)
   - optional LLM render for morning/weekend email prose only
   - strict guardrails: ticker/number/link validation against deterministic payload
+  - citation floor guard (`LLM_EMAIL_MIN_SOURCE_URLS`) for rendered output
+  - OpenAI-compatible base URL support (`LLM_API_BASE_URL`)
   - shadow mode for safe rollout before enabling live LLM email rendering
   - deterministic formatter fallback on any LLM request/validation failure
 - **Operational resilience**
@@ -194,8 +202,10 @@ Important settings include:
 - `ENABLE_LLM_EMAIL_RENDER`
 - `LLM_RENDER_SHADOW_MODE`
 - `LLM_EMAIL_MODEL`
+- `LLM_API_BASE_URL`
 - `LLM_EMAIL_TIMEOUT_SECONDS`
 - `LLM_EMAIL_MAX_CHARS`
+- `LLM_EMAIL_MIN_SOURCE_URLS`
 - `DELIVERY_CHANNEL` (`all`, `telegram`, `email`)
 
 Recommended delivery defaults:
@@ -210,6 +220,9 @@ Recommended delivery defaults:
 Run this sequence before enabling live LLM email output:
 
 ```bash
+# 0) sanity-check config and rollout mode
+python -m app.cli preflight
+
 # 1) baseline deterministic output
 python -m app.cli --dry-run --show-output --email-only morning
 

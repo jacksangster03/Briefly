@@ -13,7 +13,7 @@ from app.messaging.telegram import TelegramMessenger
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MarketSetup, MorningBriefing
 from app.schemas.delivery import ChartAsset
-from app.schemas.events import NormalisedEvent, PricePoint, QuoteData
+from app.schemas.events import NormalisedEvent, PricePoint, QuoteData, SectorSnapshot
 from app.schemas.portfolio import PortfolioHolding
 from app.settings import Settings
 
@@ -44,6 +44,30 @@ def test_chart_renderer_returns_png_asset():
     assert asset.content_id
 
 
+def test_chart_renderer_macro_and_sector_assets():
+    renderer = ChartRenderer()
+
+    macro_asset = renderer.render_macro_risk_strip(
+        [
+            QuoteData(symbol="TLT", display_name="20Y+ Treasury", current_price=86.0, change_percent=-0.8),
+            QuoteData(symbol="GLD", display_name="Gold", current_price=240.0, change_percent=0.2),
+            QuoteData(symbol="USO", display_name="WTI Crude", current_price=81.0, change_percent=1.4),
+        ]
+    )
+    assert macro_asset is not None
+    assert macro_asset.content.startswith(b"\x89PNG")
+
+    sector_asset = renderer.render_sector_exposure_performance(
+        [
+            ("Technology", 0.52, 1.1),
+            ("Financials", 0.21, -0.4),
+            ("Healthcare", 0.14, 0.2),
+        ]
+    )
+    assert sector_asset is not None
+    assert sector_asset.content.startswith(b"\x89PNG")
+
+
 def test_morning_chart_builder_builds_multiple_assets():
     class StubMarketData:
         def get_price_history(self, symbol: str, period: str = "1mo", interval: str = "1d"):
@@ -56,14 +80,20 @@ def test_morning_chart_builder_builds_multiple_assets():
     profile = UserProfile(
         portfolio_holdings=[
             PortfolioHolding(profile_name="default_user", symbol="NVDA", weight_pct=8.0, bucket="core"),
-        ]
+        ],
+        portfolio_sector_weights={"technology": 0.7},
     )
     briefing = MorningBriefing(
         market_setup=MarketSetup(
             index_quotes=[
                 QuoteData(symbol="SPY", display_name="S&P 500", current_price=500.0, change_percent=0.8),
                 QuoteData(symbol="QQQ", display_name="Nasdaq 100", current_price=420.0, change_percent=-0.4),
-            ]
+            ],
+            macro_quotes=[
+                QuoteData(symbol="TLT", display_name="20Y+ Treasury", current_price=86.0, change_percent=-0.8),
+                QuoteData(symbol="GLD", display_name="Gold", current_price=240.0, change_percent=0.2),
+                QuoteData(symbol="USO", display_name="WTI Crude", current_price=81.0, change_percent=1.4),
+            ],
         ),
         portfolio_quotes=[
             QuoteData(symbol="NVDA", display_name="Nvidia", current_price=101.0, change_percent=2.5),
@@ -72,11 +102,32 @@ def test_morning_chart_builder_builds_multiple_assets():
         portfolio_focus=[
             NormalisedEvent(title="Nvidia wins major order", tickers=["NVDA"], summary="Demand signal.")
         ],
+        sector_scan=[
+            SectorSnapshot(
+                sector_key="technology",
+                display_name="Technology",
+                etf_symbol="XLK",
+                etf_quote=QuoteData(
+                    symbol="XLK",
+                    display_name="Technology",
+                    current_price=222.0,
+                    change_percent=1.1,
+                ),
+            )
+        ],
     )
 
     charts = MorningChartBuilder(profile=profile, market_data=StubMarketData()).build(briefing)
-    assert len(charts) >= 2
-    assert {chart.key for chart in charts}.issuperset({"market_snapshot", "portfolio_movers"})
+    assert len(charts) == 5
+    assert {chart.key for chart in charts}.issuperset(
+        {
+            "market_snapshot",
+            "macro_risk_strip",
+            "top_holdings_performance",
+            "sector_exposure_performance",
+            "event_linked_trend",
+        }
+    )
 
 
 def test_email_formatter_embeds_inline_chart_cids():

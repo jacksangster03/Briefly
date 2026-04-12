@@ -101,6 +101,28 @@ def test_validate_candidate_rejects_unknown_numeric_tokens():
     assert any("Unknown numeric tokens" in error for error in errors)
 
 
+def test_validate_candidate_enforces_min_source_urls():
+    settings = Settings(
+        enable_llm_email_render=True,
+        openai_api_key="test-key",
+        llm_email_min_source_urls=2,
+    )
+    renderer = LLMEmailRenderer(settings)
+    briefing, events = _sample_briefing()
+    second = events[0].model_copy(deep=True)
+    second.cluster_id = "tesla_cluster_2"
+    second.url = "https://example.com/tesla-second-source"
+    payload = renderer._build_payload(briefing, events + [second])
+
+    candidate = {
+        "subject": "Weekend Briefing",
+        "body": "Tesla (TSLA) demand remains in focus.",
+        "source_urls": ["https://example.com/tesla-demand-reset"],
+    }
+    errors, _ = renderer._validate_candidate(candidate, payload)
+    assert any("Insufficient source URLs" in error for error in errors)
+
+
 def test_render_morning_shadow_mode_keeps_deterministic_active(monkeypatch):
     settings = Settings(
         enable_llm_email_render=True,

@@ -124,6 +124,123 @@ class ChartRenderer:
             filename=f"{key}.png",
         )
 
+    def render_macro_risk_strip(self, quotes: list[QuoteData]) -> ChartAsset | None:
+        """Render a compact macro risk strip from macro instrument moves."""
+        if not quotes:
+            return None
+
+        selected = quotes[:5]
+        labels = [q.display_name or q.symbol for q in selected]
+        values = [q.change_percent for q in selected]
+        colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
+
+        fig, ax = plt.subplots(figsize=(8.2, 4.2), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        bars = ax.barh(labels, values, color=colors, edgecolor="none")
+        ax.axvline(0, color=GRID, linewidth=1.2)
+        ax.set_title("Macro Risk Strip", loc="left", fontsize=15, weight="bold", color=TEXT)
+        ax.set_xlabel("Change %", color=TEXT)
+        ax.grid(axis="x", color=GRID, linewidth=0.8, alpha=0.8)
+        ax.tick_params(axis="x", colors=TEXT)
+        ax.tick_params(axis="y", colors=TEXT)
+        ax.invert_yaxis()
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        for bar, value in zip(bars, values):
+            ax.text(
+                value + (0.06 if value >= 0 else -0.06),
+                bar.get_y() + bar.get_height() / 2,
+                f"{value:+.2f}%",
+                va="center",
+                ha="left" if value >= 0 else "right",
+                fontsize=9.5,
+                color=TEXT,
+                weight="bold",
+            )
+
+        fig.tight_layout()
+        return self._to_asset(
+            fig,
+            key="macro_risk_strip",
+            title="Macro Risk Strip",
+            caption="Cross-asset risk gauges (rates, commodities, dollar, crypto) at the latest capture.",
+            filename="macro-risk-strip.png",
+        )
+
+    def render_sector_exposure_performance(
+        self,
+        points: list[tuple[str, float, float]],
+    ) -> ChartAsset | None:
+        """Render portfolio sector exposure overlaid with ETF performance."""
+        if not points:
+            return None
+
+        top_points = sorted(points, key=lambda item: item[1], reverse=True)[:6]
+        labels = [label for label, _, _ in top_points]
+        exposures = [weight for _, weight, _ in top_points]
+        changes = [change for _, _, change in top_points]
+        colors = [POSITIVE if change >= 0 else NEGATIVE for change in changes]
+
+        fig, ax = plt.subplots(figsize=(8.4, 4.8), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        bars = ax.bar(labels, exposures, color=ACCENT, alpha=0.78, edgecolor="none")
+        ax.set_ylim(0, max(exposures) * 1.35 if exposures else 1.0)
+        ax.set_ylabel("Portfolio Weight", color=TEXT)
+        ax.set_title("Sector Exposure vs Performance", loc="left", fontsize=15, weight="bold", color=TEXT)
+        ax.grid(axis="y", color=GRID, linewidth=0.8, alpha=0.8)
+        ax.tick_params(axis="x", labelrotation=18, colors=TEXT)
+        ax.tick_params(axis="y", colors=TEXT)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        for bar, exposure in zip(bars, exposures):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                exposure + 0.01,
+                f"{exposure:.0%}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                color=TEXT,
+            )
+
+        ax2 = ax.twinx()
+        ax2.axhline(0, color=GRID, linewidth=1.0)
+        ax2.scatter(
+            range(len(labels)),
+            changes,
+            color=colors,
+            s=84,
+            zorder=5,
+        )
+        ax2.set_ylabel("ETF Change %", color=TEXT)
+        ax2.tick_params(axis="y", colors=TEXT)
+        for spine in ax2.spines.values():
+            spine.set_visible(False)
+        for idx, change in enumerate(changes):
+            ax2.text(
+                idx,
+                change + (0.08 if change >= 0 else -0.08),
+                f"{change:+.2f}%",
+                ha="center",
+                va="bottom" if change >= 0 else "top",
+                fontsize=9,
+                color=TEXT,
+                weight="bold",
+            )
+
+        fig.tight_layout()
+        return self._to_asset(
+            fig,
+            key="sector_exposure_performance",
+            title="Sector Exposure vs Performance",
+            caption="Portfolio sector concentration with the latest corresponding sector ETF move.",
+            filename="sector-exposure-performance.png",
+        )
+
     def render_price_history(
         self,
         symbol_label: str,
