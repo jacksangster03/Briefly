@@ -35,6 +35,12 @@ The current product is no longer just a headline feed:
   - quote freshness lines (`as of <local time>`, provider source mix) in watchlist/sector output
   - explicit close-reference wording on weekend quote lines
   - compact handling for empty sector sections to avoid long blank runs
+- **Phase 4 email render layer (preflight + fallback safe)**
+  - deterministic selection stays upstream (no LLM ranking)
+  - optional LLM render for morning/weekend email prose only
+  - strict guardrails: ticker/number/link validation against deterministic payload
+  - shadow mode for safe rollout before enabling live LLM email rendering
+  - deterministic formatter fallback on any LLM request/validation failure
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths
@@ -72,6 +78,7 @@ python -m app.cli breaking
 python -m app.cli scheduler
 python -m app.cli init-db
 python -m app.cli status
+python -m app.cli preflight
 python -m app.cli quote NVDA
 python -m app.cli news
 ```
@@ -177,18 +184,47 @@ Important settings include:
 - `FINNHUB_API_KEY`
 - `NEWSAPI_KEY`
 - `FRED_API_KEY`
+- `OPENAI_API_KEY` (required only if enabling Phase 4 LLM email render)
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 - `PROVIDER_TIMEOUT`
 - `PROVIDER_MAX_RETRIES`
 - `ENABLE_CHARTS`
 - `TELEGRAM_SEND_CHARTS`
+- `ENABLE_LLM_EMAIL_RENDER`
+- `LLM_RENDER_SHADOW_MODE`
+- `LLM_EMAIL_MODEL`
+- `LLM_EMAIL_TIMEOUT_SECONDS`
+- `LLM_EMAIL_MAX_CHARS`
 - `DELIVERY_CHANNEL` (`all`, `telegram`, `email`)
 
 Recommended delivery defaults:
 - keep Telegram text-first: `TELEGRAM_SEND_CHARTS=false`
 - use rich charts in email: `ENABLE_CHARTS=true`
 - leave channel routing at `DELIVERY_CHANNEL=all` and override per-run with CLI flags
+- for Phase 4 rollout, start with `ENABLE_LLM_EMAIL_RENDER=true` + `LLM_RENDER_SHADOW_MODE=true`
+  and inspect `morning_email_llm_shadow` in terminal output before switching shadow off
+
+### Phase 4 preflight checklist
+
+Run this sequence before enabling live LLM email output:
+
+```bash
+# 1) baseline deterministic output
+python -m app.cli --dry-run --show-output --email-only morning
+
+# 2) turn on render layer in shadow mode
+#    .env:
+#    ENABLE_LLM_EMAIL_RENDER=true
+#    LLM_RENDER_SHADOW_MODE=true
+#    OPENAI_API_KEY=...
+python -m app.cli --dry-run --show-output --email-only morning
+
+# 3) review [EMAIL OUTPUT] morning_email_llm_shadow vs morning_email_preview
+#    for 3-5 runs; only then move to live mode:
+#    LLM_RENDER_SHADOW_MODE=false
+python -m app.cli --show-output --email-only morning
+```
 
 General runtime settings are defined in:
 - [app/settings.py](/Users/jack/market-briefing-bot/app/settings.py)
@@ -225,7 +261,8 @@ Briefing generation
   morning / intraday / breaking
 
 Formatting + delivery
-  TelegramFormatter -> Telegram / Email
+  TelegramFormatter -> deterministic EmailFormatter
+  -> optional LLMEmailRenderer (shadow/live) -> Telegram / Email
 
 Persistence
   SQLite for sent messages, provider health, events, market snapshots, holdings
@@ -264,6 +301,7 @@ The test suite currently covers:
 - manual `--show-output` mode
 - market-data fallback behavior
 - provider circuit breaker behavior
+- LLM email render guardrails + shadow/live fallback behavior
 
 ## Typical workflows
 
@@ -310,6 +348,10 @@ The repo is now beyond basic plumbing:
   - `PORTFOLIO FOCUS`
   - intraday prioritization
   - operational debugging tools like `--show-output`
+- **Phase 4 preflight + render layer** is now in place
+  - deterministic selection + optional LLM render for morning/weekend email
+  - shadow mode rollout controls
+  - strict validation against deterministic payload and safe fallback
 
 The biggest remaining quality gap is still editorial/source quality in some surfaced headlines, not the core plumbing.
 

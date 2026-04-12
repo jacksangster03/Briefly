@@ -218,3 +218,31 @@ def test_get_messengers_respects_telegram_only_setting():
     messengers = _get_messengers(settings, profile)
     names = [messenger.name for messenger in messengers]
     assert names == ["telegram"]
+
+
+def test_preflight_reports_pass_for_dry_run_defaults():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--dry-run", "preflight"])
+    assert result.exit_code == 0, result.output
+    assert "phase-4 preflight" in result.output
+    assert "result: PASS" in result.output
+
+
+def test_preflight_flags_missing_openai_key_when_llm_enabled(monkeypatch):
+    from app import cli as cli_module
+
+    real_get_settings = cli_module.get_settings
+
+    def _fake_get_settings():
+        settings = real_get_settings()
+        settings.enable_llm_email_render = True
+        settings.openai_api_key = ""
+        settings.dry_run = True
+        return settings
+
+    monkeypatch.setattr(cli_module, "get_settings", _fake_get_settings)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["preflight"])
+    assert result.exit_code == 0, result.output
+    assert "[FAIL] OpenAI key" in result.output
+    assert "result: FAIL" in result.output

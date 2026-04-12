@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     show_output: bool = False
     enable_charts: bool = True
     telegram_send_charts: bool = False
+    enable_llm_email_render: bool = False
+    llm_render_shadow_mode: bool = True
+    llm_email_model: str = "gpt-4o-mini"
+    llm_email_timeout_seconds: int = 25
+    llm_email_max_chars: int = 3200
     # all | telegram | email
     delivery_channel: str = "all"
 

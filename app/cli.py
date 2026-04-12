@@ -141,12 +141,65 @@ def status(ctx):
     click.echo(f"  Timezone:    {settings.timezone}")
     click.echo(f"  Dry run:     {settings.dry_run}")
     click.echo(f"  Delivery:    {settings.normalized_delivery_channel}")
+    llm_mode = "shadow" if settings.llm_render_shadow_mode else "live"
+    llm_enabled = "enabled" if settings.enable_llm_email_render else "disabled"
+    click.echo(f"  LLM email:   {llm_enabled} ({llm_mode})")
     click.echo(f"  Database:    {settings.database_url}")
     click.echo(f"  Finnhub:     {'configured' if settings.finnhub_configured else 'not set'}")
     click.echo(f"  FRED:        {'configured' if settings.fred_configured else 'not set'}")
     click.echo(f"  NewsAPI:     {'configured' if settings.newsapi_configured else 'not set'}")
     click.echo(f"  Telegram:    {'configured' if settings.telegram_configured else 'not set'}")
     click.echo(f"  Email:       {'configured' if settings.email_configured else 'not set'}")
+
+
+@cli.command()
+@click.pass_context
+def preflight(ctx):
+    """Run a Phase 4 delivery preflight check (render + channel readiness)."""
+    settings = ctx.obj["settings"]
+    llm_mode = "shadow" if settings.llm_render_shadow_mode else "live"
+    llm_enabled = settings.enable_llm_email_render
+
+    checks: list[tuple[str, bool, str]] = [
+        ("Telegram channel", settings.telegram_configured or settings.dry_run, "configured or dry-run"),
+        ("Email channel", settings.email_configured or settings.dry_run, "configured or dry-run"),
+        ("Charts enabled", settings.enable_charts, "recommended for rich morning email"),
+        (
+            "OpenAI key",
+            (not llm_enabled) or bool(settings.openai_api_key),
+            "required only when ENABLE_LLM_EMAIL_RENDER=true",
+        ),
+    ]
+
+    click.echo("phase-4 preflight")
+    click.echo(f"  Delivery channel: {settings.normalized_delivery_channel}")
+    click.echo(f"  Dry run:          {settings.dry_run}")
+    click.echo(f"  LLM render:       {'enabled' if llm_enabled else 'disabled'} ({llm_mode})")
+    click.echo(f"  LLM model:        {settings.llm_email_model}")
+    click.echo(f"  LLM body cap:     {settings.llm_email_max_chars} chars")
+    click.echo("")
+
+    for label, ok, detail in checks:
+        status = "PASS" if ok else "FAIL"
+        click.echo(f"  [{status}] {label}: {detail}")
+
+    warnings: list[str] = []
+    if llm_enabled and not settings.llm_render_shadow_mode and not settings.dry_run:
+        warnings.append("LLM live mode is enabled. Use shadow mode first for 3-5 inspected runs.")
+    if settings.normalized_delivery_channel == "telegram" and llm_enabled:
+        warnings.append("LLM render is email-first; telegram-only runs will not exercise LLM output.")
+    if settings.normalized_delivery_channel == "email" and not settings.email_configured and not settings.dry_run:
+        warnings.append("Email-only live delivery requested but email credentials are not configured.")
+
+    if warnings:
+        click.echo("")
+        click.echo("  warnings:")
+        for warning in warnings:
+            click.echo(f"  - {warning}")
+
+    has_failures = any(not ok for _, ok, _ in checks)
+    click.echo("")
+    click.echo(f"  result: {'FAIL' if has_failures else 'PASS'}")
 
 
 @cli.command()

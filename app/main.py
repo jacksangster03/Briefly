@@ -15,6 +15,7 @@ from app.briefing.email_formatter import EmailFormatter
 from app.briefing.formatter import TelegramFormatter
 from app.briefing.breaking_generator import BreakingAlertGenerator
 from app.briefing.intraday_generator import IntradayGenerator
+from app.briefing.llm_email_renderer import LLMEmailRenderer
 from app.briefing.morning_generator import MorningBriefingGenerator
 from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
@@ -256,6 +257,20 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
         seen_tracking_ids.add(tracking_id)
         display_events.append(evt)
 
+    llm_decision = LLMEmailRenderer(settings).render_morning(
+        briefing=briefing,
+        deterministic_email=email_content,
+        selected_events=display_events,
+    )
+    active_email_content = llm_decision.active_email
+    if settings.show_output and llm_decision.shadow_preview:
+        _print_email_output(
+            llm_decision.shadow_preview.subject,
+            llm_decision.shadow_preview.plain_text,
+            llm_decision.shadow_preview.inline_assets,
+            "morning_email_llm_shadow",
+        )
+
     telegram_messengers = [m for m in messengers if isinstance(m, TelegramMessenger)]
     email_messengers = [m for m in messengers if isinstance(m, EmailMessenger)]
 
@@ -267,16 +282,16 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
         settings.show_output
         and settings.normalized_delivery_channel != "telegram"
         and not email_messengers
-        and briefing.chart_assets
+        and (briefing.chart_assets or settings.enable_llm_email_render)
     ):
         _print_email_output(
-            email_content.subject,
-            email_content.plain_text,
-            email_content.inline_assets,
+            active_email_content.subject,
+            active_email_content.plain_text,
+            active_email_content.inline_assets,
             "morning_email_preview",
         )
     for messenger in email_messengers:
-        _deliver_rich_email(messenger, email_content, "morning_brief", display_events, settings=settings)
+        _deliver_rich_email(messenger, active_email_content, "morning_brief", display_events, settings=settings)
 
     logger.info(
         "Morning briefing delivered: %d messages, %d events",
