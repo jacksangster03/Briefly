@@ -46,6 +46,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     catalogs = _build_followables_catalog(settings=settings, profile=profile)
     metadata = _build_profile_metadata(profile=profile, profile_name=normalized_profile)
     validations = _build_profile_validations(profile=profile)
+    analysis = _build_portfolio_analysis(profile=profile)
 
     return {
         "profile": normalized_profile,
@@ -87,6 +88,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
         "catalogs": catalogs,
         "metadata": metadata,
         "validations": validations,
+        "analysis": analysis,
         "supported_preference_keys": supported_preference_keys(),
     }
 
@@ -301,6 +303,8 @@ def _build_profile_metadata(*, profile: UserProfile, profile_name: str) -> dict[
     return {
         "last_holdings_update": _iso_or_none(holdings_updated_at),
         "last_preferences_update": _iso_or_none(preferences_updated_at),
+        "last_holdings_update_local": _display_local_datetime(holdings_updated_at, profile.timezone),
+        "last_preferences_update_local": _display_local_datetime(preferences_updated_at, profile.timezone),
         "next_morning_send_local": _next_morning_send(profile),
     }
 
@@ -375,6 +379,158 @@ def _build_profile_validations(*, profile: UserProfile) -> list[dict[str, str]]:
     return warnings
 
 
+def _build_portfolio_analysis(*, profile: UserProfile) -> dict[str, Any]:
+    """Compute concise analysis metrics for overview cards/charts."""
+    weights = [
+        float(position.weight_pct)
+        for position in profile.portfolio_holdings
+        if position.weight_pct is not None
+    ]
+    weights_sorted = sorted(weights, reverse=True)
+    total_weight = float(sum(weights))
+    top5_weight = float(sum(weights_sorted[:5])) if weights_sorted else 0.0
+    top5_share = (top5_weight / total_weight * 100.0) if total_weight > 0 else 0.0
+
+    largest_position = None
+    if profile.portfolio_holdings:
+        ranked_positions = sorted(
+            profile.portfolio_holdings,
+            key=lambda p: (p.weight_pct is not None, p.weight_pct or 0.0),
+            reverse=True,
+        )
+        head = ranked_positions[0]
+        largest_position = {
+            "symbol": head.symbol,
+            "weight_pct": float(head.weight_pct or 0.0) if head.weight_pct is not None else None,
+            "bucket": head.bucket or "",
+        }
+
+    top_sector = ""
+    if profile.portfolio_sector_weights:
+        top_sector = max(profile.portfolio_sector_weights.items(), key=lambda item: item[1])[0]
+    top_region = ""
+    if profile.coverage_weights:
+        top_region = max(profile.coverage_weights.items(), key=lambda item: item[1])[0]
+
+    delivery_enabled = {
+        "morning": bool(profile.channels_for("morning")),
+        "intraday": bool(profile.channels_for("intraday")),
+        "breaking": bool(profile.channels_for("breaking")),
+    }
+
+    sector_comparison = _build_sector_comparison_rows(profile)
+    region_rows = _build_region_rows(profile)
+    watchlist_rows = [
+        {"label": "Primary", "count": len(profile.watchlist_primary)},
+        {"label": "Secondary", "count": len(profile.watchlist_secondary)},
+        {"label": "Monitor", "count": len(profile.watchlist_monitor)},
+    ]
+    bucket_rows = _build_bucket_rows(profile)
+    max_sector_pct = max((row["portfolio_pct"] for row in sector_comparison), default=0.0)
+    max_sector_weight = max((row["coverage_weight"] for row in sector_comparison), default=0.0)
+    max_region_weight = max((row["value"] for row in region_rows), default=0.0)
+    max_watch_count = max((row["count"] for row in watchlist_rows), default=0)
+    max_bucket_value = max((row["value"] for row in bucket_rows), default=0.0)
+
+    return {
+        "kpis": {
+            "holdings_weight_total_pct": total_weight,
+            "holdings_weight_gap_pct": 100.0 - total_weight if total_weight > 0 else None,
+            "largest_position": largest_position,
+            "top_sector": top_sector,
+            "top_region": top_region,
+            "top5_concentration_pct": top5_share,
+            "watchlist_total": (
+                len(profile.watchlist_primary)
+                + len(profile.watchlist_secondary)
+                + len(profile.watchlist_monitor)
+            ),
+            "delivery_enabled": delivery_enabled,
+        },
+        "charts": {
+            "sector_comparison": sector_comparison,
+            "region_weights": region_rows,
+            "watchlist_priority": watchlist_rows,
+            "bucket_allocation": bucket_rows,
+        },
+        "chart_max": {
+            "sector": max(max_sector_pct, max_sector_weight),
+            "region": max_region_weight,
+            "watchlist": float(max_watch_count),
+            "bucket": max_bucket_value,
+        },
+        "briefing_impact_preview": _build_briefing_impact_preview(profile),
+    }
+
+
+def _build_sector_comparison_rows(profile: UserProfile) -> list[dict[str, Any]]:
+    keys = set(profile.portfolio_sector_weights.keys()) | set(profile.sector_weights.keys())
+    rows: list[dict[str, Any]] = []
+    for key in sorted(keys):
+        rows.append(
+            {
+                "key": key,
+                "label": key.replace("_", " ").title(),
+                "portfolio_pct": float(profile.portfolio_sector_weights.get(key, 0.0) * 100.0),
+                "coverage_weight": float(profile.sector_weights.get(key, 0.0)),
+            }
+        )
+    rows.sort(key=lambda row: max(row["portfolio_pct"], row["coverage_weight"]), reverse=True)
+    return rows[:8]
+
+
+def _build_region_rows(profile: UserProfile) -> list[dict[str, Any]]:
+    rows = [
+        {
+            "key": key,
+            "label": key.replace("_", " ").title(),
+            "value": float(value),
+        }
+        for key, value in profile.coverage_weights.items()
+    ]
+    rows.sort(key=lambda row: row["value"], reverse=True)
+    return rows[:8]
+
+
+def _build_bucket_rows(profile: UserProfile) -> list[dict[str, Any]]:
+    bucket_totals: dict[str, float] = {}
+    unweighted_count = 0
+    for position in profile.portfolio_holdings:
+        bucket = (position.bucket or "unlabeled").strip().lower()
+        if position.weight_pct is None:
+            unweighted_count += 1
+            continue
+        bucket_totals[bucket] = bucket_totals.get(bucket, 0.0) + float(position.weight_pct)
+    rows = [
+        {"label": bucket.replace("_", " ").title(), "value": value}
+        for bucket, value in bucket_totals.items()
+    ]
+    rows.sort(key=lambda row: row["value"], reverse=True)
+    if unweighted_count > 0:
+        rows.append({"label": "Unweighted Positions", "value": float(unweighted_count)})
+    return rows[:6]
+
+
+def _build_briefing_impact_preview(profile: UserProfile) -> str:
+    primary_count = len(profile.watchlist_primary)
+    top_region = ""
+    if profile.coverage_weights:
+        top_region = max(profile.coverage_weights.items(), key=lambda item: item[1])[0].replace("_", " ").title()
+    top_sectors = sorted(profile.sector_weights.items(), key=lambda item: float(item[1]), reverse=True)[:3]
+    sector_text = ", ".join(
+        key.replace("_", " ").title()
+        for key, weight in top_sectors
+        if float(weight) > 0
+    )
+    region_text = top_region or profile.home_region.replace("_", " ").title()
+    if not sector_text:
+        sector_text = "balanced sector coverage"
+    return (
+        f"Current settings emphasize {region_text} context and {sector_text}. "
+        f"Primary watchlist contains {primary_count} symbol(s), which drives strongest ranking impact."
+    )
+
+
 def _latest_holdings_update(profile_name: str) -> datetime | None:
     with get_session() as session:
         row = (
@@ -413,6 +569,15 @@ def _next_morning_send(profile: UserProfile) -> str:
     if candidate <= now_local:
         candidate = candidate + timedelta(days=1)
     return candidate.strftime("%Y-%m-%d %H:%M %Z")
+
+
+def _display_local_datetime(value: datetime | None, tz_name: str) -> str:
+    if value is None:
+        return "Not provided"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    tz = ZoneInfo(tz_name)
+    return value.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z")
 
 
 def _iso_or_none(value: datetime | None) -> str | None:

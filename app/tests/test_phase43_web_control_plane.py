@@ -95,6 +95,7 @@ def test_ui_settings_page_renders(client):
     assert "Portfolio Control Panel" in response.text
     assert "Saved values are persisted in SQLite as" in response.text
     assert "Home Region Focus" in response.text
+    assert "Briefing Impact Preview" in response.text
 
 
 def test_api_put_preferences_and_state_roundtrip(client):
@@ -118,6 +119,9 @@ def test_api_put_preferences_and_state_roundtrip(client):
     assert state["effective"]["sections"]["watchlist"] is False
     assert "metadata" in state
     assert "validations" in state
+    assert "analysis" in state
+    assert "kpis" in state["analysis"]
+    assert "chart_max" in state["analysis"]
 
 
 def test_api_put_preferences_rejects_invalid_values(client):

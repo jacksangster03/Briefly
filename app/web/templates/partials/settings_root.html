@@ -6,6 +6,8 @@
 {% set watchlist = state.effective.watchlist %}
 {% set metadata = state.metadata %}
 {% set validations = state.validations %}
+{% set analysis = state.analysis %}
+{% set kpis = analysis.kpis %}
 
 <style>
   .grid {
@@ -117,6 +119,95 @@
     margin: 2px 0 6px;
     font-weight: 600;
     color: var(--ink);
+  }
+  .kpi-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    margin-bottom: 10px;
+  }
+  .kpi {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    padding: 10px;
+  }
+  .kpi-label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .kpi-value {
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: 0.01em;
+  }
+  .kpi-note {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 0.74rem;
+  }
+  .chart-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    margin-top: 8px;
+  }
+  .chart-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    padding: 10px;
+  }
+  .chart-title {
+    margin: 0 0 8px;
+    font-size: 0.86rem;
+    color: var(--muted);
+  }
+  .bar-list {
+    display: grid;
+    gap: 6px;
+  }
+  .bar-row {
+    display: grid;
+    grid-template-columns: 1fr 72px;
+    align-items: center;
+    gap: 8px;
+  }
+  .bar-label {
+    font-size: 0.78rem;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
+  .bar-track {
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  }
+  .bar-fill.secondary {
+    background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  }
+  .bar-value {
+    text-align: right;
+    font-size: 0.76rem;
+    color: var(--muted);
+  }
+  .preview-box {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    padding: 10px;
+    font-size: 0.86rem;
+    color: var(--ink);
+    margin-top: 8px;
   }
   .mono {
     margin: 0;
@@ -350,8 +441,132 @@
 <div class="grid">
   <section class="card" id="section-overview">
     <h2>Overview</h2>
-    <p class="muted">Quick operational summary so you can confirm current state before making changes.</p>
-    <div class="summary-grid">
+    <p class="muted">Portfolio analysis layer: current exposure shape and how it will influence briefing prioritization.</p>
+
+    <div class="kpi-grid">
+      <div class="kpi">
+        <div class="kpi-label">Holdings Weight Total</div>
+        <div class="kpi-value">{{ "%.2f"|format(kpis.holdings_weight_total_pct) }}%</div>
+        <div class="kpi-note">Gap vs 100%: {{ "%.2f"|format(kpis.holdings_weight_gap_pct) if kpis.holdings_weight_gap_pct is not none else "Not provided" }}%</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Largest Position</div>
+        <div class="kpi-value">
+          {{ kpis.largest_position.symbol if kpis.largest_position else "Not provided" }}
+          {% if kpis.largest_position and kpis.largest_position.weight_pct is not none %}
+            ({{ "%.2f"|format(kpis.largest_position.weight_pct) }}%)
+          {% endif %}
+        </div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Top 5 Concentration</div>
+        <div class="kpi-value">{{ "%.2f"|format(kpis.top5_concentration_pct) }}%</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Top Portfolio Sector</div>
+        <div class="kpi-value">{{ kpis.top_sector.replace("_", " ").title() if kpis.top_sector else "Not provided" }}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Top Region Focus</div>
+        <div class="kpi-value">{{ kpis.top_region.replace("_", " ").title() if kpis.top_region else state.effective.coverage.home_region.replace("_", " ").title() }}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Next Morning Send</div>
+        <div class="kpi-value">{{ metadata.next_morning_send_local }}</div>
+        <div class="kpi-note">Delivery enabled: M {{ "yes" if kpis.delivery_enabled.morning else "no" }}, I {{ "yes" if kpis.delivery_enabled.intraday else "no" }}, B {{ "yes" if kpis.delivery_enabled.breaking else "no" }}</div>
+      </div>
+    </div>
+
+    <div class="chart-grid">
+      <div class="chart-card">
+        <p class="chart-title">Portfolio Bucket Allocation</p>
+        {% set bucket_rows = analysis.charts.bucket_allocation %}
+        {% if bucket_rows %}
+          {% set max_bucket = analysis.chart_max.bucket %}
+          <div class="bar-list">
+            {% for row in bucket_rows %}
+              <div class="bar-row">
+                <div>
+                  <div class="bar-label">{{ row.label }}</div>
+                  <div class="bar-track"><div class="bar-fill" style="width: {{ (row.value / max_bucket * 100) if max_bucket > 0 else 0 }}%;"></div></div>
+                </div>
+                <div class="bar-value">{{ "%.2f"|format(row.value) }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="muted">No weighted holdings data available.</p>
+        {% endif %}
+      </div>
+
+      <div class="chart-card">
+        <p class="chart-title">Region Emphasis</p>
+        {% set region_rows = analysis.charts.region_weights %}
+        {% if region_rows %}
+          {% set max_region = analysis.chart_max.region %}
+          <div class="bar-list">
+            {% for row in region_rows %}
+              <div class="bar-row">
+                <div>
+                  <div class="bar-label">{{ row.label }}</div>
+                  <div class="bar-track"><div class="bar-fill secondary" style="width: {{ (row.value / max_region * 100) if max_region > 0 else 0 }}%;"></div></div>
+                </div>
+                <div class="bar-value">{{ "%.2f"|format(row.value) }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="muted">No region weights configured yet.</p>
+        {% endif %}
+      </div>
+
+      <div class="chart-card">
+        <p class="chart-title">Watchlist Priority Ladder</p>
+        {% set watch_rows = analysis.charts.watchlist_priority %}
+        {% if watch_rows %}
+          {% set max_watch = analysis.chart_max.watchlist %}
+          <div class="bar-list">
+            {% for row in watch_rows %}
+              <div class="bar-row">
+                <div>
+                  <div class="bar-label">{{ row.label }}</div>
+                  <div class="bar-track"><div class="bar-fill" style="width: {{ (row.count / max_watch * 100) if max_watch > 0 else 0 }}%;"></div></div>
+                </div>
+                <div class="bar-value">{{ row.count }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="chart-card">
+        <p class="chart-title">Sector: Portfolio vs Coverage Weight</p>
+        {% set sector_rows = analysis.charts.sector_comparison %}
+        {% if sector_rows %}
+          {% set max_sector = analysis.chart_max.sector %}
+          <div class="bar-list">
+            {% for row in sector_rows %}
+              <div class="bar-row">
+                <div>
+                  <div class="bar-label">{{ row.label }}</div>
+                  <div class="bar-track"><div class="bar-fill" style="width: {{ (row.portfolio_pct / max_sector * 100) if max_sector > 0 else 0 }}%;"></div></div>
+                  <div class="bar-track" style="margin-top:3px;"><div class="bar-fill secondary" style="width: {{ (row.coverage_weight / max_sector * 100) if max_sector > 0 else 0 }}%;"></div></div>
+                </div>
+                <div class="bar-value">P {{ "%.1f"|format(row.portfolio_pct) }} / C {{ "%.1f"|format(row.coverage_weight) }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="muted">No sector comparison data available yet.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="preview-box">
+      <strong>Briefing Impact Preview:</strong> {{ analysis.briefing_impact_preview }}
+    </div>
+
+    <div class="summary-grid" style="margin-top:10px;">
       <dl class="summary">
         <dt>Profile</dt><dd>{{ state.profile }}</dd>
         <dt>Timezone</dt><dd>{{ state.effective.timezone }}</dd>
@@ -363,16 +578,17 @@
         <dt>Active Overrides</dt><dd>{{ state.overrides | length }}</dd>
       </dl>
       <dl class="summary">
-        <dt>Next Morning Send</dt><dd>{{ metadata.next_morning_send_local }}</dd>
         <dt>Morning Channels</dt><dd>{{ delivery.morning_channels | join(", ") if delivery.morning_channels else "Not configured" }}</dd>
         <dt>Intraday Channels</dt><dd>{{ delivery.intraday_channels | join(", ") if delivery.intraday_channels else "Not configured" }}</dd>
+        <dt>Breaking Channels</dt><dd>{{ delivery.breaking_channels | join(", ") if delivery.breaking_channels else "Not configured" }}</dd>
       </dl>
       <dl class="summary">
-        <dt>Last Holdings Update (UTC)</dt><dd>{{ metadata.last_holdings_update or "Not provided" }}</dd>
-        <dt>Last Preferences Update (UTC)</dt><dd>{{ metadata.last_preferences_update or "Not provided" }}</dd>
+        <dt>Last Holdings Update</dt><dd title="UTC: {{ metadata.last_holdings_update or 'Not provided' }}">{{ metadata.last_holdings_update_local }}</dd>
+        <dt>Last Preferences Update</dt><dd title="UTC: {{ metadata.last_preferences_update or 'Not provided' }}">{{ metadata.last_preferences_update_local }}</dd>
         <dt>Supported Keys</dt><dd>{{ state.supported_preference_keys | length }}</dd>
       </dl>
     </div>
+
     <div class="actions">
       <form
         hx-post="/ui/profile/{{ state.profile }}/reset"
@@ -690,8 +906,12 @@
     <p class="muted">Effective values = YAML defaults + active SQLite overrides for this profile.</p>
     <div class="summary-grid">
       <dl class="summary">
+        <dt>Last Holdings Update (Local)</dt>
+        <dd title="UTC: {{ metadata.last_holdings_update or 'Not provided' }}">{{ metadata.last_holdings_update_local }}</dd>
         <dt>Last Holdings Update (UTC)</dt>
         <dd>{{ metadata.last_holdings_update or "Not provided" }}</dd>
+        <dt>Last Preferences Update (Local)</dt>
+        <dd title="UTC: {{ metadata.last_preferences_update or 'Not provided' }}">{{ metadata.last_preferences_update_local }}</dd>
         <dt>Last Preferences Update (UTC)</dt>
         <dd>{{ metadata.last_preferences_update or "Not provided" }}</dd>
       </dl>
