@@ -81,6 +81,44 @@ def scheduler(ctx):
     start_scheduler()
 
 
+@cli.command("web")
+@click.option(
+    "--host",
+    default=None,
+    help="Bind host for control panel server (default from WEB_HOST).",
+)
+@click.option(
+    "--port",
+    type=int,
+    default=None,
+    help="Bind port for control panel server (default from WEB_PORT).",
+)
+@click.pass_context
+def web_panel(ctx, host: str | None, port: int | None):
+    """Run the local FastAPI + HTMX portfolio control panel."""
+    import uvicorn
+
+    from app.web.app import create_web_app
+
+    init_db()
+    settings = ctx.obj["settings"]
+    if host:
+        settings.web_host = host
+    if port:
+        settings.web_port = port
+
+    app = create_web_app(settings)
+    click.echo(
+        f"Starting control panel at http://{settings.web_host}:{settings.web_port}/ui/settings"
+    )
+    uvicorn.run(
+        app,
+        host=settings.web_host,
+        port=int(settings.web_port),
+        log_level=str(settings.log_level).lower(),
+    )
+
+
 @cli.command("import-holdings")
 @click.option(
     "--file",

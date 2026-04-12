@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from app.briefing.llm_email_renderer import LLMEmailRenderer
 from app.schemas.briefings import MarketSetup, MorningBriefing
 from app.schemas.delivery import ChartAsset, EmailRenderResult
@@ -217,3 +219,64 @@ def test_render_morning_falls_back_on_validation_failure(monkeypatch):
     assert decision.mode == "fallback"
     assert decision.active_email.subject == deterministic.subject
     assert decision.validation_errors
+
+
+def test_estimate_usage_cost_with_configured_rates():
+    settings = Settings(
+        enable_llm_email_render=True,
+        openai_api_key="test-key",
+        llm_email_input_cost_per_1m_tokens=0.15,
+        llm_email_output_cost_per_1m_tokens=0.60,
+    )
+    renderer = LLMEmailRenderer(settings)
+    cost = renderer._estimate_usage_cost(prompt_tokens=2000, completion_tokens=500)
+    assert cost is not None
+    assert cost == pytest.approx(0.0006, rel=1e-6)
+
+
+def test_estimate_usage_cost_disabled_when_rates_missing():
+    renderer = LLMEmailRenderer(
+        Settings(
+            enable_llm_email_render=True,
+            openai_api_key="test-key",
+            llm_email_input_cost_per_1m_tokens=0.0,
+            llm_email_output_cost_per_1m_tokens=0.0,
+        )
+    )
+    assert renderer._estimate_usage_cost(prompt_tokens=2000, completion_tokens=500) is None
+
+
+def test_validate_candidate_accepts_safe_percent_equivalent_numeric():
+    renderer = LLMEmailRenderer(Settings(enable_llm_email_render=True, openai_api_key="test-key"))
+    briefing, events = _sample_briefing()
+    payload = renderer._build_payload(briefing, events)
+    candidate = {
+        "subject": "Weekend Briefing",
+        "body": "S&P 500 held near 679.460 while TSLA remained in focus.",
+        "source_urls": ["https://example.com/tesla-demand-reset"],
+    }
+    errors, _ = renderer._validate_candidate(candidate, payload)
+    assert not any("Unknown numeric tokens" in error for error in errors)
+
+
+def test_build_payload_allows_title_and_exchange_ticker_mentions():
+    renderer = LLMEmailRenderer(Settings(enable_llm_email_render=True, openai_api_key="test-key"))
+    briefing, _ = _sample_briefing()
+    event = NormalisedEvent(
+        title="Nebius (NBIS) Eyes Foray Into Full-Stack AI",
+        summary="Oklo (NYSE:OKLO) signs expansion deal tied to AI datacenter demand.",
+        tickers=[],
+        source="newsapi",
+        event_type="company_news",
+        cluster_id="cluster_nbis_oklo",
+        url="https://example.com/nbis-oklo",
+        published_at=datetime(2026, 4, 12, 7, 50, tzinfo=timezone.utc),
+    )
+    payload = renderer._build_payload(briefing, [event])
+    candidate = {
+        "subject": "Weekend Briefing",
+        "body": "NBIS and OKLO remain in focus for AI infrastructure demand.",
+        "source_urls": ["https://example.com/nbis-oklo"],
+    }
+    errors, _ = renderer._validate_candidate(candidate, payload)
+    assert not any("Unknown ticker references" in error for error in errors)

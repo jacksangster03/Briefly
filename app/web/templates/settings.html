@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>market-briefing-bot Control Panel</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root {
+      --bg: #f3f7fb;
+      --card: #ffffff;
+      --ink: #12263a;
+      --muted: #4f647a;
+      --border: #d7e2ee;
+      --accent: #0b7285;
+      --success: #0f9d58;
+      --error: #c92a2a;
+      --shadow: 0 10px 30px rgba(18, 38, 58, 0.08);
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(1400px 700px at 20% -10%, #dceeff 0%, var(--bg) 45%, #edf3f9 100%);
+      color: var(--ink);
+      font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+      line-height: 1.4;
+      padding: 20px 14px 50px;
+    }
+
+    .shell {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .title {
+      font-size: clamp(1.4rem, 2.8vw, 2rem);
+      font-weight: 700;
+      margin: 0 0 8px;
+      letter-spacing: 0.01em;
+    }
+
+    .subtitle {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <h1 class="title">Portfolio Control Panel</h1>
+    <p class="subtitle">Single-user local control plane for profile settings and holdings snapshots.</p>
+    <div id="settings-root">
+      {% include "partials/settings_root.html" %}
+    </div>
+  </div>
+</body>
+</html>
+

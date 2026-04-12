@@ -66,8 +66,14 @@ class Settings(BaseSettings):
     llm_email_timeout_seconds: int = 25
     llm_email_max_chars: int = 3200
     llm_email_min_source_urls: int = 2
+    # Optional cost estimation (per 1M tokens). When both are > 0, usage logs
+    # include estimated per-run cost for the LLM render call.
+    llm_email_input_cost_per_1m_tokens: float = 0.0
+    llm_email_output_cost_per_1m_tokens: float = 0.0
     # all | telegram | email
     delivery_channel: str = "all"
+    web_host: str = "127.0.0.1"
+    web_port: int = 8080
 
     # -- Paths ----------------------------------------------------------------
     configs_dir: str = str(PROJECT_ROOT / "configs")

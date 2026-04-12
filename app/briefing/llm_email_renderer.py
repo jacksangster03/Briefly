@@ -27,7 +27,9 @@ logger = get_logger("llm_email")
 _URL_RE = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
 _PAREN_TICKER_RE = re.compile(r"\(([A-Z]{1,6})\)")
 _DOLLAR_TICKER_RE = re.compile(r"\$([A-Z]{1,6})\b")
+_EXCHANGE_TICKER_RE = re.compile(r"\((?:NASDAQ|NYSE|LSE|TSX|ASX|HKEX|OTC):([A-Z0-9.\-]{1,10})\)", re.IGNORECASE)
 _NUMERIC_TOKEN_RE = re.compile(r"(?:[$€£]\s*)?\d[\d,]*(?:\.\d+)?(?:%|bp|bps|x|k|m|b|bn|t)?", re.IGNORECASE)
+_NORMALISED_NUMERIC_RE = re.compile(r"^([€$£]?)(-?\d+(?:\.\d+)?)(%|bp|bps|x|k|m|b|bn|t)?$")
 
 
 @dataclass
@@ -173,6 +175,7 @@ class LLMEmailRenderer:
             event_rows.append(row)
 
             allowed_tickers.update(event.tickers)
+            allowed_tickers.update(self._extract_explicit_tickers(f"{event.title}\n{summary}"))
             if event.url and event.url not in allowed_urls:
                 ordered_urls.append(event.url)
                 allowed_urls.add(event.url)
@@ -257,14 +260,45 @@ class LLMEmailRenderer:
         if usage:
             prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
             completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
-            logger.info(
-                "LLM email usage: prompt=%s completion=%s model=%s",
-                prompt_tokens,
-                completion_tokens,
-                self.settings.llm_email_model,
+            total_tokens = int(prompt_tokens) + int(completion_tokens)
+            estimated_cost = self._estimate_usage_cost(
+                prompt_tokens=int(prompt_tokens),
+                completion_tokens=int(completion_tokens),
             )
+            if estimated_cost is None:
+                logger.info(
+                    "LLM email usage: prompt=%s completion=%s total=%s model=%s",
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    self.settings.llm_email_model,
+                )
+            else:
+                logger.info(
+                    "LLM email usage: prompt=%s completion=%s total=%s model=%s est_cost_usd=%.6f",
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    self.settings.llm_email_model,
+                    estimated_cost,
+                )
         message_content = payload["choices"][0]["message"]["content"]
         return self._extract_json_object(message_content)
+
+    def _estimate_usage_cost(
+        self,
+        *,
+        prompt_tokens: int,
+        completion_tokens: int,
+    ) -> float | None:
+        """Estimate USD cost when per-1M token rates are configured."""
+        input_rate = float(self.settings.llm_email_input_cost_per_1m_tokens or 0.0)
+        output_rate = float(self.settings.llm_email_output_cost_per_1m_tokens or 0.0)
+        if input_rate <= 0 or output_rate <= 0:
+            return None
+        input_cost = (max(0, int(prompt_tokens)) / 1_000_000) * input_rate
+        output_cost = (max(0, int(completion_tokens)) / 1_000_000) * output_rate
+        return input_cost + output_cost
 
     def _extract_json_object(self, content: str) -> dict[str, Any]:
         raw = (content or "").strip()
@@ -341,7 +375,7 @@ class LLMEmailRenderer:
         unknown_numeric_tokens = sorted(
             token
             for token in self._extract_numeric_tokens(text)
-            if token not in payload.allowed_numeric_tokens
+            if not self._numeric_token_allowed(token, payload.allowed_numeric_tokens)
         )
         if unknown_numeric_tokens:
             errors.append(f"Unknown numeric tokens: {', '.join(unknown_numeric_tokens[:5])}")
@@ -494,6 +528,14 @@ class LLMEmailRenderer:
         normalized = token.strip().lower().replace(" ", "").replace(",", "")
         if normalized.startswith("+"):
             normalized = normalized[1:]
+        match = _NORMALISED_NUMERIC_RE.match(normalized)
+        if not match:
+            return normalized
+        currency, number_part, suffix = match.groups()
+        if "." in number_part:
+            number_part = number_part.rstrip("0").rstrip(".")
+        suffix = suffix or ""
+        return f"{currency}{number_part}{suffix}"
         return normalized
 
     @staticmethod
@@ -507,9 +549,44 @@ class LLMEmailRenderer:
         return False
 
     @staticmethod
+    def _coerce_numeric_value(token: str) -> float | None:
+        """Extract numeric value from a normalized token for equivalence checks."""
+        stripped = token.strip().lower()
+        if stripped.startswith("+"):
+            stripped = stripped[1:]
+        if stripped.startswith("$") or stripped.startswith("€") or stripped.startswith("£"):
+            stripped = stripped[1:]
+        if stripped.endswith("%"):
+            stripped = stripped[:-1]
+        suffixes = ("bps", "bp", "bn", "k", "m", "b", "t", "x")
+        for suffix in suffixes:
+            if stripped.endswith(suffix):
+                stripped = stripped[: -len(suffix)]
+                break
+        try:
+            return float(stripped)
+        except ValueError:
+            return None
+
+    def _numeric_token_allowed(self, token: str, allowed_tokens: set[str]) -> bool:
+        """Allow strict matches plus safe percent/no-percent equivalents for rates."""
+        if token in allowed_tokens:
+            return True
+        numeric_value = self._coerce_numeric_value(token)
+        if numeric_value is None:
+            return False
+        # Permit 4.29 <-> 4.29% style swaps for yield/rate-scale values only.
+        if abs(numeric_value) > 20:
+            return False
+        if token.endswith("%"):
+            return token[:-1] in allowed_tokens
+        return f"{token}%" in allowed_tokens
+
+    @staticmethod
     def _extract_explicit_tickers(text: str) -> set[str]:
         tickers = set(_PAREN_TICKER_RE.findall(text or ""))
         tickers.update(_DOLLAR_TICKER_RE.findall(text or ""))
+        tickers.update(_EXCHANGE_TICKER_RE.findall(text or ""))
         return {ticker.upper() for ticker in tickers if ticker}
 
     @staticmethod

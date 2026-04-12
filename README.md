@@ -53,6 +53,10 @@ The current product is no longer just a headline feed:
   - per-profile, DB-backed overrides for channels, watchlists, sector weights, and morning sections
   - runtime profile load merges YAML defaults with persisted overrides
   - per-message routing (`morning` / `intraday` / `breaking`) can be customized by profile
+- **Phase 4.3 web control panel (FastAPI + HTMX)**
+  - local-first settings UI for holdings, watchlists, sector weights, delivery routing, and morning section visibility
+  - server-rendered panel with partial HTMX updates (no frontend build step)
+  - programmatic control-plane API for state, preference updates, followables search, and holdings upload
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths
@@ -88,6 +92,7 @@ python -m app.cli morning
 python -m app.cli intraday
 python -m app.cli breaking
 python -m app.cli scheduler
+python -m app.cli web --host 127.0.0.1 --port 8080
 python -m app.cli init-db
 python -m app.cli status
 python -m app.cli preflight
@@ -210,11 +215,14 @@ Important settings include:
 - `ENABLE_LLM_EMAIL_RENDER`
 - `LLM_RENDER_SHADOW_MODE`
 - `LLM_EMAIL_MODEL`
+- `LLM_EMAIL_INPUT_COST_PER_1M_TOKENS` (optional per-run cost estimate)
+- `LLM_EMAIL_OUTPUT_COST_PER_1M_TOKENS` (optional per-run cost estimate)
 - `LLM_API_BASE_URL`
 - `LLM_EMAIL_TIMEOUT_SECONDS`
 - `LLM_EMAIL_MAX_CHARS`
 - `LLM_EMAIL_MIN_SOURCE_URLS`
 - `DELIVERY_CHANNEL` (`all`, `telegram`, `email`)
+- `WEB_HOST`, `WEB_PORT` (Phase 4.3 local control panel bind)
 
 Recommended delivery defaults:
 - keep Telegram text-first: `TELEGRAM_SEND_CHARTS=false`
@@ -309,6 +317,34 @@ Supported keys:
 - `sections.morning.market_setup`, `sections.morning.macro_context`, `sections.morning.top_themes`
 - `sections.morning.portfolio_focus`, `sections.morning.sector_scan`, `sections.morning.watchlist`
 
+### Phase 4.3 web control panel usage
+
+Start the local panel:
+
+```bash
+python -m app.cli web --host 127.0.0.1 --port 8080
+```
+
+Open:
+- `http://127.0.0.1:8080/ui/settings?profile=default_user`
+- API docs: `http://127.0.0.1:8080/api/docs`
+
+Phase 4.3 HTTP surface:
+- `GET /ui/settings`
+- `GET /api/v1/profile/{profile}/state`
+- `PUT /api/v1/profile/{profile}/preferences`
+- `DELETE /api/v1/profile/{profile}/preferences/{pref_key}`
+- `POST /api/v1/profile/{profile}/holdings/import`
+- `GET /api/v1/followables/search`
+
+Example bulk preference update:
+
+```bash
+curl -X PUT "http://127.0.0.1:8080/api/v1/profile/default_user/preferences" \
+  -H "Content-Type: application/json" \
+  -d '{"updates":{"delivery.morning_channels":["email"],"sections.morning.watchlist":false}}'
+```
+
 ## Product architecture
 
 ```text
@@ -329,6 +365,9 @@ Formatting + delivery
   TelegramFormatter -> deterministic EmailFormatter
   -> optional LLMEmailRenderer (shadow/live) -> Telegram / Email
 
+Control plane
+  CLI prefs + FastAPI/HTMX local panel -> preferences + holdings services
+
 Persistence
   SQLite for sent messages, provider health, events, market snapshots,
   holdings, and user preference overrides
@@ -342,6 +381,8 @@ Key code areas:
 - [app/portfolio/importer.py](/Users/jack/market-briefing-bot/app/portfolio/importer.py)
 - [app/portfolio/service.py](/Users/jack/market-briefing-bot/app/portfolio/service.py)
 - [app/personalization/preferences_service.py](/Users/jack/market-briefing-bot/app/personalization/preferences_service.py)
+- [app/web/app.py](/Users/jack/market-briefing-bot/app/web/app.py)
+- [app/web/control_plane_service.py](/Users/jack/market-briefing-bot/app/web/control_plane_service.py)
 
 ## Testing
 
@@ -359,6 +400,7 @@ python -m pytest app/tests/test_market_data.py -q
 python -m pytest app/tests/test_show_output.py -q
 python -m pytest app/tests/test_circuit_breaker.py -q
 python -m pytest app/tests/test_phase42_control_plane.py -q
+python -m pytest app/tests/test_phase43_web_control_plane.py -q
 ```
 
 The test suite currently covers:
@@ -367,6 +409,7 @@ The test suite currently covers:
 - scheduler window behavior
 - holdings import/persistence/scoring
 - profile control-plane overrides (Phase 4.2)
+- web control panel + control-plane API (Phase 4.3)
 - manual `--show-output` mode
 - market-data fallback behavior
 - provider circuit breaker behavior
@@ -410,6 +453,14 @@ python -m app.cli prefs-set --profile default_user --key delivery.breaking_chann
 python -m app.cli --show-output morning
 ```
 
+### 6. Run the local control panel
+
+```bash
+python -m app.cli web --host 127.0.0.1 --port 8080
+```
+
+Then open `http://127.0.0.1:8080/ui/settings?profile=default_user`.
+
 ## Current phase
 
 The repo is now beyond basic plumbing:
@@ -434,6 +485,10 @@ The repo is now beyond basic plumbing:
   - persisted profile-level overrides for channels, watchlists, sector weights, and section visibility
   - runtime merge of YAML defaults + DB overrides
   - CLI surface for inspect/set/unset/reset workflows
+- **Phase 4.3 web control panel** is now in place
+  - FastAPI + HTMX local UI for holdings imports and profile preference management
+  - control-plane API endpoints for state, updates, search, and upload flows
+  - single-user localhost-first operations without a separate frontend build
 
 The biggest remaining quality gap is still editorial/source quality in some surfaced headlines, not the core plumbing.
 

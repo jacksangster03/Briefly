@@ -1,0 +1,205 @@
+"""Phase 4.3 tests: FastAPI + HTMX portfolio control panel."""
+
+from __future__ import annotations
+
+import io
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import sessionmaker
+
+from app.db import session as db_session
+from app.db.base import Base, create_app_engine
+from app.settings import Settings
+from app.web.app import create_web_app
+
+
+@pytest.fixture
+def isolated_db(tmp_path):
+    old_engine = db_session._engine
+    old_factory = db_session._SessionLocal
+    db_path = tmp_path / "phase43_test.db"
+    engine = create_app_engine(f"sqlite:///{db_path}")
+    db_session._engine = engine
+    db_session._SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+    Base.metadata.create_all(bind=engine)
+    try:
+        yield
+    finally:
+        db_session._engine = old_engine
+        db_session._SessionLocal = old_factory
+        engine.dispose()
+
+
+@pytest.fixture
+def test_settings(tmp_path, isolated_db):
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir(parents=True)
+    (config_dir / "user_profile.example.yaml").write_text(
+        "\n".join(
+            [
+                "user:",
+                "  name: default_user",
+                "  timezone: Europe/Madrid",
+                "  home_region: spain",
+                "coverage_weights:",
+                "  us: 1.0",
+                "sector_weights:",
+                "  technology: 1.0",
+                "  semiconductors: 0.8",
+                "delivery:",
+                "  morning_brief_time: '08:45'",
+                "  hourly_updates: true",
+                "  breaking_alerts: true",
+                "  quiet_hours_start: '23:00'",
+                "  quiet_hours_end: '07:00'",
+            ]
+        )
+    )
+    (config_dir / "watchlists.example.yaml").write_text(
+        "primary: [AAPL, MSFT]\nsecondary: [NVDA]\nmonitor: [AMD]\n"
+    )
+    (config_dir / "sectors.yaml").write_text(
+        "\n".join(
+            [
+                "sectors:",
+                "  technology:",
+                "    etf: XLK",
+                "    display_name: Technology",
+                "    key_names: [AAPL, MSFT, NVDA]",
+                "  semiconductors:",
+                "    etf: SMH",
+                "    display_name: Semiconductors",
+                "    key_names: [NVDA, AMD, INTC]",
+                "indices:",
+                "  - { symbol: SPY, display: \"S&P 500\" }",
+                "  - { symbol: QQQ, display: \"Nasdaq 100\" }",
+                "macro_instruments:",
+                "  - { symbol: TLT, display: \"20Y+ Treasury\" }",
+                "  - { symbol: GLD, display: Gold }",
+            ]
+        )
+    )
+    return Settings(configs_dir=str(config_dir), dry_run=True)
+
+
+@pytest.fixture
+def client(test_settings):
+    app = create_web_app(test_settings)
+    return TestClient(app)
+
+
+def test_ui_settings_page_renders(client):
+    response = client.get("/ui/settings?profile=default_user")
+    assert response.status_code == 200
+    assert "Portfolio Control Panel" in response.text
+    assert "Saved values are persisted in SQLite as" in response.text
+
+
+def test_api_put_preferences_and_state_roundtrip(client):
+    response = client.put(
+        "/api/v1/profile/default_user/preferences",
+        json={
+            "updates": {
+                "watchlist.primary": ["TSLA", "AMZN"],
+                "delivery.morning_channels": ["email"],
+                "sections.morning.watchlist": False,
+            }
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["updated"]["watchlist.primary"] == ["TSLA", "AMZN"]
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert state["effective"]["watchlist"]["primary"] == ["TSLA", "AMZN"]
+    assert state["effective"]["delivery"]["morning_channels"] == ["email"]
+    assert state["effective"]["sections"]["watchlist"] is False
+
+
+def test_api_put_preferences_rejects_invalid_values(client):
+    bad_channel = client.put(
+        "/api/v1/profile/default_user/preferences",
+        json={"updates": {"delivery.morning_channels": ["sms"]}},
+    )
+    assert bad_channel.status_code == 400
+
+    bad_key = client.put(
+        "/api/v1/profile/default_user/preferences",
+        json={"updates": {"delivery.unknown_key": "x"}},
+    )
+    assert bad_key.status_code == 400
+
+
+def test_api_delete_preference_reverts_to_defaults(client):
+    set_resp = client.put(
+        "/api/v1/profile/default_user/preferences",
+        json={"updates": {"watchlist.primary": ["TSLA"]}},
+    )
+    assert set_resp.status_code == 200
+
+    delete_resp = client.delete("/api/v1/profile/default_user/preferences/watchlist.primary")
+    assert delete_resp.status_code == 200
+    assert delete_resp.json()["removed"] is True
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert state["effective"]["watchlist"]["primary"] == ["AAPL", "MSFT"]
+
+
+def test_api_holdings_import_yaml_and_reject_bad_csv(client):
+    yaml_content = "\n".join(
+        [
+            "profile: default_user",
+            "as_of_date: 2026-04-12",
+            "holdings:",
+            "  - symbol: NVDA",
+            "    weight_pct: 8.5",
+            "  - symbol: MSFT",
+            "    weight_pct: 6.2",
+        ]
+    ).encode("utf-8")
+
+    response = client.post(
+        "/api/v1/profile/default_user/holdings/import",
+        files={"file": ("holdings.yaml", io.BytesIO(yaml_content), "application/x-yaml")},
+    )
+    assert response.status_code == 200
+    assert response.json()["imported_count"] == 2
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert len(state["holdings"]) == 2
+
+    bad_csv = b"symbol,weight_pct\n,8.2\n"
+    bad_response = client.post(
+        "/api/v1/profile/default_user/holdings/import",
+        files={"file": ("bad.csv", io.BytesIO(bad_csv), "text/csv")},
+    )
+    assert bad_response.status_code == 400
+
+
+def test_api_followables_search_filters_by_query_and_kind(client):
+    response = client.get("/api/v1/followables/search", params={"q": "nv", "kind": "stock"})
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert any(item["symbol"] == "NVDA" for item in results)
+    assert all(item["kind"] == "stock" for item in results)
+
+
+def test_ui_htmx_save_sections_persists_and_returns_partial(client):
+    response = client.post(
+        "/ui/profile/default_user/save/sections",
+        data={
+            "section_market_setup": "on",
+            "section_macro_context": "on",
+            "section_top_themes": "on",
+            "section_portfolio_focus": "on",
+            "section_sector_scan": "on",
+            # intentionally omit section_watchlist => false
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert response.status_code == 200
+    assert "Morning section visibility saved to DB overrides." in response.text
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert state["effective"]["sections"]["watchlist"] is False
