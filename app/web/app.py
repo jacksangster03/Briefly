@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -132,15 +134,19 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 filename=file.filename or "holdings.yaml",
                 content=content,
             )
+            state = build_profile_state(_settings(request), normalized_profile)
+            timezone = state["effective"]["timezone"]
+            saved_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
             message = (
                 f"Imported {result['imported_count']} holdings for profile "
-                f"'{result['profile_name']}'."
+                f"'{result['profile_name']}' at {saved_at}."
             )
             return _render_settings_root(
                 request,
                 profile=normalized_profile,
                 message=message,
                 message_kind="success",
+                state=state,
             )
         except ValueError as exc:
             return _render_settings_root(
@@ -159,11 +165,15 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     async def ui_reset_profile_preferences(request: Request, profile: str):
         normalized_profile = _normalize_profile(profile)
         result = reset_preferences(normalized_profile)
+        state = build_profile_state(_settings(request), normalized_profile)
+        timezone = state["effective"]["timezone"]
+        saved_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
         return _render_settings_root(
             request,
             profile=normalized_profile,
-            message=f"Reset complete. Removed {result['removed_count']} override(s).",
+            message=f"Reset complete. Removed {result['removed_count']} override(s) at {saved_at}.",
             message_kind="success",
+            state=state,
         )
 
     @app.get("/api/v1/profile/{profile}/state")
@@ -228,11 +238,16 @@ def _render_ui_after_update(
 ) -> HTMLResponse:
     try:
         apply_preference_updates(profile, updates)
+        state = build_profile_state(_settings(request), profile)
+        timezone = state["effective"]["timezone"]
+        saved_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
+        message = f"{success_message} Saved at {saved_at}."
         return _render_settings_root(
             request,
             profile=profile,
-            message=success_message,
+            message=message,
             message_kind="success",
+            state=state,
         )
     except ValueError as exc:
         return _render_settings_root(
@@ -251,8 +266,9 @@ def _render_settings_root(
     message: str,
     message_kind: str,
     status_code: int = 200,
+    state: dict[str, Any] | None = None,
 ) -> HTMLResponse:
-    state = build_profile_state(_settings(request), profile)
+    state = state or build_profile_state(_settings(request), profile)
     return templates.TemplateResponse(
         request,
         "partials/settings_root.html",

@@ -58,6 +58,8 @@ The current product is no longer just a headline feed:
   - searchable watchlist builders (chip-based add/remove) instead of long multiselect lists
   - region-focus controls (`home_region` + `coverage_weights`) alongside sector weights
   - terminal-style professional UI with persistent light/dark mode toggle
+  - sticky section navigation + contextual helper text for faster configuration
+  - validation warnings (delivery gaps, weight imbalance) and save timestamps
   - server-rendered panel with partial HTMX updates (no frontend build step)
   - programmatic control-plane API for state, preference updates, followables search, and holdings upload
 - **Operational resilience**

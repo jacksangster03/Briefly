@@ -217,6 +217,8 @@
         const chips = builder.querySelector("[data-watch-chips]");
         const hidden = builder.querySelector("[data-watch-hidden]");
         const addButton = builder.querySelector("[data-watch-add]");
+        const clearButton = builder.querySelector("[data-watch-clear]");
+        const holdingsButton = builder.querySelector("[data-watch-load-holdings]");
         if (!field || !input || !chips || !hidden || !addButton) return;
 
         const selected = new Set();
@@ -263,6 +265,28 @@
         render();
 
         addButton.addEventListener("click", addFromInput);
+        if (clearButton) {
+          clearButton.addEventListener("click", () => {
+            selected.clear();
+            render();
+          });
+        }
+        if (holdingsButton) {
+          holdingsButton.addEventListener("click", () => {
+            const holdingsNode = document.getElementById("holdings-symbols-json");
+            if (!holdingsNode) return;
+            try {
+              const symbols = JSON.parse(holdingsNode.textContent || "[]");
+              symbols.forEach((symbol) => {
+                const normalized = normalizeTickerInput(String(symbol), catalog);
+                if (normalized) selected.add(normalized);
+              });
+              render();
+            } catch {
+              // Ignore malformed holdings payload.
+            }
+          });
+        }
         input.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {
             event.preventDefault();
@@ -290,11 +314,44 @@
         });
       }
 
-      document.addEventListener("DOMContentLoaded", () => initWatchlistBuilders(document));
+      let hasUnsavedChanges = false;
+
+      function markDirty() {
+        hasUnsavedChanges = true;
+      }
+
+      function clearDirty() {
+        hasUnsavedChanges = false;
+      }
+
+      function bindUnsavedChangesGuard(root = document) {
+        root.querySelectorAll("form.tracked-form").forEach((form) => {
+          if (form.dataset.dirtyBound === "true") return;
+          form.dataset.dirtyBound = "true";
+          form.addEventListener("input", markDirty);
+          form.addEventListener("change", markDirty);
+          form.addEventListener("submit", () => {
+            clearDirty();
+          });
+        });
+      }
+
+      window.addEventListener("beforeunload", (event) => {
+        if (!hasUnsavedChanges) return;
+        event.preventDefault();
+        event.returnValue = "";
+      });
+
+      document.addEventListener("DOMContentLoaded", () => {
+        initWatchlistBuilders(document);
+        bindUnsavedChangesGuard(document);
+      });
       document.body.addEventListener("htmx:afterSwap", (event) => {
         const target = event.detail && event.detail.target;
         if (target && target.id === "settings-root") {
           initWatchlistBuilders(target);
+          bindUnsavedChangesGuard(target);
+          clearDirty();
         }
       });
     })();

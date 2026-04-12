@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import yaml
 
+from app.db.models import PortfolioHolding as PortfolioHoldingRow
+from app.db.models import UserPreference as UserPreferenceRow
+from app.db.session import get_session
 from app.personalization.preferences_service import (
     clear_preferences,
     get_preferences,
@@ -39,6 +44,8 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     overrides = get_preferences(normalized_profile)
     holdings = [holding.model_dump(mode="json") for holding in profile.portfolio_holdings]
     catalogs = _build_followables_catalog(settings=settings, profile=profile)
+    metadata = _build_profile_metadata(profile=profile, profile_name=normalized_profile)
+    validations = _build_profile_validations(profile=profile)
 
     return {
         "profile": normalized_profile,
@@ -78,6 +85,8 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
         "overrides": overrides,
         "holdings": holdings,
         "catalogs": catalogs,
+        "metadata": metadata,
+        "validations": validations,
         "supported_preference_keys": supported_preference_keys(),
     }
 
@@ -283,3 +292,132 @@ def _build_followables_catalog(
         "macro": macro,
         "regions": regions,
     }
+
+
+def _build_profile_metadata(*, profile: UserProfile, profile_name: str) -> dict[str, Any]:
+    """Build operational metadata used by UI summary cards."""
+    holdings_updated_at = _latest_holdings_update(profile_name)
+    preferences_updated_at = _latest_preferences_update(profile_name)
+    return {
+        "last_holdings_update": _iso_or_none(holdings_updated_at),
+        "last_preferences_update": _iso_or_none(preferences_updated_at),
+        "next_morning_send_local": _next_morning_send(profile),
+    }
+
+
+def _build_profile_validations(*, profile: UserProfile) -> list[dict[str, str]]:
+    """Produce user-facing validation warnings for obvious misconfiguration states."""
+    warnings: list[dict[str, str]] = []
+
+    weights = [position.weight_pct for position in profile.portfolio_holdings if position.weight_pct is not None]
+    if weights:
+        weight_sum = float(sum(weights))
+        if weight_sum < 95 or weight_sum > 105:
+            warnings.append(
+                {
+                    "code": "holdings_weight_sum",
+                    "message": (
+                        f"Holdings weights sum to {weight_sum:.1f}%. "
+                        "Consider normalizing toward 100% for cleaner portfolio relevance."
+                    ),
+                }
+            )
+
+    region_values = [float(value) for value in profile.coverage_weights.values()] if profile.coverage_weights else []
+    if not region_values or max(region_values) <= 0:
+        warnings.append(
+            {
+                "code": "region_weights_empty",
+                "message": "Region weights are all zero. Coverage by region may feel random.",
+            }
+        )
+
+    sector_values = [float(value) for value in profile.sector_weights.values()] if profile.sector_weights else []
+    if sector_values:
+        max_sector = max(sector_values)
+        positive_values = [value for value in sector_values if value > 0]
+        if positive_values:
+            baseline = sum(positive_values) / len(positive_values)
+            if baseline > 0 and max_sector / baseline >= 3.0:
+                warnings.append(
+                    {
+                        "code": "sector_weight_concentration",
+                        "message": (
+                            "Sector weighting is highly concentrated. "
+                            "This may suppress useful cross-sector stories."
+                        ),
+                    }
+                )
+
+    delivery_groups = {
+        "morning": profile.channels_for("morning"),
+        "intraday": profile.channels_for("intraday"),
+        "breaking": profile.channels_for("breaking"),
+    }
+    for briefing_type, channels in delivery_groups.items():
+        if channels:
+            continue
+        warnings.append(
+            {
+                "code": f"delivery_missing_{briefing_type}",
+                "message": f"No channels enabled for {briefing_type} briefing delivery.",
+            }
+        )
+
+    if not profile.watchlist_primary:
+        warnings.append(
+            {
+                "code": "watchlist_primary_empty",
+                "message": "Primary watchlist is empty. High-priority personalization will be weaker.",
+            }
+        )
+
+    return warnings
+
+
+def _latest_holdings_update(profile_name: str) -> datetime | None:
+    with get_session() as session:
+        row = (
+            session.query(PortfolioHoldingRow.updated_at)
+            .filter(
+                PortfolioHoldingRow.profile_name == profile_name,
+                PortfolioHoldingRow.active.is_(True),
+            )
+            .order_by(PortfolioHoldingRow.updated_at.desc())
+            .first()
+        )
+    return row[0] if row else None
+
+
+def _latest_preferences_update(profile_name: str) -> datetime | None:
+    with get_session() as session:
+        row = (
+            session.query(UserPreferenceRow.updated_at)
+            .filter(
+                UserPreferenceRow.profile_name == profile_name,
+                UserPreferenceRow.active.is_(True),
+            )
+            .order_by(UserPreferenceRow.updated_at.desc())
+            .first()
+        )
+    return row[0] if row else None
+
+
+def _next_morning_send(profile: UserProfile) -> str:
+    time_parts = (profile.morning_brief_time or "08:45").split(":")
+    hour = int(time_parts[0])
+    minute = int(time_parts[1])
+    tz = ZoneInfo(profile.timezone)
+    now_local = datetime.now(tz)
+    candidate = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now_local:
+        candidate = candidate + timedelta(days=1)
+    return candidate.strftime("%Y-%m-%d %H:%M %Z")
+
+
+def _iso_or_none(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()

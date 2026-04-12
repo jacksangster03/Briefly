@@ -4,6 +4,8 @@
 {% set delivery = state.effective.delivery %}
 {% set sections = state.effective.sections %}
 {% set watchlist = state.effective.watchlist %}
+{% set metadata = state.metadata %}
+{% set validations = state.validations %}
 
 <style>
   .grid {
@@ -18,6 +20,7 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     padding: 16px;
+    scroll-margin-top: 86px;
   }
   .card h2 {
     margin: 0 0 8px;
@@ -28,6 +31,11 @@
     color: var(--muted);
     font-size: 0.84rem;
     margin: 0 0 12px;
+  }
+  .tiny {
+    color: var(--muted);
+    font-size: 0.76rem;
+    margin-top: 4px;
   }
   .status {
     border: 1px solid var(--border);
@@ -46,10 +54,54 @@
     background: var(--status-error-bg);
     color: var(--status-error-ink);
   }
+  .section-nav {
+    position: sticky;
+    top: 8px;
+    z-index: 30;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--card);
+    box-shadow: var(--shadow);
+    padding: 8px;
+    margin-bottom: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .section-nav a {
+    text-decoration: none;
+    color: var(--ink);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 0.8rem;
+    padding: 6px 10px;
+    background: var(--bg-secondary);
+  }
+  .section-nav a:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .warning-box {
+    border: 1px solid var(--error);
+    border-radius: 10px;
+    background: var(--status-error-bg);
+    color: var(--status-error-ink);
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .warning-box h3 {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+  }
+  .warning-list {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 0.84rem;
+  }
   .summary-grid {
     display: grid;
     gap: 10px;
-    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
   .summary {
     border: 1px solid var(--border);
@@ -122,6 +174,15 @@
     color: var(--accent);
     background: rgba(245, 159, 0, 0.08);
     vertical-align: middle;
+  }
+  .source-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 7px;
+    border-radius: 8px;
+    font-size: 0.7rem;
+    border: 1px solid var(--border);
+    color: var(--muted);
   }
   .actions {
     display: flex;
@@ -244,10 +305,14 @@
       flex-direction: column;
       align-items: stretch;
     }
+    .section-nav {
+      top: 6px;
+    }
   }
 </style>
 
 <script type="application/json" id="stock-catalog-json">{{ stocks | tojson }}</script>
+<script type="application/json" id="holdings-symbols-json">{{ state.holdings | map(attribute="symbol") | list | tojson }}</script>
 <datalist id="stock-option-list">
   {% for stock in stocks %}
     <option value="{{ stock.label }}"></option>
@@ -262,42 +327,72 @@
   </div>
 {% endif %}
 
+{% if validations %}
+  <div class="warning-box">
+    <h3>Configuration Warnings</h3>
+    <ul class="warning-list">
+      {% for warning in validations %}
+        <li>{{ warning.message }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}
+
+<nav class="section-nav" aria-label="Settings sections">
+  <a href="#section-overview">Overview</a>
+  <a href="#section-holdings">Holdings</a>
+  <a href="#section-coverage">Coverage</a>
+  <a href="#section-delivery">Delivery</a>
+  <a href="#section-morning">Morning Brief</a>
+  <a href="#section-audit">Audit</a>
+</nav>
+
 <div class="grid">
-  <section class="card">
-    <h2>Profile Summary</h2>
+  <section class="card" id="section-overview">
+    <h2>Overview</h2>
+    <p class="muted">Quick operational summary so you can confirm current state before making changes.</p>
     <div class="summary-grid">
       <dl class="summary">
         <dt>Profile</dt><dd>{{ state.profile }}</dd>
         <dt>Timezone</dt><dd>{{ state.effective.timezone }}</dd>
         <dt>Home Region</dt><dd>{{ state.effective.coverage.home_region.replace("_", " ").title() }}</dd>
-        <dt>Holdings</dt><dd>{{ state.holdings | length }}</dd>
       </dl>
       <dl class="summary">
+        <dt>Holdings</dt><dd>{{ state.holdings | length }}</dd>
         <dt>Watchlist Symbols</dt><dd>{{ watchlist.primary | length + watchlist.secondary | length + watchlist.monitor | length }}</dd>
         <dt>Active Overrides</dt><dd>{{ state.overrides | length }}</dd>
+      </dl>
+      <dl class="summary">
+        <dt>Next Morning Send</dt><dd>{{ metadata.next_morning_send_local }}</dd>
+        <dt>Morning Channels</dt><dd>{{ delivery.morning_channels | join(", ") if delivery.morning_channels else "Not configured" }}</dd>
+        <dt>Intraday Channels</dt><dd>{{ delivery.intraday_channels | join(", ") if delivery.intraday_channels else "Not configured" }}</dd>
+      </dl>
+      <dl class="summary">
+        <dt>Last Holdings Update (UTC)</dt><dd>{{ metadata.last_holdings_update or "Not provided" }}</dd>
+        <dt>Last Preferences Update (UTC)</dt><dd>{{ metadata.last_preferences_update or "Not provided" }}</dd>
         <dt>Supported Keys</dt><dd>{{ state.supported_preference_keys | length }}</dd>
       </dl>
-      <div class="summary">
-        <dt style="color: var(--muted); font-size: 0.78rem;">Active DB Overrides</dt>
-        <pre class="mono">{{ state.overrides | tojson(indent=2) }}</pre>
-      </div>
     </div>
-    <form
-      hx-post="/ui/profile/{{ state.profile }}/reset"
-      hx-target="#settings-root"
-      hx-swap="outerHTML"
-      method="post"
-      class="actions"
-    >
-      <button type="submit" class="danger" onclick="return confirm('Reset all DB overrides for this profile?');">
-        Reset Overrides
-      </button>
-    </form>
+    <div class="actions">
+      <form
+        hx-post="/ui/profile/{{ state.profile }}/reset"
+        hx-target="#settings-root"
+        hx-swap="outerHTML"
+        method="post"
+      >
+        <button type="submit" class="danger" onclick="return confirm('Reset all DB overrides for this profile?');">
+          Reset Overrides
+        </button>
+      </form>
+    </div>
   </section>
 
-  <section class="card">
+  <section class="card" id="section-holdings">
     <h2>Holdings</h2>
-    <p class="muted">Replace current holdings snapshot from YAML/CSV. Existing active holdings will be deactivated.</p>
+    <p class="muted">
+      Upload a YAML/CSV snapshot to replace active holdings.
+      This directly affects portfolio-aware ranking and morning portfolio focus.
+    </p>
     <form
       hx-post="/ui/profile/{{ state.profile }}/holdings/import"
       hx-target="#settings-root"
@@ -305,7 +400,7 @@
       hx-encoding="multipart/form-data"
       enctype="multipart/form-data"
       method="post"
-      class="actions"
+      class="actions tracked-form"
     >
       <input type="file" name="file" accept=".yaml,.yml,.csv" required>
       <button type="submit">Import Holdings Snapshot</button>
@@ -328,12 +423,12 @@
             {% for holding in state.holdings %}
               <tr>
                 <td>{{ holding.symbol }}</td>
-                <td>{{ "%.2f"|format(holding.weight_pct) if holding.weight_pct is not none else "-" }}</td>
-                <td>{{ "%.2f"|format(holding.shares) if holding.shares is not none else "-" }}</td>
-                <td>{{ "%.2f"|format(holding.avg_cost) if holding.avg_cost is not none else "-" }}</td>
-                <td>{{ holding.bucket or "-" }}</td>
-                <td>{{ holding.account or "-" }}</td>
-                <td>{{ holding.as_of_date or "-" }}</td>
+                <td>{{ "%.2f"|format(holding.weight_pct) if holding.weight_pct is not none else "Not provided" }}</td>
+                <td>{{ "%.2f"|format(holding.shares) if holding.shares is not none else "Not provided" }}</td>
+                <td>{{ "%.2f"|format(holding.avg_cost) if holding.avg_cost is not none else "Not provided" }}</td>
+                <td>{{ holding.bucket or "Not provided" }}</td>
+                <td>{{ holding.account or "Not provided" }}</td>
+                <td>{{ holding.as_of_date or "Not provided" }}</td>
               </tr>
             {% endfor %}
           {% else %}
@@ -344,27 +439,34 @@
     </div>
   </section>
 
-  <section class="card">
-    <h2>Coverage: Watchlists + Sector + Region Focus</h2>
-    <p class="muted">Use search to add tickers quickly. Click a chip to remove it.</p>
+  <section class="card" id="section-coverage">
+    <h2>Coverage</h2>
+    <p class="muted">
+      Configure what gets editorial priority.
+      Primary watchlist drives strongest relevance, secondary is medium, monitor is low-priority.
+    </p>
     <form
       hx-post="/ui/profile/{{ state.profile }}/save/coverage"
       hx-target="#settings-root"
       hx-swap="outerHTML"
       method="post"
+      class="tracked-form"
     >
       <div class="watch-grid">
         <div class="field">
           <label>
             Primary Watchlist
             {% if "watchlist.primary" in state.overrides %}<span class="pill">override</span>{% endif %}
+            <span class="source-tag">effective</span>
           </label>
           <div class="watch-builder" data-watch-builder data-field="watchlist_primary" data-initial='{{ watchlist.primary | tojson }}'>
             <div class="watch-builder-toolbar">
               <input type="search" data-watch-input list="stock-option-list" placeholder="Search ticker or company">
               <button type="button" class="secondary small" data-watch-add>Add</button>
+              <button type="button" class="secondary small" data-watch-clear>Clear</button>
+              <button type="button" class="secondary small" data-watch-load-holdings>Use Holdings</button>
             </div>
-            <p class="watch-help">Enter ticker (e.g. NVDA) or company name, then Add.</p>
+            <p class="watch-help">Use for names that should strongly influence alerts and morning coverage.</p>
             <div class="watch-chip-row" data-watch-chips></div>
             <div data-watch-hidden></div>
           </div>
@@ -373,13 +475,15 @@
           <label>
             Secondary Watchlist
             {% if "watchlist.secondary" in state.overrides %}<span class="pill">override</span>{% endif %}
+            <span class="source-tag">effective</span>
           </label>
           <div class="watch-builder" data-watch-builder data-field="watchlist_secondary" data-initial='{{ watchlist.secondary | tojson }}'>
             <div class="watch-builder-toolbar">
               <input type="search" data-watch-input list="stock-option-list" placeholder="Search ticker or company">
               <button type="button" class="secondary small" data-watch-add>Add</button>
+              <button type="button" class="secondary small" data-watch-clear>Clear</button>
             </div>
-            <p class="watch-help">Keep this for important but non-core names.</p>
+            <p class="watch-help">Important names you want covered with lower editorial priority than primary.</p>
             <div class="watch-chip-row" data-watch-chips></div>
             <div data-watch-hidden></div>
           </div>
@@ -388,13 +492,15 @@
           <label>
             Monitor Watchlist
             {% if "watchlist.monitor" in state.overrides %}<span class="pill">override</span>{% endif %}
+            <span class="source-tag">effective</span>
           </label>
           <div class="watch-builder" data-watch-builder data-field="watchlist_monitor" data-initial='{{ watchlist.monitor | tojson }}'>
             <div class="watch-builder-toolbar">
               <input type="search" data-watch-input list="stock-option-list" placeholder="Search ticker or company">
               <button type="button" class="secondary small" data-watch-add>Add</button>
+              <button type="button" class="secondary small" data-watch-clear>Clear</button>
             </div>
-            <p class="watch-help">Use monitor for lower-priority tracking names.</p>
+            <p class="watch-help">Low-priority tracking names without strongly affecting ranking.</p>
             <div class="watch-chip-row" data-watch-chips></div>
             <div data-watch-hidden></div>
           </div>
@@ -406,6 +512,7 @@
           <label>
             Home Region Focus
             {% if "coverage.home_region" in state.overrides %}<span class="pill">override</span>{% endif %}
+            <span class="source-tag">effective</span>
           </label>
           <select name="coverage_home_region" required>
             {% for region in regions %}
@@ -414,6 +521,7 @@
               </option>
             {% endfor %}
           </select>
+          <p class="tiny">Choose the region that should receive default editorial emphasis.</p>
         </div>
       </div>
 
@@ -429,7 +537,7 @@
               step="0.05"
               min="0"
               name="region_weight__{{ region.key }}"
-              value="{{ state.effective.coverage.region_weights.get(region.key, 0) }}"
+              value="{{ "%.2f"|format(state.effective.coverage.region_weights.get(region.key, 0)) }}"
             >
           </div>
         {% endfor %}
@@ -448,7 +556,7 @@
               step="0.05"
               min="0"
               name="sector_weight__{{ sector_key }}"
-              value="{{ state.effective.coverage.sector_weights.get(sector_key, 0) }}"
+              value="{{ "%.2f"|format(state.effective.coverage.sector_weights.get(sector_key, 0)) }}"
             >
           </div>
         {% endfor %}
@@ -460,13 +568,18 @@
     </form>
   </section>
 
-  <section class="card">
-    <h2>Delivery Routing</h2>
+  <section class="card" id="section-delivery">
+    <h2>Delivery</h2>
+    <p class="muted">
+      Choose channels and schedule controls for each briefing type.
+      Changes affect the next generated run without restarting your profile data.
+    </p>
     <form
       hx-post="/ui/profile/{{ state.profile }}/save/delivery"
       hx-target="#settings-root"
       hx-swap="outerHTML"
       method="post"
+      class="tracked-form"
     >
       <div class="inline-grid">
         <div class="check-item">
@@ -542,13 +655,15 @@
     </form>
   </section>
 
-  <section class="card">
-    <h2>Morning Section Visibility</h2>
+  <section class="card" id="section-morning">
+    <h2>Morning Brief Settings</h2>
+    <p class="muted">Enable or disable sections that appear in the next generated morning briefing.</p>
     <form
       hx-post="/ui/profile/{{ state.profile }}/save/sections"
       hx-target="#settings-root"
       hx-swap="outerHTML"
       method="post"
+      class="tracked-form"
     >
       <div class="check-grid">
         {% for key, enabled in sections.items() %}
@@ -568,5 +683,22 @@
         <button type="submit">Save Morning Sections</button>
       </div>
     </form>
+  </section>
+
+  <section class="card" id="section-audit">
+    <h2>Audit & Source of Truth</h2>
+    <p class="muted">Effective values = YAML defaults + active SQLite overrides for this profile.</p>
+    <div class="summary-grid">
+      <dl class="summary">
+        <dt>Last Holdings Update (UTC)</dt>
+        <dd>{{ metadata.last_holdings_update or "Not provided" }}</dd>
+        <dt>Last Preferences Update (UTC)</dt>
+        <dd>{{ metadata.last_preferences_update or "Not provided" }}</dd>
+      </dl>
+      <div class="summary">
+        <dt style="color: var(--muted); font-size: 0.78rem;">Active DB Overrides</dt>
+        <pre class="mono">{{ state.overrides | tojson(indent=2) }}</pre>
+      </div>
+    </div>
   </section>
 </div>

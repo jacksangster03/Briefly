@@ -116,6 +116,8 @@ def test_api_put_preferences_and_state_roundtrip(client):
     assert state["effective"]["watchlist"]["primary"] == ["TSLA", "AMZN"]
     assert state["effective"]["delivery"]["morning_channels"] == ["email"]
     assert state["effective"]["sections"]["watchlist"] is False
+    assert "metadata" in state
+    assert "validations" in state
 
 
 def test_api_put_preferences_rejects_invalid_values(client):
@@ -201,6 +203,7 @@ def test_ui_htmx_save_sections_persists_and_returns_partial(client):
     )
     assert response.status_code == 200
     assert "Morning section visibility saved to DB overrides." in response.text
+    assert "Saved at" in response.text
 
     state = client.get("/api/v1/profile/default_user/state").json()
     assert state["effective"]["sections"]["watchlist"] is False
@@ -223,9 +226,16 @@ def test_ui_htmx_save_coverage_persists_watchlist_and_region_focus(client):
     )
     assert response.status_code == 200
     assert "Coverage preferences saved to DB overrides." in response.text
+    assert "Saved at" in response.text
 
     state = client.get("/api/v1/profile/default_user/state").json()
     assert state["effective"]["watchlist"]["primary"] == ["TSLA", "NVDA"]
     assert state["effective"]["coverage"]["home_region"] == "us"
     assert state["effective"]["coverage"]["region_weights"]["us"] == pytest.approx(1.4)
     assert state["effective"]["coverage"]["region_weights"]["europe"] == pytest.approx(0.6)
+
+
+def test_state_exposes_validation_warnings_when_delivery_channels_missing(client):
+    state = client.get("/api/v1/profile/default_user/state").json()
+    warnings = state["validations"]
+    assert any("No channels enabled for morning briefing delivery." in item["message"] for item in warnings)
