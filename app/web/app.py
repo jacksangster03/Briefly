@@ -266,23 +266,41 @@ def _render_settings_root(
 
 
 def _coverage_updates_from_form(form) -> dict[str, Any]:
+    def _unique_upper(items: list[str]) -> list[str]:
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for raw in items:
+            symbol = str(raw).strip().upper()
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            ordered.append(symbol)
+        return ordered
+
     updates: dict[str, Any] = {
-        "watchlist.primary": [item.upper() for item in form.getlist("watchlist_primary") if str(item).strip()],
-        "watchlist.secondary": [item.upper() for item in form.getlist("watchlist_secondary") if str(item).strip()],
-        "watchlist.monitor": [item.upper() for item in form.getlist("watchlist_monitor") if str(item).strip()],
+        "watchlist.primary": _unique_upper(form.getlist("watchlist_primary")),
+        "watchlist.secondary": _unique_upper(form.getlist("watchlist_secondary")),
+        "watchlist.monitor": _unique_upper(form.getlist("watchlist_monitor")),
+        "coverage.home_region": str(form.get("coverage_home_region", "")).strip().lower(),
     }
 
     sector_weights: dict[str, float] = {}
+    region_weights: dict[str, float] = {}
     for key, value in form.multi_items():
         text_key = str(key)
-        if not text_key.startswith("sector_weight__"):
-            continue
-        sector_key = text_key.replace("sector_weight__", "", 1)
         raw = str(value).strip()
-        if not raw:
+        if text_key.startswith("sector_weight__"):
+            sector_key = text_key.replace("sector_weight__", "", 1)
+            if raw:
+                sector_weights[sector_key] = float(raw)
             continue
-        sector_weights[sector_key] = float(raw)
+        if text_key.startswith("region_weight__"):
+            region_key = text_key.replace("region_weight__", "", 1)
+            if raw:
+                region_weights[region_key] = float(raw)
+            continue
     updates["sector.weights"] = sector_weights
+    updates["coverage.weights"] = region_weights
     return updates
 
 

@@ -38,7 +38,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
 
     overrides = get_preferences(normalized_profile)
     holdings = [holding.model_dump(mode="json") for holding in profile.portfolio_holdings]
-    catalogs = _build_followables_catalog(settings)
+    catalogs = _build_followables_catalog(settings=settings, profile=profile)
 
     return {
         "profile": normalized_profile,
@@ -53,6 +53,8 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
             "coverage": {
                 "sector_weights": profile.sector_weights,
                 "portfolio_sector_weights": profile.portfolio_sector_weights,
+                "region_weights": profile.coverage_weights,
+                "home_region": profile.home_region,
             },
             "delivery": {
                 "morning_channels": profile.channels_for("morning"),
@@ -153,7 +155,7 @@ def search_followables(
     """Search followables catalog for dropdown/autocomplete UI controls."""
     query = (q or "").strip().lower()
     normalized_kind = (kind or "").strip().lower()
-    catalogs = _build_followables_catalog(settings)
+    catalogs = _build_followables_catalog(settings=settings)
 
     options: list[dict[str, str]] = []
     kind_map = {
@@ -161,8 +163,9 @@ def search_followables(
         "sectors": "sector",
         "indices": "index",
         "macro": "macro",
+        "regions": "region",
     }
-    for bucket in ("stocks", "sectors", "indices", "macro"):
+    for bucket in ("stocks", "sectors", "indices", "macro", "regions"):
         if normalized_kind and normalized_kind != kind_map[bucket]:
             continue
         for item in catalogs[bucket]:
@@ -216,7 +219,11 @@ def _load_profile_defaults(settings: Settings, profile_name: str) -> UserProfile
     return profile
 
 
-def _build_followables_catalog(settings: Settings) -> dict[str, list[dict[str, str]]]:
+def _build_followables_catalog(
+    *,
+    settings: Settings,
+    profile: UserProfile | None = None,
+) -> dict[str, list[dict[str, str]]]:
     universe = load_sector_universe(settings)
     stocks = [
         {
@@ -255,9 +262,24 @@ def _build_followables_catalog(settings: Settings) -> dict[str, list[dict[str, s
         for instrument in universe.macro_instruments
     ]
 
+    default_regions = {"us", "europe", "asia", "latam", "middle_east", "global"}
+    profile_regions = set(profile.coverage_weights.keys()) if profile else set()
+    if profile and profile.home_region:
+        profile_regions.add(profile.home_region)
+    region_keys = sorted(default_regions | {str(item).lower() for item in profile_regions if item})
+    regions = [
+        {
+            "kind": "region",
+            "key": region,
+            "label": region.replace("_", " ").title(),
+        }
+        for region in region_keys
+    ]
+
     return {
         "stocks": stocks,
         "sectors": sectors,
         "indices": indices,
         "macro": macro,
+        "regions": regions,
     }

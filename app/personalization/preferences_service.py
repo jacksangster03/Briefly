@@ -19,6 +19,14 @@ ALLOWED_MORNING_SECTIONS = {
     "sector_scan",
     "watchlist",
 }
+ALLOWED_HOME_REGIONS = {
+    "us",
+    "europe",
+    "asia",
+    "latam",
+    "middle_east",
+    "global",
+}
 
 
 def _normalize_profile(profile_name: str) -> str:
@@ -42,19 +50,39 @@ def _normalize_tickers(value: Any) -> list[str]:
     return [ticker.upper() for ticker in candidates]
 
 
-def _normalize_sector_weights(value: Any) -> dict[str, float]:
+def _normalize_weight_map(value: Any, *, label: str) -> dict[str, float]:
     if not isinstance(value, dict):
-        raise ValueError("Sector weights must be a JSON object")
+        raise ValueError(f"{label} must be a JSON object")
     normalized: dict[str, float] = {}
     for key, raw in value.items():
-        sector = str(key).strip().lower()
-        if not sector:
+        map_key = str(key).strip().lower()
+        if not map_key:
             continue
         weight = float(raw)
         if weight < 0:
-            raise ValueError("Sector weights cannot be negative")
-        normalized[sector] = weight
+            raise ValueError(f"{label} cannot be negative")
+        normalized[map_key] = weight
     return normalized
+
+
+def _normalize_sector_weights(value: Any) -> dict[str, float]:
+    return _normalize_weight_map(value, label="Sector weights")
+
+
+def _normalize_region_weights(value: Any) -> dict[str, float]:
+    return _normalize_weight_map(value, label="Region weights")
+
+
+def _normalize_home_region(value: Any) -> str:
+    region = str(value).strip().lower().replace(" ", "_")
+    if not region:
+        raise ValueError("Home region is required")
+    if region not in ALLOWED_HOME_REGIONS:
+        raise ValueError(
+            f"Unsupported home region '{region}'. "
+            f"Allowed: {', '.join(sorted(ALLOWED_HOME_REGIONS))}"
+        )
+    return region
 
 
 def _normalize_bool(value: Any) -> bool:
@@ -123,6 +151,8 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "watchlist.secondary": _normalize_tickers,
     "watchlist.monitor": _normalize_tickers,
     "sector.weights": _normalize_sector_weights,
+    "coverage.home_region": _normalize_home_region,
+    "coverage.weights": _normalize_region_weights,
     "delivery.morning_channels": _normalize_channels,
     "delivery.intraday_channels": _normalize_channels,
     "delivery.breaking_channels": _normalize_channels,

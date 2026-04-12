@@ -249,6 +249,15 @@ def _load_profile_overrides(profile: UserProfile) -> None:
                 for sector, weight in value.items()
             }
             continue
+        if key == "coverage.home_region":
+            profile.home_region = str(value).strip().lower() or profile.home_region
+            continue
+        if key == "coverage.weights" and isinstance(value, dict):
+            profile.coverage_weights = {
+                str(region).lower(): float(weight)
+                for region, weight in value.items()
+            }
+            continue
         if key == "delivery.morning_channels":
             profile.delivery_channels["morning"] = [str(item).lower() for item in (value or [])]
             continue

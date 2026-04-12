@@ -94,6 +94,7 @@ def test_ui_settings_page_renders(client):
     assert response.status_code == 200
     assert "Portfolio Control Panel" in response.text
     assert "Saved values are persisted in SQLite as" in response.text
+    assert "Home Region Focus" in response.text
 
 
 def test_api_put_preferences_and_state_roundtrip(client):
@@ -203,3 +204,28 @@ def test_ui_htmx_save_sections_persists_and_returns_partial(client):
 
     state = client.get("/api/v1/profile/default_user/state").json()
     assert state["effective"]["sections"]["watchlist"] is False
+
+
+def test_ui_htmx_save_coverage_persists_watchlist_and_region_focus(client):
+    response = client.post(
+        "/ui/profile/default_user/save/coverage",
+        data={
+            "watchlist_primary": ["TSLA", "NVDA"],
+            "watchlist_secondary": ["AMZN"],
+            "watchlist_monitor": ["AAPL"],
+            "coverage_home_region": "us",
+            "region_weight__us": "1.4",
+            "region_weight__europe": "0.6",
+            "sector_weight__technology": "1.1",
+            "sector_weight__semiconductors": "0.9",
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert response.status_code == 200
+    assert "Coverage preferences saved to DB overrides." in response.text
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert state["effective"]["watchlist"]["primary"] == ["TSLA", "NVDA"]
+    assert state["effective"]["coverage"]["home_region"] == "us"
+    assert state["effective"]["coverage"]["region_weights"]["us"] == pytest.approx(1.4)
+    assert state["effective"]["coverage"]["region_weights"]["europe"] == pytest.approx(0.6)

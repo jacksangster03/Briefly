@@ -59,6 +59,14 @@ def test_preference_rejects_invalid_channel(isolated_db):
         set_preference("default_user", "delivery.morning_channels", ["telegram", "sms"])
 
 
+def test_preference_accepts_region_focus_overrides(isolated_db):
+    set_preference("default_user", "coverage.home_region", "us")
+    set_preference("default_user", "coverage.weights", {"us": 1.2, "europe": 0.8, "asia": 0.5})
+    prefs = get_preferences("default_user")
+    assert prefs["coverage.home_region"] == "us"
+    assert prefs["coverage.weights"] == {"us": 1.2, "europe": 0.8, "asia": 0.5}
+
+
 def test_load_user_profile_applies_preference_overrides(isolated_db, tmp_path):
     config_dir = tmp_path / "configs"
     config_dir.mkdir(parents=True)

@@ -1,5 +1,6 @@
 {% set stocks = state.catalogs.stocks %}
 {% set sectors = state.catalogs.sectors %}
+{% set regions = state.catalogs.regions %}
 {% set delivery = state.effective.delivery %}
 {% set sections = state.effective.sections %}
 {% set watchlist = state.effective.watchlist %}
@@ -7,10 +8,11 @@
 <style>
   .grid {
     display: grid;
-    gap: 14px;
     grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 14px;
   }
   .card {
+    grid-column: span 12;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -18,102 +20,148 @@
     padding: 16px;
   }
   .card h2 {
-    margin: 0 0 10px;
-    font-size: 1.02rem;
+    margin: 0 0 8px;
+    font-size: 1.05rem;
     letter-spacing: 0.01em;
   }
-  .mono {
-    font-family: "SF Mono", "Menlo", "Consolas", monospace;
-    background: #f5f9fd;
+  .muted {
+    color: var(--muted);
+    font-size: 0.84rem;
+    margin: 0 0 12px;
+  }
+  .status {
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 8px;
-    font-size: 0.8rem;
+    padding: 11px 12px;
+    margin-bottom: 12px;
+    background: var(--status-info-bg);
+    color: var(--status-info-ink);
+    font-size: 0.9rem;
+  }
+  .status.success {
+    background: var(--status-success-bg);
+    color: var(--status-success-ink);
+  }
+  .status.error {
+    background: var(--status-error-bg);
+    color: var(--status-error-ink);
+  }
+  .summary-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  }
+  .summary {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    background: var(--bg-secondary);
+  }
+  .summary dt {
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  .summary dd {
+    margin: 2px 0 6px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .mono {
+    margin: 0;
     max-height: 220px;
     overflow: auto;
-    color: #24435f;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px;
+    background: var(--input-bg);
+    color: var(--ink);
+    font-family: "IBM Plex Mono", "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 0.78rem;
   }
-  .pill {
-    display: inline-block;
-    margin-left: 6px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 0.72rem;
-    background: #e8f4ff;
-    color: #155d8d;
-    border: 1px solid #c6e3f8;
-    vertical-align: middle;
+  .inline-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   }
   .field {
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
   label {
     display: block;
     color: var(--muted);
     font-size: 0.84rem;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    letter-spacing: 0.01em;
   }
-  select, input[type="time"], input[type="number"], input[type="file"] {
+  input[type="search"],
+  input[type="time"],
+  input[type="number"],
+  input[type="file"],
+  select {
     width: 100%;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 9px;
     padding: 8px 10px;
     font-size: 0.92rem;
-    background: #fff;
+    background: var(--input-bg);
     color: var(--ink);
   }
-  select[multiple] {
-    min-height: 160px;
+  input:focus-visible,
+  select:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-color: var(--accent);
   }
-  .inline-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 10px;
+  .pill {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 0.72rem;
+    color: var(--accent);
+    background: rgba(245, 159, 0, 0.08);
+    vertical-align: middle;
   }
   .actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-top: 12px;
+    margin-top: 10px;
   }
   button {
-    border: none;
-    border-radius: 10px;
+    border: 1px solid transparent;
+    border-radius: 9px;
     padding: 9px 12px;
     font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
     background: var(--accent);
-    color: #fff;
+    color: #111;
+  }
+  button:hover {
+    background: var(--accent-strong);
+  }
+  button:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
   button.secondary {
-    background: #eef4fa;
-    border: 1px solid var(--border);
-    color: #254a6a;
+    background: transparent;
+    border-color: var(--border);
+    color: var(--ink);
+  }
+  button.secondary:hover {
+    background: var(--card-hover);
   }
   button.danger {
-    background: #ffe9e9;
-    color: #9a1515;
-    border: 1px solid #f5cccc;
+    background: transparent;
+    border-color: var(--error);
+    color: var(--error);
   }
-  .status {
-    margin-bottom: 10px;
-    border-radius: 10px;
-    padding: 10px 12px;
-    font-size: 0.9rem;
-    border: 1px solid var(--border);
-    background: #f4fbff;
-    color: #265271;
-  }
-  .status.success {
-    background: #ecfdf3;
-    border-color: #c3f1d4;
-    color: #14643a;
-  }
-  .status.error {
-    background: #fff0f0;
-    border-color: #ffd2d2;
-    color: #9f1f1f;
+  button.small {
+    padding: 7px 10px;
+    font-size: 0.82rem;
   }
   .table-wrap {
     overflow: auto;
@@ -125,42 +173,86 @@
   }
   th, td {
     border-bottom: 1px solid var(--border);
-    padding: 7px 6px;
+    padding: 8px 6px;
     text-align: left;
     white-space: nowrap;
   }
   th {
-    color: #37546f;
+    color: var(--muted);
     font-weight: 600;
   }
-  .muted {
-    color: var(--muted);
-    font-size: 0.82rem;
-    margin-top: 0;
-  }
-  .summary-grid {
+  .watch-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
     gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    margin-bottom: 8px;
   }
-  .summary {
+  .watch-builder {
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 10px;
-    background: #f8fbff;
+    background: var(--bg-secondary);
   }
-  .summary dt {
+  .watch-builder-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .watch-help {
+    margin: 8px 0 0;
     color: var(--muted);
+    font-size: 0.76rem;
+  }
+  .watch-chip-row {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 32px;
+  }
+  .watch-chip {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 10px;
     font-size: 0.78rem;
+    background: var(--chip-bg);
+    color: var(--chip-text);
+    cursor: pointer;
   }
-  .summary dd {
-    margin: 2px 0 6px;
-    font-weight: 600;
+  .watch-chip:hover {
+    border-color: var(--error);
+    color: var(--error);
   }
-  @media (max-width: 900px) {
-    .col-6, .col-4, .col-8, .col-12 { grid-column: span 12 !important; }
+  .check-grid {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  }
+  .check-item {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    background: var(--bg-secondary);
+  }
+  .check-item label {
+    margin: 0;
+    font-size: 0.86rem;
+    color: var(--ink);
+  }
+  @media (max-width: 760px) {
+    .watch-builder-toolbar {
+      flex-direction: column;
+      align-items: stretch;
+    }
   }
 </style>
+
+<script type="application/json" id="stock-catalog-json">{{ stocks | tojson }}</script>
+<datalist id="stock-option-list">
+  {% for stock in stocks %}
+    <option value="{{ stock.label }}"></option>
+  {% endfor %}
+</datalist>
 
 {% if message %}
   <div class="status {{ message_kind }}">{{ message }}</div>
@@ -171,12 +263,13 @@
 {% endif %}
 
 <div class="grid">
-  <section class="card col-12" style="grid-column: span 12;">
+  <section class="card">
     <h2>Profile Summary</h2>
     <div class="summary-grid">
       <dl class="summary">
         <dt>Profile</dt><dd>{{ state.profile }}</dd>
         <dt>Timezone</dt><dd>{{ state.effective.timezone }}</dd>
+        <dt>Home Region</dt><dd>{{ state.effective.coverage.home_region.replace("_", " ").title() }}</dd>
         <dt>Holdings</dt><dd>{{ state.holdings | length }}</dd>
       </dl>
       <dl class="summary">
@@ -202,7 +295,7 @@
     </form>
   </section>
 
-  <section class="card col-12" style="grid-column: span 12;">
+  <section class="card">
     <h2>Holdings</h2>
     <p class="muted">Replace current holdings snapshot from YAML/CSV. Existing active holdings will be deactivated.</p>
     <form
@@ -251,49 +344,97 @@
     </div>
   </section>
 
-  <section class="card col-12" style="grid-column: span 12;">
-    <h2>Coverage: Watchlists + Sector Weights</h2>
+  <section class="card">
+    <h2>Coverage: Watchlists + Sector + Region Focus</h2>
+    <p class="muted">Use search to add tickers quickly. Click a chip to remove it.</p>
     <form
       hx-post="/ui/profile/{{ state.profile }}/save/coverage"
       hx-target="#settings-root"
       hx-swap="outerHTML"
       method="post"
     >
-      <div class="inline-grid">
+      <div class="watch-grid">
         <div class="field">
           <label>
             Primary Watchlist
             {% if "watchlist.primary" in state.overrides %}<span class="pill">override</span>{% endif %}
           </label>
-          <select name="watchlist_primary" multiple>
-            {% for stock in stocks %}
-              <option value="{{ stock.symbol }}" {% if stock.symbol in watchlist.primary %}selected{% endif %}>{{ stock.label }}</option>
-            {% endfor %}
-          </select>
+          <div class="watch-builder" data-watch-builder data-field="watchlist_primary" data-initial='{{ watchlist.primary | tojson }}'>
+            <div class="watch-builder-toolbar">
+              <input type="search" data-watch-input list="stock-option-list" placeholder="Search ticker or company">
+              <button type="button" class="secondary small" data-watch-add>Add</button>
+            </div>
+            <p class="watch-help">Enter ticker (e.g. NVDA) or company name, then Add.</p>
+            <div class="watch-chip-row" data-watch-chips></div>
+            <div data-watch-hidden></div>
+          </div>
         </div>
         <div class="field">
           <label>
             Secondary Watchlist
             {% if "watchlist.secondary" in state.overrides %}<span class="pill">override</span>{% endif %}
           </label>
-          <select name="watchlist_secondary" multiple>
-            {% for stock in stocks %}
-              <option value="{{ stock.symbol }}" {% if stock.symbol in watchlist.secondary %}selected{% endif %}>{{ stock.label }}</option>
-            {% endfor %}
-          </select>
+          <div class="watch-builder" data-watch-builder data-field="watchlist_secondary" data-initial='{{ watchlist.secondary | tojson }}'>
+            <div class="watch-builder-toolbar">
+              <input type="search" data-watch-input list="stock-option-list" placeholder="Search ticker or company">
+              <button type="button" class="secondary small" data-watch-add>Add</button>
+            </div>
+            <p class="watch-help">Keep this for important but non-core names.</p>
+            <div class="watch-chip-row" data-watch-chips></div>
+            <div data-watch-hidden></div>
+          </div>
         </div>
         <div class="field">
           <label>
             Monitor Watchlist
             {% if "watchlist.monitor" in state.overrides %}<span class="pill">override</span>{% endif %}
           </label>
-          <select name="watchlist_monitor" multiple>
-            {% for stock in stocks %}
-              <option value="{{ stock.symbol }}" {% if stock.symbol in watchlist.monitor %}selected{% endif %}>{{ stock.label }}</option>
+          <div class="watch-builder" data-watch-builder data-field="watchlist_monitor" data-initial='{{ watchlist.monitor | tojson }}'>
+            <div class="watch-builder-toolbar">
+              <input type="search" data-watch-input list="stock-option-list" placeholder="Search ticker or company">
+              <button type="button" class="secondary small" data-watch-add>Add</button>
+            </div>
+            <p class="watch-help">Use monitor for lower-priority tracking names.</p>
+            <div class="watch-chip-row" data-watch-chips></div>
+            <div data-watch-hidden></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="inline-grid" style="margin-top: 2px;">
+        <div class="field">
+          <label>
+            Home Region Focus
+            {% if "coverage.home_region" in state.overrides %}<span class="pill">override</span>{% endif %}
+          </label>
+          <select name="coverage_home_region" required>
+            {% for region in regions %}
+              <option value="{{ region.key }}" {% if region.key == state.effective.coverage.home_region %}selected{% endif %}>
+                {{ region.label }}
+              </option>
             {% endfor %}
           </select>
         </div>
       </div>
+
+      <div class="inline-grid" style="margin-top: 4px;">
+        {% for region in regions %}
+          <div class="field">
+            <label>
+              Region Weight — {{ region.label }}
+              {% if "coverage.weights" in state.overrides %}<span class="pill">override</span>{% endif %}
+            </label>
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              name="region_weight__{{ region.key }}"
+              value="{{ state.effective.coverage.region_weights.get(region.key, 0) }}"
+            >
+          </div>
+        {% endfor %}
+      </div>
+
       <div class="inline-grid" style="margin-top: 4px;">
         {% for sector in sectors %}
           {% set sector_key = sector.key %}
@@ -312,13 +453,14 @@
           </div>
         {% endfor %}
       </div>
+
       <div class="actions">
         <button type="submit">Save Coverage</button>
       </div>
     </form>
   </section>
 
-  <section class="card col-12" style="grid-column: span 12;">
+  <section class="card">
     <h2>Delivery Routing</h2>
     <form
       hx-post="/ui/profile/{{ state.profile }}/save/delivery"
@@ -327,7 +469,7 @@
       method="post"
     >
       <div class="inline-grid">
-        <div class="field">
+        <div class="check-item">
           <label>
             Morning Channels
             {% if "delivery.morning_channels" in state.overrides %}<span class="pill">override</span>{% endif %}
@@ -335,7 +477,7 @@
           <label><input type="checkbox" name="delivery_morning_channels" value="telegram" {% if "telegram" in delivery.morning_channels %}checked{% endif %}> Telegram</label>
           <label><input type="checkbox" name="delivery_morning_channels" value="email" {% if "email" in delivery.morning_channels %}checked{% endif %}> Email</label>
         </div>
-        <div class="field">
+        <div class="check-item">
           <label>
             Intraday Channels
             {% if "delivery.intraday_channels" in state.overrides %}<span class="pill">override</span>{% endif %}
@@ -343,7 +485,7 @@
           <label><input type="checkbox" name="delivery_intraday_channels" value="telegram" {% if "telegram" in delivery.intraday_channels %}checked{% endif %}> Telegram</label>
           <label><input type="checkbox" name="delivery_intraday_channels" value="email" {% if "email" in delivery.intraday_channels %}checked{% endif %}> Email</label>
         </div>
-        <div class="field">
+        <div class="check-item">
           <label>
             Breaking Channels
             {% if "delivery.breaking_channels" in state.overrides %}<span class="pill">override</span>{% endif %}
@@ -352,7 +494,8 @@
           <label><input type="checkbox" name="delivery_breaking_channels" value="email" {% if "email" in delivery.breaking_channels %}checked{% endif %}> Email</label>
         </div>
       </div>
-      <div class="inline-grid">
+
+      <div class="inline-grid" style="margin-top: 4px;">
         <div class="field">
           <label>
             Morning Brief Time
@@ -375,15 +518,16 @@
           <input type="time" name="delivery_quiet_hours_end" value="{{ delivery.quiet_hours_end }}" required>
         </div>
       </div>
-      <div class="inline-grid">
-        <div class="field">
+
+      <div class="check-grid" style="margin-top: 6px;">
+        <div class="check-item">
           <label>
             Hourly Updates
             {% if "delivery.hourly_updates" in state.overrides %}<span class="pill">override</span>{% endif %}
           </label>
           <label><input type="checkbox" name="delivery_hourly_updates" {% if delivery.hourly_updates %}checked{% endif %}> Enabled</label>
         </div>
-        <div class="field">
+        <div class="check-item">
           <label>
             Breaking Alerts
             {% if "delivery.breaking_alerts" in state.overrides %}<span class="pill">override</span>{% endif %}
@@ -391,13 +535,14 @@
           <label><input type="checkbox" name="delivery_breaking_alerts" {% if delivery.breaking_alerts %}checked{% endif %}> Enabled</label>
         </div>
       </div>
+
       <div class="actions">
         <button type="submit">Save Delivery</button>
       </div>
     </form>
   </section>
 
-  <section class="card col-12" style="grid-column: span 12;">
+  <section class="card">
     <h2>Morning Section Visibility</h2>
     <form
       hx-post="/ui/profile/{{ state.profile }}/save/sections"
@@ -405,9 +550,9 @@
       hx-swap="outerHTML"
       method="post"
     >
-      <div class="inline-grid">
+      <div class="check-grid">
         {% for key, enabled in sections.items() %}
-          <div class="field">
+          <div class="check-item">
             <label>
               {{ key.replace("_", " ").title() }}
               {% if ("sections.morning." ~ key) in state.overrides %}<span class="pill">override</span>{% endif %}
@@ -425,4 +570,3 @@
     </form>
   </section>
 </div>
-

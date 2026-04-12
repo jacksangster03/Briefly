@@ -4,29 +4,80 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>market-briefing-bot Control Panel</title>
+  <script>
+    (() => {
+      const stored = window.localStorage.getItem("mbb-ui-theme");
+      if (stored === "light" || stored === "dark") {
+        document.documentElement.setAttribute("data-theme", stored);
+      } else {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <style>
     :root {
-      --bg: #f3f7fb;
+      --bg: #0b0d12;
+      --bg-secondary: #11151e;
+      --card: #151b26;
+      --card-hover: #1b2331;
+      --ink: #f5f7fa;
+      --muted: #9cb0c9;
+      --border: #2a3445;
+      --accent: #f59f00;
+      --accent-strong: #ffb020;
+      --success: #1faa6f;
+      --error: #ea5455;
+      --shadow: 0 14px 38px rgba(0, 0, 0, 0.28);
+      --radius: 12px;
+      --chip-bg: #252f3f;
+      --chip-text: #dce6f3;
+      --status-info-bg: #122238;
+      --status-info-ink: #aac7ee;
+      --status-success-bg: #10251b;
+      --status-success-ink: #9ee6bb;
+      --status-error-bg: #31181a;
+      --status-error-ink: #f5b2b2;
+      --input-bg: #101622;
+      --focus-ring: 0 0 0 3px rgba(245, 159, 0, 0.18);
+    }
+
+    :root[data-theme="light"] {
+      --bg: #f2f5fa;
+      --bg-secondary: #e6ecf5;
       --card: #ffffff;
-      --ink: #12263a;
-      --muted: #4f647a;
-      --border: #d7e2ee;
-      --accent: #0b7285;
-      --success: #0f9d58;
-      --error: #c92a2a;
-      --shadow: 0 10px 30px rgba(18, 38, 58, 0.08);
-      --radius: 16px;
+      --card-hover: #f8fbff;
+      --ink: #111b2b;
+      --muted: #4b5e78;
+      --border: #c7d3e3;
+      --accent: #cf7500;
+      --accent-strong: #ba6400;
+      --success: #1b8e5a;
+      --error: #c0393f;
+      --shadow: 0 10px 26px rgba(17, 27, 43, 0.08);
+      --chip-bg: #e8f0fb;
+      --chip-text: #16395f;
+      --status-info-bg: #edf5ff;
+      --status-info-ink: #1f4c78;
+      --status-success-bg: #eaf9f0;
+      --status-success-ink: #1f6641;
+      --status-error-bg: #ffeef0;
+      --status-error-ink: #8c2431;
+      --input-bg: #ffffff;
+      --focus-ring: 0 0 0 3px rgba(207, 117, 0, 0.16);
     }
 
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: radial-gradient(1400px 700px at 20% -10%, #dceeff 0%, var(--bg) 45%, #edf3f9 100%);
+      background:
+        radial-gradient(900px 500px at 8% -5%, rgba(245, 159, 0, 0.15), transparent 58%),
+        radial-gradient(1000px 600px at 92% -10%, rgba(46, 131, 255, 0.12), transparent 58%),
+        linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg) 100%);
       color: var(--ink);
-      font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+      font-family: "IBM Plex Sans", "Segoe UI", "Avenir Next", "Helvetica Neue", sans-serif;
       line-height: 1.4;
-      padding: 20px 14px 50px;
+      padding: 18px 14px 44px;
     }
 
     .shell {
@@ -34,28 +85,219 @@
       margin: 0 auto;
     }
 
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+
+    .eyebrow {
+      margin: 0;
+      color: var(--muted);
+      font-family: "IBM Plex Mono", "SF Mono", "Menlo", "Consolas", monospace;
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
     .title {
       font-size: clamp(1.4rem, 2.8vw, 2rem);
-      font-weight: 700;
-      margin: 0 0 8px;
-      letter-spacing: 0.01em;
+      font-weight: 640;
+      margin: 4px 0 8px;
+      letter-spacing: 0.008em;
     }
 
     .subtitle {
-      margin: 0 0 18px;
+      margin: 0;
       color: var(--muted);
       font-size: 0.98rem;
+      max-width: 840px;
+    }
+
+    .theme-toggle {
+      margin-top: 2px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 8px 14px;
+      cursor: pointer;
+      background: var(--card);
+      color: var(--ink);
+      font-size: 0.86rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+
+    .theme-toggle:hover {
+      background: var(--card-hover);
+      border-color: var(--accent);
+    }
+
+    .theme-toggle:focus-visible {
+      outline: none;
+      box-shadow: var(--focus-ring);
+    }
+
+    @media (max-width: 760px) {
+      .topbar {
+        flex-direction: column;
+      }
     }
   </style>
 </head>
 <body>
   <div class="shell">
-    <h1 class="title">Portfolio Control Panel</h1>
-    <p class="subtitle">Single-user local control plane for profile settings and holdings snapshots.</p>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">market-briefing-bot</p>
+        <h1 class="title">Portfolio Control Panel</h1>
+        <p class="subtitle">Single-user local control plane for profile settings and holdings snapshots.</p>
+      </div>
+      <button id="themeToggle" class="theme-toggle" type="button">Switch Theme</button>
+    </header>
     <div id="settings-root">
       {% include "partials/settings_root.html" %}
     </div>
   </div>
+  <script>
+    (() => {
+      function getTheme() {
+        return document.documentElement.getAttribute("data-theme") || "dark";
+      }
+
+      function setTheme(theme) {
+        document.documentElement.setAttribute("data-theme", theme);
+        window.localStorage.setItem("mbb-ui-theme", theme);
+        const button = document.getElementById("themeToggle");
+        if (button) {
+          button.textContent = theme === "dark" ? "Light Mode" : "Dark Mode";
+        }
+      }
+
+      const toggle = document.getElementById("themeToggle");
+      if (toggle) {
+        setTheme(getTheme());
+        toggle.addEventListener("click", () => {
+          setTheme(getTheme() === "dark" ? "light" : "dark");
+        });
+      }
+
+      function parseStockCatalog() {
+        const node = document.getElementById("stock-catalog-json");
+        if (!node) return [];
+        try {
+          return JSON.parse(node.textContent || "[]");
+        } catch {
+          return [];
+        }
+      }
+
+      function normalizeTickerInput(raw, catalog) {
+        const text = (raw || "").trim();
+        if (!text) return "";
+        const directMatch = text.toUpperCase().match(/^[A-Z0-9.\-]{1,10}$/);
+        if (directMatch) return directMatch[0];
+        const parenMatch = text.match(/\(([A-Z0-9.\-]{1,10})\)/i);
+        if (parenMatch) return parenMatch[1].toUpperCase();
+        const lowerText = text.toLowerCase();
+        const byLabel = catalog.find((item) => (item.label || "").toLowerCase() === lowerText);
+        if (byLabel && byLabel.symbol) return byLabel.symbol.toUpperCase();
+        const byContains = catalog.find((item) => (item.label || "").toLowerCase().includes(lowerText));
+        if (byContains && byContains.symbol) return byContains.symbol.toUpperCase();
+        return "";
+      }
+
+      function bindWatchlistBuilder(builder, catalog) {
+        if (!builder || builder.dataset.bound === "true") return;
+        builder.dataset.bound = "true";
+
+        const field = builder.dataset.field;
+        const input = builder.querySelector("[data-watch-input]");
+        const chips = builder.querySelector("[data-watch-chips]");
+        const hidden = builder.querySelector("[data-watch-hidden]");
+        const addButton = builder.querySelector("[data-watch-add]");
+        if (!field || !input || !chips || !hidden || !addButton) return;
+
+        const selected = new Set();
+        function render() {
+          chips.innerHTML = "";
+          hidden.innerHTML = "";
+          Array.from(selected).sort().forEach((symbol) => {
+            const chip = document.createElement("button");
+            chip.type = "button";
+            chip.className = "watch-chip";
+            chip.title = "Remove";
+            chip.textContent = symbol;
+            chip.addEventListener("click", () => {
+              selected.delete(symbol);
+              render();
+            });
+            chips.appendChild(chip);
+
+            const fieldInput = document.createElement("input");
+            fieldInput.type = "hidden";
+            fieldInput.name = field;
+            fieldInput.value = symbol;
+            hidden.appendChild(fieldInput);
+          });
+        }
+
+        function addFromInput() {
+          const symbol = normalizeTickerInput(input.value, catalog);
+          if (!symbol) return;
+          selected.add(symbol);
+          input.value = "";
+          render();
+        }
+
+        const initialRaw = builder.dataset.initial || "[]";
+        try {
+          JSON.parse(initialRaw).forEach((symbol) => {
+            const normalized = normalizeTickerInput(String(symbol), catalog);
+            if (normalized) selected.add(normalized);
+          });
+        } catch {
+          // Ignore invalid initialization payload.
+        }
+        render();
+
+        addButton.addEventListener("click", addFromInput);
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            addFromInput();
+          }
+        });
+
+        const parentForm = builder.closest("form");
+        if (parentForm) {
+          parentForm.addEventListener("submit", () => {
+            const pending = normalizeTickerInput(input.value, catalog);
+            if (pending) {
+              selected.add(pending);
+              input.value = "";
+              render();
+            }
+          });
+        }
+      }
+
+      function initWatchlistBuilders(root = document) {
+        const catalog = parseStockCatalog();
+        root.querySelectorAll("[data-watch-builder]").forEach((builder) => {
+          bindWatchlistBuilder(builder, catalog);
+        });
+      }
+
+      document.addEventListener("DOMContentLoaded", () => initWatchlistBuilders(document));
+      document.body.addEventListener("htmx:afterSwap", (event) => {
+        const target = event.detail && event.detail.target;
+        if (target && target.id === "settings-root") {
+          initWatchlistBuilders(target);
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
-

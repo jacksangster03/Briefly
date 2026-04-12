@@ -55,6 +55,9 @@ The current product is no longer just a headline feed:
   - per-message routing (`morning` / `intraday` / `breaking`) can be customized by profile
 - **Phase 4.3 web control panel (FastAPI + HTMX)**
   - local-first settings UI for holdings, watchlists, sector weights, delivery routing, and morning section visibility
+  - searchable watchlist builders (chip-based add/remove) instead of long multiselect lists
+  - region-focus controls (`home_region` + `coverage_weights`) alongside sector weights
+  - terminal-style professional UI with persistent light/dark mode toggle
   - server-rendered panel with partial HTMX updates (no frontend build step)
   - programmatic control-plane API for state, preference updates, followables search, and holdings upload
 - **Operational resilience**
@@ -299,6 +302,8 @@ python -m app.cli prefs-set --profile default_user --key sections.morning.watchl
 # override watchlist + sector weights without editing YAML
 python -m app.cli prefs-set --profile default_user --key watchlist.primary --value '["NVDA","MSFT","TSLA"]'
 python -m app.cli prefs-set --profile default_user --key sector.weights --value '{"technology": 1.3, "energy": 1.1}'
+python -m app.cli prefs-set --profile default_user --key coverage.home_region --value "us"
+python -m app.cli prefs-set --profile default_user --key coverage.weights --value '{"us": 1.2, "europe": 0.7, "asia": 0.5}'
 ```
 
 Unset one key or clear all overrides:
@@ -311,6 +316,7 @@ python -m app.cli prefs-reset --profile default_user
 Supported keys:
 - `watchlist.primary`, `watchlist.secondary`, `watchlist.monitor`
 - `sector.weights`
+- `coverage.home_region`, `coverage.weights`
 - `delivery.morning_channels`, `delivery.intraday_channels`, `delivery.breaking_channels`
 - `delivery.morning_brief_time`, `delivery.hourly_updates`, `delivery.breaking_alerts`
 - `delivery.quiet_hours_start`, `delivery.quiet_hours_end`
