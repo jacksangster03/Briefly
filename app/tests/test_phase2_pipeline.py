@@ -351,6 +351,29 @@ def test_cluster_representative_prefers_cluster_central_headline():
     assert any(term in rep_title for term in ("oil", "hormuz", "pipeline", "iran"))
 
 
+def test_cluster_representative_prefers_direct_catalyst_over_side_angle():
+    """Direct catalyst headlines should beat soft side-angle framing."""
+    events = [
+        NormalisedEvent(
+            title="Britain's Tesco to shine light on inflation risks from Iran war",
+            summary="Retailer warns on costs as Middle East conflict ripples through supply chains.",
+            event_type="market_news",
+            final_score=0.84,
+        ),
+        NormalisedEvent(
+            title="Oil tops $100, dollar gains, stocks fall as US moves to blockade Iran",
+            summary="Energy shock drives cross-asset risk repricing across global markets.",
+            event_type="market_news",
+            final_score=0.80,
+        ),
+    ]
+    clustered = cluster_events(events)
+    rep = max(clustered, key=lambda e: e.cluster_size)
+    rep_title = rep.title.lower()
+    assert "tesco" not in rep_title
+    assert any(term in rep_title for term in ("oil", "blockade"))
+
+
 def test_ticker_resolution_strips_spurious_tickers():
     """Market news tickers not mentioned in the text should be stripped."""
     from app.processing.pipeline import _resolve_event_tickers

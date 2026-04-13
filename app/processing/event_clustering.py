@@ -34,6 +34,11 @@ HEADLINE_NOISE_PATTERNS = (
     "explainer",
     "explained",
     "here's why",
+    "to shine light on",
+    "in focus",
+    "what's in the cards",
+    "what's in focus",
+    "what to watch",
 )
 
 SIDE_ANGLE_NAME_TOKENS = {
@@ -42,6 +47,29 @@ SIDE_ANGLE_NAME_TOKENS = {
     "cramer",
     "scaramucci",
 }
+
+DIRECT_CATALYST_PATTERNS = (
+    "blockade",
+    "closed the strait",
+    "cut oil output",
+    "pipeline flow",
+    "oil tops",
+    "attacks cut",
+    "sanctions",
+    "ceasefire",
+    "rate decision",
+    "rate cut",
+    "rate hike",
+    "guidance",
+    "earnings",
+    "raises forecast",
+    "lowers forecast",
+    "acquisition",
+    "merger",
+    "8-k",
+    "10-q",
+    "10-k",
+)
 
 # Macro threads: events sharing one of these keyword groups cluster together
 # even without shared tickers. Each group defines a single macro narrative.
@@ -140,16 +168,19 @@ def _pick_cluster_representative(cluster_members: list[NormalisedEvent]) -> Norm
 
     core_terms = _cluster_core_terms(cluster_members)
 
-    def rank_key(evt: NormalisedEvent) -> tuple[float, float, float, str]:
+    def rank_key(evt: NormalisedEvent) -> tuple[float, float, float, float, str]:
         title_terms = set(_topic_terms(evt.title, "", limit=8))
         summary_terms = set(_topic_terms("", evt.summary, limit=6))
 
         title_alignment = len(title_terms & core_terms)
         summary_alignment = len(summary_terms & core_terms)
         noise_penalty = _headline_noise_penalty(evt.title)
+        has_direct_catalyst = _headline_has_direct_catalyst(evt.title)
+        catalyst_bonus = 0.45 if has_direct_catalyst else 0.0
 
         return (
-            title_alignment - noise_penalty,
+            1.0 if has_direct_catalyst else 0.0,
+            title_alignment + catalyst_bonus - noise_penalty,
             summary_alignment,
             evt.final_score,
             evt.published_at.isoformat() if evt.published_at else "",
@@ -198,6 +229,14 @@ def _headline_noise_penalty(title: str) -> float:
             break
 
     return penalty
+
+
+def _headline_has_direct_catalyst(title: str) -> bool:
+    lowered = (title or "").lower()
+    for pattern in DIRECT_CATALYST_PATTERNS:
+        if pattern in lowered:
+            return True
+    return False
 
 
 def build_story_key(evt: NormalisedEvent) -> str:

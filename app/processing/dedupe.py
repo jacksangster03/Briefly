@@ -187,9 +187,15 @@ def _same_story(evt: NormalisedEvent, row: StoredEvent) -> bool:
     evt_tickers = set(evt.tickers or [])
     if evt.cluster_id and row.cluster_id and evt.cluster_id == row.cluster_id:
         return True
+
+    evt_norm_title = normalise_for_comparison(evt.title or "")
+    row_norm_title = normalise_for_comparison(row.title or "")
+    if evt_norm_title and row_norm_title and evt_norm_title == row_norm_title:
+        return True
+
     if evt_tickers and row_tickers and not (evt_tickers & row_tickers):
         return False
-    if evt.event_type and row.event_type and evt.event_type != row.event_type:
+    if evt.event_type and row.event_type and not _compatible_event_types(evt.event_type, row.event_type):
         return False
     return _title_similarity(evt.title, row.title or "") >= 0.55
 
@@ -197,6 +203,23 @@ def _same_story(evt: NormalisedEvent, row: StoredEvent) -> bool:
 def _is_material_update(evt: NormalisedEvent, row: StoredEvent) -> bool:
     similarity = _title_similarity(evt.title, row.title or "")
     return similarity < 0.82
+
+
+def _compatible_event_types(type_a: str, type_b: str) -> bool:
+    a = (type_a or "").lower()
+    b = (type_b or "").lower()
+    if a == b:
+        return True
+
+    news_types = {"market_news", "company_news", "headline", "news_search"}
+    filing_types = {"filing", "current_report", "annual_report", "quarterly_report"}
+    earnings_types = {"earnings", "guidance"}
+    macro_types = {"macro_release", "fed_decision", "geopolitical", "regulatory"}
+
+    for group in (news_types, filing_types, earnings_types, macro_types):
+        if a in group and b in group:
+            return True
+    return False
 
 
 def _title_similarity(a: str, b: str) -> float:
