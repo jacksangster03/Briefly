@@ -66,9 +66,22 @@ class LLMEmailRenderer:
         briefing: MorningBriefing,
         deterministic_email: EmailRenderResult,
         selected_events: list[NormalisedEvent],
+        enabled_override: bool | None = None,
+        shadow_mode_override: bool | None = None,
     ) -> LLMRenderDecision:
         """Return active email content after LLM render attempt and safeguards."""
-        if not self.settings.enable_llm_email_render:
+        llm_enabled = (
+            enabled_override
+            if enabled_override is not None
+            else self.settings.enable_llm_email_render
+        )
+        llm_shadow_mode = (
+            shadow_mode_override
+            if shadow_mode_override is not None
+            else self.settings.llm_render_shadow_mode
+        )
+
+        if not llm_enabled:
             return LLMRenderDecision(
                 active_email=deterministic_email,
                 mode="disabled",
@@ -122,7 +135,7 @@ class LLMEmailRenderer:
             session_mode=briefing.session_mode,
         )
 
-        if self.settings.llm_render_shadow_mode:
+        if llm_shadow_mode:
             logger.info("LLM email render succeeded in shadow mode; deterministic email remains active.")
             return LLMRenderDecision(
                 active_email=deterministic_email,

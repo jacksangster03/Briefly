@@ -330,6 +330,8 @@ def _delivery_updates_from_form(form) -> dict[str, Any]:
         "delivery.quiet_hours_end": str(form.get("delivery_quiet_hours_end", "")).strip(),
         "delivery.hourly_updates": "delivery_hourly_updates" in form,
         "delivery.breaking_alerts": "delivery_breaking_alerts" in form,
+        "delivery.llm_email_morning": "delivery_llm_email_morning" in form,
+        "delivery.llm_shadow_mode": "delivery_llm_shadow_mode" in form,
     }
     return updates
 

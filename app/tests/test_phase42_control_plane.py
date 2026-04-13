@@ -67,6 +67,14 @@ def test_preference_accepts_region_focus_overrides(isolated_db):
     assert prefs["coverage.weights"] == {"us": 1.2, "europe": 0.8, "asia": 0.5}
 
 
+def test_preference_accepts_llm_delivery_toggles(isolated_db):
+    set_preference("default_user", "delivery.llm_email_morning", False)
+    set_preference("default_user", "delivery.llm_shadow_mode", True)
+    prefs = get_preferences("default_user")
+    assert prefs["delivery.llm_email_morning"] is False
+    assert prefs["delivery.llm_shadow_mode"] is True
+
+
 def test_load_user_profile_applies_preference_overrides(isolated_db, tmp_path):
     config_dir = tmp_path / "configs"
     config_dir.mkdir(parents=True)

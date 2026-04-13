@@ -789,6 +789,7 @@
     <p class="muted">
       Choose channels and schedule controls for each briefing type.
       Changes affect the next generated run without restarting your profile data.
+      LLM rendering currently applies to morning/weekend email only.
     </p>
     <form
       hx-post="/ui/profile/{{ state.profile }}/save/delivery"
@@ -862,6 +863,22 @@
             {% if "delivery.breaking_alerts" in state.overrides %}<span class="pill">override</span>{% endif %}
           </label>
           <label><input type="checkbox" name="delivery_breaking_alerts" {% if delivery.breaking_alerts %}checked{% endif %}> Enabled</label>
+        </div>
+        <div class="check-item">
+          <label>
+            LLM For Morning Email
+            {% if "delivery.llm_email_morning" in state.overrides %}<span class="pill">override</span>{% endif %}
+          </label>
+          <label><input type="checkbox" name="delivery_llm_email_morning" {% if delivery.llm_email_morning %}checked{% endif %}> Enabled</label>
+          <p class="tiny">If disabled, morning/weekend email always uses deterministic formatter.</p>
+        </div>
+        <div class="check-item">
+          <label>
+            LLM Shadow Mode
+            {% if "delivery.llm_shadow_mode" in state.overrides %}<span class="pill">override</span>{% endif %}
+          </label>
+          <label><input type="checkbox" name="delivery_llm_shadow_mode" {% if delivery.llm_shadow_mode %}checked{% endif %}> Enabled</label>
+          <p class="tiny">Shadow keeps deterministic email active while printing LLM preview for review.</p>
         </div>
       </div>
 

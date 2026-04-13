@@ -313,12 +313,16 @@ python -m app.cli prefs-show --profile default_user
 Set overrides:
 
 ```bash
-# route morning to email for this profile
-python -m app.cli prefs-set --profile default_user --key delivery.morning_channels --value '["email"]'
-
-# keep intraday + breaking on Telegram
-python -m app.cli prefs-set --profile default_user --key delivery.intraday_channels --value '["telegram"]'
+# your target routing:
+# - morning + intraday on email
+# - morning + intraday + breaking on telegram
+python -m app.cli prefs-set --profile default_user --key delivery.morning_channels --value '["telegram","email"]'
+python -m app.cli prefs-set --profile default_user --key delivery.intraday_channels --value '["telegram","email"]'
 python -m app.cli prefs-set --profile default_user --key delivery.breaking_channels --value '["telegram"]'
+
+# LLM controls (morning/weekend email only)
+python -m app.cli prefs-set --profile default_user --key delivery.llm_email_morning --value true
+python -m app.cli prefs-set --profile default_user --key delivery.llm_shadow_mode --value true
 
 # hide one morning section
 python -m app.cli prefs-set --profile default_user --key sections.morning.watchlist --value false
@@ -343,6 +347,7 @@ Supported keys:
 - `coverage.home_region`, `coverage.weights`
 - `delivery.morning_channels`, `delivery.intraday_channels`, `delivery.breaking_channels`
 - `delivery.morning_brief_time`, `delivery.hourly_updates`, `delivery.breaking_alerts`
+- `delivery.llm_email_morning`, `delivery.llm_shadow_mode`
 - `delivery.quiet_hours_start`, `delivery.quiet_hours_end`
 - `sections.morning.market_setup`, `sections.morning.macro_context`, `sections.morning.top_themes`
 - `sections.morning.portfolio_focus`, `sections.morning.sector_scan`, `sections.morning.watchlist`

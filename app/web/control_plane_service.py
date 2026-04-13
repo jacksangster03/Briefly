@@ -71,6 +71,12 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
                 "morning_brief_time": profile.morning_brief_time,
                 "hourly_updates": profile.hourly_updates_enabled,
                 "breaking_alerts": profile.breaking_alerts_enabled,
+                "llm_email_morning": bool(
+                    profile.delivery.get("llm_email_morning", settings.enable_llm_email_render)
+                ),
+                "llm_shadow_mode": bool(
+                    profile.delivery.get("llm_shadow_mode", settings.llm_render_shadow_mode)
+                ),
                 "quiet_hours_start": profile.quiet_hours[0],
                 "quiet_hours_end": profile.quiet_hours[1],
             },

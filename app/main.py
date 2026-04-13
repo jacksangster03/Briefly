@@ -43,6 +43,15 @@ def _build_services(settings: Settings):
     )
 
 
+def _resolve_llm_delivery_overrides(profile: UserProfile) -> tuple[bool | None, bool | None]:
+    """Resolve profile-level LLM email overrides from delivery preferences."""
+    enabled_raw = profile.delivery.get("llm_email_morning")
+    shadow_raw = profile.delivery.get("llm_shadow_mode")
+    enabled = enabled_raw if isinstance(enabled_raw, bool) else None
+    shadow = shadow_raw if isinstance(shadow_raw, bool) else None
+    return enabled, shadow
+
+
 def _get_messengers(settings: Settings, profile: UserProfile, *, message_type: str = ""):
     """Return configured messengers in priority order."""
     messengers = []
@@ -283,10 +292,13 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
         seen_tracking_ids.add(tracking_id)
         display_events.append(evt)
 
+    llm_enabled_override, llm_shadow_override = _resolve_llm_delivery_overrides(profile)
     llm_decision = LLMEmailRenderer(settings).render_morning(
         briefing=briefing,
         deterministic_email=email_content,
         selected_events=display_events,
+        enabled_override=llm_enabled_override,
+        shadow_mode_override=llm_shadow_override,
     )
     active_email_content = llm_decision.active_email
     if settings.show_output and llm_decision.shadow_preview:

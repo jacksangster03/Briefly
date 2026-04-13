@@ -271,6 +271,8 @@ def _load_profile_overrides(profile: UserProfile) -> None:
             "delivery.morning_brief_time",
             "delivery.hourly_updates",
             "delivery.breaking_alerts",
+            "delivery.llm_email_morning",
+            "delivery.llm_shadow_mode",
             "delivery.quiet_hours_start",
             "delivery.quiet_hours_end",
         }:

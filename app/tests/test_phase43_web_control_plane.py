@@ -240,6 +240,35 @@ def test_ui_htmx_save_coverage_persists_watchlist_and_region_focus(client):
     assert state["effective"]["coverage"]["region_weights"]["europe"] == pytest.approx(0.6)
 
 
+def test_ui_htmx_save_delivery_persists_channel_mix_and_llm_toggles(client):
+    response = client.post(
+        "/ui/profile/default_user/save/delivery",
+        data={
+            "delivery_morning_channels": ["telegram", "email"],
+            "delivery_intraday_channels": ["telegram", "email"],
+            "delivery_breaking_channels": ["telegram"],
+            "delivery_morning_brief_time": "08:45",
+            "delivery_quiet_hours_start": "23:00",
+            "delivery_quiet_hours_end": "07:00",
+            "delivery_hourly_updates": "on",
+            "delivery_breaking_alerts": "on",
+            "delivery_llm_email_morning": "on",
+            # leave shadow off intentionally
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert response.status_code == 200
+    assert "Delivery preferences saved to DB overrides." in response.text
+    assert "Saved at" in response.text
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert state["effective"]["delivery"]["morning_channels"] == ["telegram", "email"]
+    assert state["effective"]["delivery"]["intraday_channels"] == ["telegram", "email"]
+    assert state["effective"]["delivery"]["breaking_channels"] == ["telegram"]
+    assert state["effective"]["delivery"]["llm_email_morning"] is True
+    assert state["effective"]["delivery"]["llm_shadow_mode"] is False
+
+
 def test_state_exposes_validation_warnings_when_delivery_channels_missing(client):
     state = client.get("/api/v1/profile/default_user/state").json()
     warnings = state["validations"]
