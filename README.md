@@ -39,8 +39,11 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
   - high-threshold event checks with clearer market context
   - deterministic breaking classifier (`breaking` / `high_priority` / `regular` / `ignore`) with market-link gates
   - storyline-key cooldown to suppress near-duplicate geopolitical headline churn
+  - event-driven send logic (polling is for detection only; no fixed send cadence)
+  - optional one-shot follow-up state machine (`initial_sent -> followup_due -> followup_sent|closed`) with market-reaction confirmation checks
   - strict one-shot suppression: continuation/material-update repeats are filtered out
   - one alert per cycle (highest-priority only) to prevent notification spam
+  - flood control via rolling-hour cap + storyline cooldown
 - **Portfolio-aware intelligence**
   - holdings import from YAML or CSV
   - holdings persistence in SQLite
@@ -101,6 +104,14 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
   - intraday and breaking now surface only `new` catalysts (not continuation repeats)
   - breaking delivery is hard-routed to Telegram (no breaking email fan-out)
   - breaking checks use a cross-process run lock + sent-ID guard to prevent repeat bursts
+- **Phase 4.6 cadence engine**
+  - `CadenceEngine` + `DecisionEngine` enforce:
+    - one `Morning Briefing` per local day in local morning window
+    - one `Intraday Update` per local day in local pre–US-open window
+    - BREAKING only when classification thresholds pass
+  - US cash open is computed from `09:30 America/New_York` converted into user local timezone via IANA zones (DST-safe)
+  - NYSE holiday + half-day awareness added for pre-open gating
+  - daily idempotency markers persisted in SQLite (`morning:{local_date}`, `intraday:{local_date}`)
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths

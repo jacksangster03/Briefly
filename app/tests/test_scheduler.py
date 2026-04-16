@@ -33,10 +33,11 @@ def test_breaking_run_times_stop_at_end_hour():
 def test_scheduler_builds_explicit_intraday_jobs():
     scheduler = build_scheduler(Settings())
     job_ids = {job.id for job in scheduler.get_jobs()}
-    assert "morning_briefing" in job_ids
-    assert "intraday_update_1430" in job_ids
-    assert "intraday_update_2130" in job_ids
-    assert "intraday_update_2230" not in job_ids
+    assert "morning_cadence_check" in job_ids
+    assert "intraday_cadence_check" in job_ids
+    # Breaking polling jobs still exist as explicit checks in the configured window.
+    assert "breaking_alerts_0800" in job_ids
+    assert "breaking_alerts_2300" in job_ids
 
 
 def test_scheduler_breaking_end_boundary_does_not_overshoot():

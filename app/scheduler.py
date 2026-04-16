@@ -11,7 +11,6 @@ from pathlib import Path
 import pytz
 import yaml
 from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.logger import get_logger
@@ -31,51 +30,30 @@ def build_scheduler(settings: Settings | None = None) -> BlockingScheduler:
     # Load schedule config
     schedule_config = _load_schedule_config(settings)
 
-    # Morning briefing
-    morning = schedule_config.get("morning_briefing", {})
-    morning_time = morning.get("time", "12:30")
-    h, m = morning_time.split(":")
-    morning_days = _days_expr(morning.get("days"))
+    # Cadence checks: polling decisions, not fixed send cadence.
+    # Morning send still happens once/day via idempotency + window gating.
+    morning_check_mins = int(schedule_config.get("morning_briefing", {}).get("check_interval_minutes", 5))
     scheduler.add_job(
-        run_morning_briefing,
-        CronTrigger(
-            hour=int(h),
-            minute=int(m),
-            day_of_week=morning_days,
-            timezone=tz,
-        ),
-        id="morning_briefing",
-        name="Morning Briefing",
-        misfire_grace_time=300,
+        _run_morning_cadence_check,
+        IntervalTrigger(minutes=max(1, morning_check_mins), timezone=tz),
+        id="morning_cadence_check",
+        name="Morning Cadence Check",
+        kwargs={"settings": settings},
+        misfire_grace_time=120,
     )
-    logger.info("Scheduled morning briefing at %s (weekdays)", morning_time)
+    logger.info("Scheduled morning cadence checks every %d minute(s)", max(1, morning_check_mins))
 
-    # Hourly intraday updates
-    intraday = schedule_config.get("hourly_intraday", {})
-    if intraday.get("interval_minutes"):
-        intraday_days = _days_expr(intraday.get("days"))
-        run_times = _intraday_run_times(
-            intraday.get("start", "14:30"),
-            intraday.get("end", "22:00"),
-            int(intraday.get("interval_minutes", 60)),
-        )
-        for hour, minute in run_times:
-            scheduler.add_job(
-                run_intraday_update,
-                CronTrigger(
-                    hour=hour,
-                    minute=minute,
-                    day_of_week=intraday_days,
-                    timezone=tz,
-                ),
-                id=f"intraday_update_{hour:02d}{minute:02d}",
-                name=f"Intraday Update {hour:02d}:{minute:02d}",
-                misfire_grace_time=120,
-            )
-        logger.info(
-            "Scheduled intraday updates %s-%s (weekdays)",
-            intraday.get("start"), intraday.get("end"),
-        )
+    # Intraday send is aligned dynamically to US 09:30 NY open converted to local.
+    intraday_check_mins = int(schedule_config.get("hourly_intraday", {}).get("check_interval_minutes", 2))
+    scheduler.add_job(
+        _run_intraday_cadence_check,
+        IntervalTrigger(minutes=max(1, intraday_check_mins), timezone=tz),
+        id="intraday_cadence_check",
+        name="Intraday Cadence Check",
+        kwargs={"settings": settings},
+        misfire_grace_time=90,
+    )
+    logger.info("Scheduled intraday cadence checks every %d minute(s)", max(1, intraday_check_mins))
 
     # Breaking alerts (polling)
     breaking = schedule_config.get("breaking_alerts", {})
@@ -88,18 +66,18 @@ def build_scheduler(settings: Settings | None = None) -> BlockingScheduler:
         for hour, minute in run_times:
             scheduler.add_job(
                 run_breaking_check,
-                CronTrigger(
-                    hour=hour,
-                    minute=minute,
-                    day_of_week=breaking_days,
-                    timezone=tz,
-                ),
+                trigger="cron",
+                hour=hour,
+                minute=minute,
+                day_of_week=breaking_days,
+                timezone=tz,
+                kwargs={"settings": settings},
                 id=f"breaking_alerts_{hour:02d}{minute:02d}",
                 name=f"Breaking Alert Check {hour:02d}:{minute:02d}",
                 misfire_grace_time=60,
             )
         logger.info(
-            "Scheduled %d breaking alert checks (%s-%s every %d min)",
+            "Scheduled %d breaking polling checks (%s-%s every %d min); sending remains event-driven",
             len(run_times), start, end, poll_mins,
         )
 
@@ -152,3 +130,13 @@ def _breaking_run_times(start: str, end: str, interval_minutes: int) -> list[tup
     happily fired every 5 minutes throughout the 23rd hour.
     """
     return _intraday_run_times(start, end, interval_minutes)
+
+
+def _run_morning_cadence_check(settings: Settings) -> None:
+    """Run morning flow only when cadence engine says send now."""
+    run_morning_briefing(settings, respect_cadence=True)
+
+
+def _run_intraday_cadence_check(settings: Settings) -> None:
+    """Run intraday flow only when cadence engine says send now."""
+    run_intraday_update(settings, respect_cadence=True)

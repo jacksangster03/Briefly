@@ -96,6 +96,7 @@ class BreakingClassification(BaseModel):
     breadth_score: int = 0
     why_markets_care: str = ""
     watch_assets: list[str] = Field(default_factory=list)
+    watch_symbols: list[str] = Field(default_factory=list)
     confirm_signals: list[str] = Field(default_factory=list)
     invalidate_signals: list[str] = Field(default_factory=list)
     storyline_key: str = ""

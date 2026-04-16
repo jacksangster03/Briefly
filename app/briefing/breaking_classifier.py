@@ -150,6 +150,15 @@ _CATEGORY_WATCH_ASSETS: dict[str, list[str]] = {
     "company": ["Affected ticker", "Sector ETF", "S&P 500 (SPY)"],
 }
 
+_CATEGORY_WATCH_SYMBOLS: dict[str, list[str]] = {
+    "geopolitics": ["CL=F", "GC=F", "^VIX", "SPY", "QQQ"],
+    "rates_macro": ["^TNX", "SPY", "QQQ", "XLF", "TLT"],
+    "energy": ["CL=F", "XLE", "^VIX", "SPY"],
+    "regulation": ["SPY"],
+    "earnings": ["SPY"],
+    "company": ["SPY"],
+}
+
 _STOPWORDS = {
     "a",
     "an",
@@ -225,6 +234,7 @@ def classify_breaking_event(
 
     why = _why_markets_care(event, category, low_signal=low_signal, market_linked=market_linked)
     watch_assets = _watch_assets(event, category)
+    watch_symbols = _watch_symbols(event, category)
     confirm_signals = _confirm_signals(category, event)
     invalidate_signals = _invalidate_signals(category)
     storyline_key = build_breaking_storyline_key(event, category=category, text_lower=title)
@@ -239,6 +249,7 @@ def classify_breaking_event(
         breadth_score=breadth,
         why_markets_care=why,
         watch_assets=watch_assets,
+        watch_symbols=watch_symbols,
         confirm_signals=confirm_signals,
         invalidate_signals=invalidate_signals,
         storyline_key=storyline_key,
@@ -478,6 +489,19 @@ def _watch_assets(event: NormalisedEvent, category: str) -> list[str]:
             if etf and etf not in watch:
                 watch.append(etf)
     return watch[:6]
+
+
+def _watch_symbols(event: NormalisedEvent, category: str) -> list[str]:
+    symbols: list[str] = list(_CATEGORY_WATCH_SYMBOLS.get(category, _CATEGORY_WATCH_SYMBOLS["company"]))
+    for ticker in event.tickers[:2]:
+        if ticker not in symbols:
+            symbols.insert(0, ticker)
+    if event.sectors:
+        for sector in event.sectors[:2]:
+            etf = _TICKER_SECTOR_ETF.get((sector or "").lower().replace(" ", "_"))
+            if etf and etf not in symbols:
+                symbols.append(etf)
+    return symbols[:6]
 
 
 def _confirm_signals(category: str, event: NormalisedEvent) -> list[str]:

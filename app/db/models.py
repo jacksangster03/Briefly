@@ -148,3 +148,51 @@ class UserPreference(Base):
     active = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow)
+
+
+class CadenceMarker(Base):
+    """Idempotency marker for once-per-day cadence sends."""
+
+    __tablename__ = "cadence_markers"
+    __table_args__ = (
+        UniqueConstraint("profile_name", "marker_key", name="uq_cadence_marker_profile_key"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    marker_key = Column(String(120), nullable=False, index=True)
+    action_type = Column(String(50), nullable=False, index=True)  # morning | intraday
+    local_date = Column(Date, nullable=False, index=True)
+    local_timezone = Column(String(80), nullable=False, default="UTC")
+    sent_at_local = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+class BreakingStoryState(Base):
+    """State machine for breaking storyline lifecycle and follow-up control."""
+
+    __tablename__ = "breaking_story_state"
+    __table_args__ = (
+        UniqueConstraint("profile_name", "storyline_key", "local_date", name="uq_breaking_story_profile_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    storyline_key = Column(String(80), nullable=False, index=True)
+    local_date = Column(Date, nullable=False, index=True)
+    state = Column(String(40), nullable=False, default="initial_sent", index=True)
+    phase = Column(String(20), nullable=False, default="initial")  # initial | followup | escalation
+    category = Column(String(60), nullable=False, default="macro")
+    event_id = Column(String(36), nullable=True, index=True)
+    event_title = Column(Text, nullable=False, default="")
+    why_markets_care = Column(Text, nullable=False, default="")
+    watch_symbols = Column(JSON, default=list)
+    first_sent_at = Column(DateTime, nullable=False, default=_utcnow)
+    followup_due_at = Column(DateTime, nullable=True, index=True)
+    followup_sent_at = Column(DateTime, nullable=True)
+    followup_attempts = Column(Integer, nullable=False, default=0)
+    last_reason = Column(Text, nullable=False, default="")
+    closed = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)

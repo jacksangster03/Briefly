@@ -25,9 +25,20 @@ from app.briefing.breaking_generator import BreakingAlertGenerator
 from app.briefing.intraday_generator import IntradayGenerator
 from app.briefing.llm_email_renderer import LLMEmailRenderer
 from app.briefing.morning_generator import MorningBriefingGenerator
+from app.cadence.engine import DecisionEngine
+from app.cadence.state_store import (
+    breaking_sends_last_hour,
+    close_breaking_story,
+    due_breaking_followups,
+    record_cadence_marker,
+    recent_storyline_send_exists,
+    upsert_breaking_story_initial,
+    mark_followup_sent,
+)
 from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
+from app.db.models import BreakingStoryState
 from app.db.models import SentMessage
 from app.db.session import get_session, init_db
 from app.logger import get_logger
@@ -35,7 +46,8 @@ from app.messaging.email import EmailMessenger
 from app.messaging.telegram import TelegramMessenger
 from app.personalization.user_profile import UserProfile, load_user_profile
 from app.processing.event_store import record_sent_events
-from app.schemas.briefings import BreakingAlert, IntradayUpdate
+from app.schemas.briefings import BreakingAlert, BreakingClassification, IntradayUpdate
+from app.schemas.events import NormalisedEvent
 from app.settings import Settings, get_settings
 from app.universe.sector_universe import SectorUniverse, load_sector_universe
 
@@ -289,10 +301,12 @@ def _deliver(
     tracking_ids: list[str] | None = None,
 ):
     """Deliver messages via all configured channels and record to DB."""
+    any_success = False
     if settings and settings.show_output:
         _print_terminal_output(messages, msg_type)
     for messenger in messengers:
         success = messenger.send_messages(messages)
+        any_success = any_success or bool(success)
         is_dry_run = bool(getattr(messenger, "dry_run", False))
         try:
             if not is_dry_run:
@@ -311,6 +325,7 @@ def _deliver(
                 record_sent_events(events or [])
             except Exception:
                 logger.debug("Failed to record sent events", exc_info=True)
+    return any_success
 
 
 def _deliver_rich_email(
@@ -319,7 +334,7 @@ def _deliver_rich_email(
     msg_type: str,
     events: list | None = None,
     settings: Settings | None = None,
-) -> None:
+) -> bool:
     """Deliver a rich HTML email with inline assets and record the result."""
     if settings and settings.show_output:
         _print_email_output(
@@ -352,6 +367,7 @@ def _deliver_rich_email(
             record_sent_events(events or [])
         except Exception:
             logger.debug("Failed to record sent events for rich email", exc_info=True)
+    return bool(success)
 
 
 def _send_telegram_chart_preview(
@@ -391,15 +407,107 @@ def _apply_morning_section_preferences(briefing, profile: UserProfile) -> None:
         briefing.watchlist_quotes = []
 
 
+def _build_followup_alert_from_state(
+    state: BreakingStoryState,
+    *,
+    context_quotes,
+    reason: str,
+) -> BreakingAlert:
+    synthetic_event = NormalisedEvent(
+        event_id=state.event_id or "",
+        source="followup_state",
+        source_type="news",
+        title=state.event_title,
+        summary="Follow-up check after initial breaking alert.",
+        published_at=state.first_sent_at,
+        event_type="followup",
+        final_score=0.9,
+        factual_confidence_score=0.8,
+        cluster_size=1,
+        raw_data={"storyline_key": state.storyline_key},
+    )
+    classification = BreakingClassification(
+        tier="breaking",
+        category=state.category or "macro",
+        impact_score=4,
+        confidence_score=3,
+        novelty_score=3,
+        immediacy_score=3,
+        breadth_score=3,
+        why_markets_care=reason,
+        watch_assets=[],
+        watch_symbols=[str(symbol) for symbol in (state.watch_symbols or [])],
+        confirm_signals=[],
+        invalidate_signals=[],
+        storyline_key=state.storyline_key,
+    )
+    return BreakingAlert(
+        event=synthetic_event,
+        market_context=context_quotes or [],
+        reason=reason,
+        classification=classification,
+        tracking_ids=[
+            f"storyline:{state.storyline_key}",
+            f"breaking:{state.storyline_key}:followup",
+        ],
+    )
+
+
+def _evaluate_followup_confirmation(
+    state: BreakingStoryState,
+    *,
+    market_svc: MarketDataService,
+    fallback_symbols: list[str],
+    min_asset_move_pct: float,
+) -> tuple[bool, str, list]:
+    symbols = [str(symbol) for symbol in (state.watch_symbols or []) if str(symbol).strip()]
+    if not symbols:
+        symbols = fallback_symbols
+    # Keep quote fanout small and predictable.
+    symbols = symbols[:6]
+
+    quotes = market_svc.get_quotes(symbols)
+    if not quotes:
+        return False, "No quote data available for follow-up confirmation.", []
+
+    movers = [
+        quote
+        for quote in quotes
+        if abs(float(getattr(quote, "change_percent", 0.0) or 0.0)) >= min_asset_move_pct
+    ]
+    if movers:
+        label = movers[0].display_name or movers[0].symbol
+        move = float(movers[0].change_percent or 0.0)
+        return True, f"Follow-up: mapped assets confirmed with {label} {move:+.2f}% move.", quotes
+    return False, "Follow-up closed: mapped assets did not confirm meaningful move.", quotes
+
+
 # -- Morning Briefing ---------------------------------------------------------
 
-def run_morning_briefing(settings: Settings | None = None) -> None:
+def run_morning_briefing(settings: Settings | None = None, *, respect_cadence: bool = False) -> None:
     """Generate and deliver the morning briefing."""
     settings = settings or get_settings()
     init_db()
 
     logger.info("Starting morning briefing pipeline...")
     profile = load_user_profile(settings)
+    decision_engine = DecisionEngine(
+        settings,
+        profile_name=profile.name,
+        local_timezone=profile.timezone or settings.timezone,
+    )
+    if respect_cadence:
+        morning_decision = decision_engine.decide_morning(
+            target_hhmm=profile.morning_brief_time or "08:45",
+        )
+        logger.info(
+            "Cadence decision (morning): %s | %s",
+            morning_decision.action_type,
+            morning_decision.reason,
+        )
+        if morning_decision.action_type != "send_morning":
+            return
+
     universe = load_sector_universe(settings)
     market_svc, news_svc, macro_svc = _build_services(settings)
 
@@ -452,10 +560,17 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
     telegram_messengers = [m for m in messengers if isinstance(m, TelegramMessenger)]
     email_messengers = [m for m in messengers if isinstance(m, EmailMessenger)]
 
+    delivered_ok = False
     for messenger in telegram_messengers:
         _send_telegram_chart_preview(messenger, briefing.chart_assets, settings)
     if telegram_messengers:
-        _deliver(telegram_messengers, messages, "morning_brief", display_events, settings=settings)
+        delivered_ok = _deliver(
+            telegram_messengers,
+            messages,
+            "morning_brief",
+            display_events,
+            settings=settings,
+        ) or delivered_ok
     if (
         settings.show_output
         and settings.normalized_delivery_channel != "telegram"
@@ -469,7 +584,24 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
             "morning_email_preview",
         )
     for messenger in email_messengers:
-        _deliver_rich_email(messenger, active_email_content, "morning_brief", display_events, settings=settings)
+        delivered_ok = _deliver_rich_email(
+            messenger,
+            active_email_content,
+            "morning_brief",
+            display_events,
+            settings=settings,
+        ) or delivered_ok
+
+    if respect_cadence and delivered_ok and not settings.dry_run:
+        local_now = decision_engine.cadence.now_local()
+        record_cadence_marker(
+            profile_name=profile.name,
+            marker_key=f"morning:{local_now.date().isoformat()}",
+            action_type="morning",
+            local_date=local_now.date(),
+            local_timezone=profile.timezone or settings.timezone,
+            sent_at_local=local_now,
+        )
 
     logger.info(
         "Morning briefing delivered: %d messages, %d events",
@@ -479,13 +611,28 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
 
 # -- Intraday Update ----------------------------------------------------------
 
-def run_intraday_update(settings: Settings | None = None) -> None:
+def run_intraday_update(settings: Settings | None = None, *, respect_cadence: bool = False) -> None:
     """Fetch new events, dedupe against recent history, send top items."""
     settings = settings or get_settings()
     init_db()
 
     logger.info("Starting intraday update...")
     profile = load_user_profile(settings)
+    decision_engine = DecisionEngine(
+        settings,
+        profile_name=profile.name,
+        local_timezone=profile.timezone or settings.timezone,
+    )
+    if respect_cadence:
+        intraday_decision = decision_engine.decide_intraday()
+        logger.info(
+            "Cadence decision (intraday): %s | %s",
+            intraday_decision.action_type,
+            intraday_decision.reason,
+        )
+        if intraday_decision.action_type != "send_intraday":
+            return
+
     universe = load_sector_universe(settings)
     market_svc, news_svc, _ = _build_services(settings)
     generator = IntradayGenerator(
@@ -501,7 +648,18 @@ def run_intraday_update(settings: Settings | None = None) -> None:
     messages = formatter.format_intraday_update(update)
 
     messengers = _get_messengers(settings, profile, message_type="intraday")
-    _deliver(messengers, messages, "intraday", update.new_events, settings=settings)
+    delivered_ok = _deliver(messengers, messages, "intraday", update.new_events, settings=settings)
+
+    if respect_cadence and delivered_ok and not settings.dry_run:
+        local_now = decision_engine.cadence.now_local()
+        record_cadence_marker(
+            profile_name=profile.name,
+            marker_key=f"intraday:{local_now.date().isoformat()}",
+            action_type="intraday",
+            local_date=local_now.date(),
+            local_timezone=profile.timezone or settings.timezone,
+            sent_at_local=local_now,
+        )
 
     logger.info(
         "Intraday update: %d fetched, %d deduped, %d sent",
@@ -523,8 +681,77 @@ def run_breaking_check(settings: Settings | None = None) -> None:
             return
 
         profile = load_user_profile(settings)
+        if not profile.breaking_alerts_enabled:
+            logger.info("Breaking alerts disabled for profile '%s'; skipping cycle.", profile.name)
+            return
+
+        decision_engine = DecisionEngine(
+            settings,
+            profile_name=profile.name,
+            local_timezone=profile.timezone or settings.timezone,
+        )
         universe = load_sector_universe(settings)
         market_svc, news_svc, _ = _build_services(settings)
+
+        # 1) Due follow-up checks (event-driven, one max follow-up per storyline).
+        now_utc = datetime.now(timezone.utc)
+        due_states = due_breaking_followups(profile_name=profile.name, now_utc=now_utc)
+        if due_states:
+            formatter = TelegramFormatter(profile.timezone)
+            messengers = _get_messengers(settings, profile, message_type="breaking")
+            for state in due_states:
+                local_date = decision_engine.cadence.now_local().date()
+                confirmed, followup_reason, context_quotes = _evaluate_followup_confirmation(
+                    state,
+                    market_svc=market_svc,
+                    fallback_symbols=universe.all_index_symbols[:4],
+                    min_asset_move_pct=settings.breaking_followup_min_asset_move_pct,
+                )
+                if not confirmed:
+                    close_breaking_story(
+                        profile_name=profile.name,
+                        storyline_key=state.storyline_key,
+                        local_date=state.local_date,
+                        reason=followup_reason,
+                    )
+                    logger.info(
+                        "Breaking follow-up closed without send (storyline=%s): %s",
+                        state.storyline_key,
+                        followup_reason,
+                    )
+                    continue
+
+                followup_alert = _build_followup_alert_from_state(
+                    state,
+                    context_quotes=context_quotes,
+                    reason=followup_reason,
+                )
+                messages = formatter.format_breaking_alert(followup_alert)
+                tracking_ids = [
+                    f"storyline:{state.storyline_key}",
+                    f"breaking:{state.storyline_key}:followup",
+                ]
+                _deliver(
+                    messengers,
+                    messages,
+                    "breaking",
+                    [followup_alert.event],
+                    settings=settings,
+                    tracking_ids=tracking_ids,
+                )
+                mark_followup_sent(
+                    profile_name=profile.name,
+                    storyline_key=state.storyline_key,
+                    local_date=state.local_date if state.local_date else local_date,
+                    sent_at=now_utc,
+                    reason=followup_reason,
+                )
+                logger.info(
+                    "Breaking follow-up sent for storyline=%s",
+                    state.storyline_key,
+                )
+
+        # 2) Initial breaking detection and sends.
         generator = BreakingAlertGenerator(
             settings=settings,
             profile=profile,
@@ -555,11 +782,15 @@ def run_breaking_check(settings: Settings | None = None) -> None:
 
         tier_filtered_alerts: list[BreakingAlert] = []
         for alert in fresh_alerts:
-            if alert.classification.tier != "breaking":
+            breaking_decision = decision_engine.decide_breaking(
+                classification=alert.classification,
+                related_event_id=alert.event.event_id,
+            )
+            if breaking_decision.action_type != "send_breaking":
                 logger.info(
-                    "Skipping non-breaking tier candidate: %s (tier=%s)",
+                    "Skipping non-breaking candidate: %s (%s)",
                     alert.event.title[:90],
-                    alert.classification.tier,
+                    breaking_decision.reason,
                 )
                 continue
             tier_filtered_alerts.append(alert)
@@ -606,10 +837,55 @@ def run_breaking_check(settings: Settings | None = None) -> None:
             logger.debug("No fresh breaking alerts after storyline cooldown")
             return
 
+        flood_filtered_alerts: list[BreakingAlert] = []
+        local_now = decision_engine.cadence.now_local()
+        for alert in storyline_filtered_alerts:
+            storyline_key = alert.classification.storyline_key
+            if not storyline_key:
+                flood_filtered_alerts.append(alert)
+                continue
+
+            sends_last_hour = breaking_sends_last_hour(
+                profile_name=profile.name,
+                now_utc=now_utc,
+            )
+            if sends_last_hour >= settings.breaking_max_alerts_per_hour:
+                logger.info(
+                    "Flood control blocked breaking send (storyline=%s): %d in last hour",
+                    storyline_key,
+                    sends_last_hour,
+                )
+                continue
+
+            if recent_storyline_send_exists(
+                profile_name=profile.name,
+                storyline_key=storyline_key,
+                now_utc=now_utc,
+                cooldown_minutes=settings.breaking_storyline_cooldown_minutes,
+            ):
+                logger.info(
+                    "Cooldown blocked storyline repeat: %s",
+                    storyline_key,
+                )
+                continue
+            flood_filtered_alerts.append(alert)
+
+        if not flood_filtered_alerts:
+            logger.debug("No fresh breaking alerts after flood/cooldown guards")
+            return
+
         formatter = TelegramFormatter(profile.timezone)
         messengers = _get_messengers(settings, profile, message_type="breaking")
 
-        for alert in storyline_filtered_alerts:
+        for alert in flood_filtered_alerts:
+            storyline_key = alert.classification.storyline_key
+            if storyline_key:
+                alert.tracking_ids = list(dict.fromkeys(
+                    (alert.tracking_ids or []) + [
+                        f"storyline:{storyline_key}",
+                        f"breaking:{storyline_key}:initial",
+                    ]
+                ))
             messages = formatter.format_breaking_alert(alert)
             _deliver(
                 messengers,
@@ -619,6 +895,33 @@ def run_breaking_check(settings: Settings | None = None) -> None:
                 settings=settings,
                 tracking_ids=alert.tracking_ids,
             )
+            if storyline_key and not settings.dry_run:
+                upsert_breaking_story_initial(
+                    profile_name=profile.name,
+                    storyline_key=storyline_key,
+                    local_date=local_now.date(),
+                    category=alert.classification.category,
+                    event_id=alert.event.event_id,
+                    event_title=alert.event.title,
+                    why_markets_care=alert.reason or alert.classification.why_markets_care,
+                    watch_symbols=alert.classification.watch_symbols,
+                    first_sent_at=now_utc,
+                    followup_due_at=now_utc + timedelta(minutes=settings.breaking_followup_delay_minutes),
+                    reason="initial_breaking_sent",
+                )
+                followup_decision = decision_engine.decide_schedule_followup(
+                    related_event_id=alert.event.event_id,
+                    now=now_utc,
+                    reason=(
+                        "Initial BREAKING sent; follow-up due in "
+                        f"{settings.breaking_followup_delay_minutes}m."
+                    ),
+                )
+                logger.info(
+                    "Cadence decision (breaking follow-up): %s | %s",
+                    followup_decision.action_type,
+                    followup_decision.reason,
+                )
             logger.info(
                 "Breaking alert sent: %s (score=%.3f)",
                 alert.event.title[:60],

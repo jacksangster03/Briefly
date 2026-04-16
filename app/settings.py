@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     delivery_channel: str = "all"
     web_host: str = "127.0.0.1"
     web_port: int = 8080
+    breaking_followup_delay_minutes: int = 10
+    breaking_storyline_cooldown_minutes: int = 45
+    breaking_max_alerts_per_hour: int = 3
+    breaking_followup_min_asset_move_pct: float = 0.9
 
     # -- Paths ----------------------------------------------------------------
     configs_dir: str = str(PROJECT_ROOT / "configs")
