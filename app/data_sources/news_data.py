@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.data_sources.global_news_hub import GlobalNewsHubService
 from app.data_sources.providers.finnhub import FinnhubProvider
 from app.data_sources.providers.newsapi import NewsAPIProvider
 from app.data_sources.providers.sec_provider import SECProvider
@@ -13,7 +14,7 @@ logger = get_logger("news_data")
 
 
 class NewsDataService:
-    """Aggregates news from Finnhub, NewsAPI, and SEC EDGAR."""
+    """Aggregates news from core + optional global providers and SEC EDGAR."""
 
     def __init__(self, settings: Settings):
         # Finnhub's /news endpoint has been intermittently unresponsive; the
@@ -51,21 +52,15 @@ class NewsDataService:
             if settings.sec_user_agent
             else None
         )
+        self.global_hub = GlobalNewsHubService(
+            settings=settings,
+            finnhub=self.finnhub,
+            newsapi=self.newsapi,
+        )
 
     def fetch_market_news(self) -> list[NormalisedEvent]:
         """Fetch general market news from all configured providers."""
-        all_events: list[NormalisedEvent] = []
-
-        if self.finnhub and self.finnhub.is_configured():
-            events = self.finnhub.get_market_news()
-            all_events.extend(events)
-            logger.info("Finnhub market news: %d items", len(events))
-
-        if self.newsapi and self.newsapi.is_configured():
-            events = self.newsapi.get_top_headlines()
-            all_events.extend(events)
-            logger.info("NewsAPI headlines: %d items", len(events))
-
+        all_events = self.global_hub.fetch_market_news()
         logger.info("Total market news: %d items", len(all_events))
         return all_events
 

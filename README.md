@@ -87,6 +87,11 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
   - `GLOBAL NEWS & GEOPOLITICS` section in morning briefing
   - `GLOBAL RISK UPDATE` block in intraday (toggleable from preferences/control panel)
   - cross-section dedupe keeps global stories from repeating in other morning sections
+- **Phase 4.5 global coverage engine (foundation)**
+  - `GlobalNewsHubService` merges Finnhub + NewsAPI with optional adapters for GDELT, Alpha Vantage, FMP, and Mediastack
+  - per-event canonical metadata (`canonical_url`, `domain`, `source_name`, `provider_event_id`)
+  - cross-provider story fingerprinting and dedupe before scoring pipeline
+  - process-level per-provider daily call budgets to stay within free-tier limits
 - **Cross-type anti-repeat policy**
   - events already sent in one channel/type are suppressed from later morning/intraday/breaking surfacing
   - intraday and breaking now surface only `new` catalysts (not continuation repeats)
@@ -198,13 +203,41 @@ This is useful when:
 
 ## Expanding global news coverage (free/low-cost options)
 
-If the current Finnhub + NewsAPI mix is thin during specific windows, next sources to consider:
-- **GDELT 2.1 Events API** (free): broad global event stream with geopolitics coverage.
-- **Mediastack free tier**: global headline aggregation with simple HTTP integration.
-- **Alpha Vantage News & Sentiment** (free key, rate-limited): market-linked news enrichment.
-- **FMP (Financial Modeling Prep) free tier**: additional business/news endpoints.
+If the current Finnhub + NewsAPI mix is thin during specific windows, Phase 4.5 can be enabled incrementally:
+- **GDELT DOC API** (`ENABLE_GDELT=true`): broad global event/article recall.
+- **Alpha Vantage NEWS_SENTIMENT** (`ENABLE_ALPHA_VANTAGE_NEWS=true`): topic-filtered market linkage.
+- **FMP news** (`ENABLE_FMP_NEWS=true`): supplemental finance headlines.
+- **Mediastack** (`ENABLE_MEDIASTACK_NEWS=true`): low-volume backup feed.
 
 Keep the same trust-gating and market-link filters before surfacing any new-source stories.
+
+Quick API setup (paste into `.env`):
+
+```bash
+# Phase 4.5 API keys
+ALPHA_VANTAGE_API_KEY=
+FMP_API_KEY=
+MEDIASTACK_API_KEY=
+
+# Provider toggles
+ENABLE_GDELT=true
+ENABLE_ALPHA_VANTAGE_NEWS=true
+ENABLE_FMP_NEWS=false
+ENABLE_MEDIASTACK_NEWS=false
+
+# Free-tier budgets
+GDELT_DAILY_CALL_BUDGET=250
+ALPHA_VANTAGE_NEWS_DAILY_CALL_BUDGET=20
+FMP_NEWS_DAILY_CALL_BUDGET=120
+MEDIASTACK_NEWS_DAILY_CALL_BUDGET=3
+
+# Query/topic shaping
+GLOBAL_NEWS_MAX_RECORDS=50
+ALPHA_VANTAGE_TOPICS=economy_macro,economy_monetary,energy_transportation,financial_markets
+GDELT_GLOBAL_QUERY=(inflation OR sanctions OR tariffs OR oil OR shipping OR blockade OR war OR ceasefire OR central bank OR rates OR treasury OR dollar OR fx OR supply chain)
+FMP_NEWS_LIMIT=50
+MEDIASTACK_NEWS_LIMIT=25
+```
 
 ## Portfolio holdings workflow
 
@@ -264,6 +297,9 @@ This matters most for:
 Important settings include:
 - `FINNHUB_API_KEY`
 - `NEWSAPI_KEY`
+- `ALPHA_VANTAGE_API_KEY` (optional, Phase 4.5)
+- `FMP_API_KEY` (optional, Phase 4.5)
+- `MEDIASTACK_API_KEY` (optional, Phase 4.5)
 - `FRED_API_KEY`
 - `OPENAI_API_KEY` (required only if enabling Phase 4 LLM email render)
 - `TELEGRAM_BOT_TOKEN`
@@ -283,6 +319,9 @@ Important settings include:
 - `LLM_EMAIL_MIN_SOURCE_URLS`
 - `DELIVERY_CHANNEL` (`all`, `telegram`, `email`)
 - `WEB_HOST`, `WEB_PORT` (Phase 4.3 local control-center bind)
+- `ENABLE_GDELT`, `ENABLE_ALPHA_VANTAGE_NEWS`, `ENABLE_FMP_NEWS`, `ENABLE_MEDIASTACK_NEWS`
+- `GDELT_DAILY_CALL_BUDGET`, `ALPHA_VANTAGE_NEWS_DAILY_CALL_BUDGET`, `FMP_NEWS_DAILY_CALL_BUDGET`, `MEDIASTACK_NEWS_DAILY_CALL_BUDGET`
+- `GDELT_GLOBAL_QUERY`, `ALPHA_VANTAGE_TOPICS`, `GLOBAL_NEWS_MAX_RECORDS`
 
 Recommended delivery defaults:
 - keep Telegram text-first: `TELEGRAM_SEND_CHARTS=false`

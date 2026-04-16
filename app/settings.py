@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # -- Data providers -------------------------------------------------------
     finnhub_api_key: str = ""
     newsapi_key: str = ""
+    alpha_vantage_api_key: str = ""
+    fmp_api_key: str = ""
+    mediastack_api_key: str = ""
     fred_api_key: str = ""
     ecb_base_url: str = "https://data-api.ecb.europa.eu/service"
     eurostat_base_url: str = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data"
@@ -30,6 +33,10 @@ class Settings(BaseSettings):
     alpaca_api_key: str = ""
     alpaca_api_secret: str = ""
     alpaca_base_url: str = "https://paper-api.alpaca.markets"
+    gdelt_base_url: str = "https://api.gdeltproject.org/api/v2/doc/doc"
+    alpha_vantage_base_url: str = "https://www.alphavantage.co/query"
+    fmp_base_url: str = "https://financialmodelingprep.com/stable/news/general-latest"
+    mediastack_base_url: str = "https://api.mediastack.com/v1/news"
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     x_bearer_token: str = ""
@@ -83,6 +90,23 @@ class Settings(BaseSettings):
     # -- Provider timeouts (seconds) ------------------------------------------
     provider_timeout: int = 30
     provider_max_retries: int = 2
+    # -- Phase 4.5 global-news expansion -------------------------------------
+    # Provider toggles
+    enable_gdelt: bool = False
+    enable_alpha_vantage_news: bool = False
+    enable_fmp_news: bool = False
+    enable_mediastack_news: bool = False
+    # Daily call budgets (process-level guard; reset each process day)
+    gdelt_daily_call_budget: int = 250
+    alpha_vantage_news_daily_call_budget: int = 20
+    fmp_news_daily_call_budget: int = 120
+    mediastack_news_daily_call_budget: int = 3
+    # Request shaping
+    global_news_max_records: int = 50
+    alpha_vantage_topics: str = "economy_macro,economy_monetary,energy_transportation,financial_markets"
+    gdelt_global_query: str = "(inflation OR sanctions OR tariffs OR oil OR shipping OR blockade OR war OR ceasefire OR central bank OR rates OR treasury OR dollar OR fx OR supply chain)"
+    fmp_news_limit: int = 50
+    mediastack_news_limit: int = 25
 
     # -- Convenience helpers --------------------------------------------------
     @property
@@ -104,6 +128,18 @@ class Settings(BaseSettings):
     @property
     def newsapi_configured(self) -> bool:
         return bool(self.newsapi_key)
+
+    @property
+    def alpha_vantage_configured(self) -> bool:
+        return bool(self.alpha_vantage_api_key)
+
+    @property
+    def fmp_configured(self) -> bool:
+        return bool(self.fmp_api_key)
+
+    @property
+    def mediastack_configured(self) -> bool:
+        return bool(self.mediastack_api_key)
 
     @property
     def telegram_configured(self) -> bool:
