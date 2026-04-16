@@ -202,6 +202,97 @@ MACRO_SIGNAL_KEYWORDS = {
     "treasury", "yield",
 }
 
+REGION_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "US": (
+        "u.s.",
+        "united states",
+        "white house",
+        "washington",
+        "federal reserve",
+        "treasury",
+        "wall street",
+        "nasdaq",
+        "s&p 500",
+        "dow jones",
+        "russell 2000",
+    ),
+    "Europe": (
+        "europe",
+        "eurozone",
+        "european union",
+        "ecb",
+        "boe",
+        "bank of england",
+        "stoxx",
+        "ftse",
+        "dax",
+        "cac 40",
+        "britain",
+        "u.k.",
+        "germany",
+        "france",
+        "italy",
+        "spain",
+        "brussels",
+    ),
+    "Middle East": (
+        "middle east",
+        "iran",
+        "israel",
+        "gaza",
+        "lebanon",
+        "hormuz",
+        "opec",
+        "saudi",
+        "riyadh",
+        "uae",
+        "qatar",
+        "yemen",
+        "tehran",
+    ),
+    "Asia": (
+        "asia",
+        "china",
+        "beijing",
+        "japan",
+        "boj",
+        "nikkei",
+        "taiwan",
+        "south korea",
+        "korea",
+        "hong kong",
+        "india",
+        "singapore",
+        "shanghai",
+        "shenzhen",
+        "kospi",
+    ),
+    "LATAM": (
+        "latam",
+        "latin america",
+        "brazil",
+        "mexico",
+        "argentina",
+        "chile",
+        "peru",
+        "colombia",
+        "ibovespa",
+        "bovespa",
+    ),
+    "Global Macro": (
+        "global",
+        "worldwide",
+        "cross-asset",
+        "risk sentiment",
+        "g7",
+        "g20",
+        "imf",
+        "world bank",
+        "oecd",
+        "geopolitical",
+    ),
+}
+
 
 def _normalise_filter_text(value: str) -> str:
     """Normalise punctuation so low-signal rules catch typographic variants."""
@@ -234,6 +325,7 @@ def process_event_stream(
     _resolve_event_tickers(events)
     if sector_lookup is not None:
         _enrich_event_sectors(events, sector_lookup)
+    _enrich_event_regions(events)
 
     deduped = deduplicate_events(
         events,
@@ -265,6 +357,10 @@ def select_intraday_events(
         if not is_actionable_event(evt):
             continue
         if evt.cluster_id and evt.cluster_id in seen_clusters:
+            continue
+        # Cross-run suppression policy: one story should surface once across
+        # morning/intraday/breaking rather than repeating via continuations.
+        if evt.update_status != "new":
             continue
 
         required_score = (
@@ -298,6 +394,9 @@ def select_breaking_events(
         if not is_actionable_event(evt):
             continue
         if evt.already_sent:
+            continue
+        # Breaking should be strict one-shot, not repeat continuations.
+        if evt.update_status != "new":
             continue
         if rules.require_ticker and not evt.tickers:
             continue
@@ -404,6 +503,31 @@ def _enrich_event_sectors(
             for sector in sector_lookup(ticker):
                 if sector not in evt.sectors:
                     evt.sectors.append(sector)
+
+
+def _enrich_event_regions(events: list[NormalisedEvent]) -> None:
+    """Populate conservative region tags from event text and event type."""
+    for evt in events:
+        raw_text = f"{evt.title} {evt.summary}"
+        text = _normalise_filter_text(f"{evt.title} {evt.summary}")
+
+        for region, tokens in REGION_KEYWORDS.items():
+            if any(token in text for token in tokens):
+                if region not in evt.regions:
+                    evt.regions.append(region)
+
+        # Capture uppercase acronym references without confusing lowercase
+        # pronouns like "tell us".
+        if re.search(r"\bUS\b", raw_text) and "US" not in evt.regions:
+            evt.regions.append("US")
+        if re.search(r"\bEU\b", raw_text) and "Europe" not in evt.regions:
+            evt.regions.append("Europe")
+
+        if (
+            evt.event_type in {"macro_release", "fed_decision", "geopolitical", "regulatory"}
+            and "Global Macro" not in evt.regions
+        ):
+            evt.regions.append("Global Macro")
 
 
 def is_actionable_event(evt: NormalisedEvent) -> bool:

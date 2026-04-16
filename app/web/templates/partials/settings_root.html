@@ -464,11 +464,11 @@
       </div>
       <div class="kpi">
         <div class="kpi-label">Top Portfolio Sector</div>
-        <div class="kpi-value">{{ kpis.top_sector.replace("_", " ").title() if kpis.top_sector else "Not provided" }}</div>
+        <div class="kpi-value">{{ kpis.top_sector_label if kpis.top_sector_label else "Not provided" }}</div>
       </div>
       <div class="kpi">
         <div class="kpi-label">Top Region Focus</div>
-        <div class="kpi-value">{{ kpis.top_region.replace("_", " ").title() if kpis.top_region else state.effective.coverage.home_region.replace("_", " ").title() }}</div>
+        <div class="kpi-value">{{ kpis.top_region_label if kpis.top_region_label else state.effective.coverage.home_region_label }}</div>
       </div>
       <div class="kpi">
         <div class="kpi-label">Next Morning Send</div>
@@ -570,7 +570,7 @@
       <dl class="summary">
         <dt>Profile</dt><dd>{{ state.profile }}</dd>
         <dt>Timezone</dt><dd>{{ state.effective.timezone }}</dd>
-        <dt>Home Region</dt><dd>{{ state.effective.coverage.home_region.replace("_", " ").title() }}</dd>
+        <dt>Home Region</dt><dd>{{ state.effective.coverage.home_region_label }}</dd>
       </dl>
       <dl class="summary">
         <dt>Holdings</dt><dd>{{ state.holdings | length }}</dd>
@@ -866,6 +866,14 @@
         </div>
         <div class="check-item">
           <label>
+            Intraday Global Risk Block
+            {% if "delivery.intraday_global_risk_enabled" in state.overrides %}<span class="pill">override</span>{% endif %}
+          </label>
+          <label><input type="checkbox" name="delivery_intraday_global_risk_enabled" {% if delivery.intraday_global_risk_enabled %}checked{% endif %}> Enabled</label>
+          <p class="tiny">Adds a compact high-trust global risk block in intraday updates when relevant.</p>
+        </div>
+        <div class="check-item">
+          <label>
             LLM For Morning Email
             {% if "delivery.llm_email_morning" in state.overrides %}<span class="pill">override</span>{% endif %}
           </label>
@@ -903,7 +911,7 @@
           <div class="check-item">
             <label>
               {{ key.replace("_", " ").title() }}
-              {% if ("sections.morning." ~ key) in state.overrides %}<span class="pill">override</span>{% endif %}
+              {% if (key == "global_news" and "sections.global_news" in state.overrides) or (key != "global_news" and ("sections.morning." ~ key) in state.overrides) %}<span class="pill">override</span>{% endif %}
             </label>
             <label>
               <input type="checkbox" name="section_{{ key }}" {% if enabled %}checked{% endif %}>

@@ -52,6 +52,7 @@ class MorningBriefing(BaseModel):
     session_mode: SessionMode = "weekday"
     market_setup: MarketSetup = Field(default_factory=MarketSetup)
     macro_context: list[MacroDataPoint] = Field(default_factory=list)
+    global_news: list[NormalisedEvent] = Field(default_factory=list)
     top_themes: list[NormalisedEvent] = Field(default_factory=list)
     portfolio_focus: list[NormalisedEvent] = Field(default_factory=list)
     sector_scan: list[SectorSnapshot] = Field(default_factory=list)
@@ -73,6 +74,7 @@ class IntradayUpdate(BaseModel):
     session_mode: SessionMode = "weekday"
     hour_label: str = ""
     market_snapshot: list[QuoteData] = Field(default_factory=list)
+    global_risk_items: list[NormalisedEvent] = Field(default_factory=list)
     new_events: list[NormalisedEvent] = Field(default_factory=list)
     events_fetched: int = 0
     events_after_dedup: int = 0

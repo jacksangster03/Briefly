@@ -11,6 +11,7 @@ SECTION_HEADERS = {
     "market_setup": "MARKET SETUP",
     "weekend_setup": "LAST CLOSE (FRIDAY)",
     "macro": "MACRO CONTEXT",
+    "global_news": "GLOBAL NEWS & GEOPOLITICS",
     "themes": "TOP THEMES",
     "weekend_themes": "WEEKEND DEVELOPMENTS",
     "portfolio_focus": "PORTFOLIO FOCUS",
@@ -20,6 +21,7 @@ SECTION_HEADERS = {
     "week_ahead": "WHAT TO WATCH NEXT WEEK",
     "intraday_title": "INTRADAY UPDATE",
     "weekend_intraday_title": "WEEKEND UPDATE",
+    "global_risk_update": "GLOBAL RISK UPDATE",
     "breaking_title": "BREAKING",
     "footer": "Briefly",
 }

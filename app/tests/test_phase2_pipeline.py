@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.briefing.theme_builder import build_top_themes
 from app.personalization.delivery_rules import load_alert_rules
 from app.processing.event_clustering import build_story_key, cluster_events
-from app.processing.pipeline import select_intraday_events
+from app.processing.pipeline import select_breaking_events, select_intraday_events
 from app.schemas.events import NormalisedEvent
 from app.settings import Settings
 
@@ -66,6 +66,54 @@ def test_intraday_selector_prefers_actionable_events():
     selected = select_intraday_events(events, rules)
     assert len(selected) == 1
     assert "Fed signals" in selected[0].title
+
+
+def test_intraday_selector_skips_material_update_events():
+    rules = load_alert_rules(Settings()).intraday
+    events = [
+        NormalisedEvent(
+            title="US warns buyers of Iranian oil could face sanctions",
+            event_type="geopolitical",
+            final_score=0.9,
+            novelty_score=1.0,
+            update_status="material_update",
+        ),
+        NormalisedEvent(
+            title="Fed signals patience on rates as oil shock lifts inflation risk",
+            event_type="macro_release",
+            final_score=0.75,
+            novelty_score=1.0,
+            update_status="new",
+        ),
+    ]
+    selected = select_intraday_events(events, rules)
+    assert len(selected) == 1
+    assert selected[0].update_status == "new"
+
+
+def test_breaking_selector_skips_material_update_events():
+    rules = load_alert_rules(Settings()).breaking
+    events = [
+        NormalisedEvent(
+            title="Oil tops $100 as blockade risk rises around Iran",
+            event_type="geopolitical",
+            final_score=0.95,
+            factual_confidence_score=0.9,
+            novelty_score=1.0,
+            update_status="material_update",
+        ),
+        NormalisedEvent(
+            title="US warns buyers of Iranian oil could face sanctions",
+            event_type="geopolitical",
+            final_score=0.92,
+            factual_confidence_score=0.9,
+            novelty_score=1.0,
+            update_status="new",
+        ),
+    ]
+    selected = select_breaking_events(events, rules)
+    assert len(selected) == 1
+    assert selected[0].title == "US warns buyers of Iranian oil could face sanctions"
 
 
 def test_theme_builder_generates_clean_summary():
@@ -319,6 +367,41 @@ def test_macro_thread_clusters_hormuz_and_lebanon():
     assert len(clustered) == 2
     sizes = sorted([c.cluster_size for c in clustered], reverse=True)
     assert sizes == [2, 2]
+
+
+def test_region_enrichment_tags_expected_regions():
+    from app.processing.pipeline import _enrich_event_regions
+
+    events = [
+        NormalisedEvent(
+            title="US and EU consider tighter sanctions on Iranian oil exports",
+            summary="Shipping insurers reprice coverage near the Strait of Hormuz.",
+            event_type="geopolitical",
+        ),
+        NormalisedEvent(
+            title="BoJ guidance shift pressures Asia FX complex",
+            summary="Tokyo policy signal drives regional rates and currency volatility.",
+            event_type="macro_release",
+        ),
+    ]
+    _enrich_event_regions(events)
+    assert "US" in events[0].regions
+    assert "Europe" in events[0].regions
+    assert "Middle East" in events[0].regions
+    assert "Asia" in events[1].regions
+    assert "Global Macro" in events[1].regions
+
+
+def test_region_enrichment_avoids_pronoun_false_positive():
+    from app.processing.pipeline import _enrich_event_regions
+
+    evt = NormalisedEvent(
+        title="Investors tell us to stay selective into earnings season",
+        summary="Positioning remains cautious before the next catalyst window.",
+        event_type="headline",
+    )
+    _enrich_event_regions([evt])
+    assert "US" not in evt.regions
 
 
 def test_cluster_representative_prefers_cluster_central_headline():

@@ -58,7 +58,7 @@ def _get_messengers(settings: Settings, profile: UserProfile, *, message_type: s
     channel = settings.normalized_delivery_channel
     preferred_channels = set(profile.channels_for(message_type))
     if not preferred_channels:
-        preferred_channels = {"telegram", "email"}
+        preferred_channels = {"telegram"} if message_type == "breaking" else {"telegram", "email"}
 
     include_telegram = channel in {"all", "telegram"} and "telegram" in preferred_channels
     include_email = channel in {"all", "email"} and "email" in preferred_channels
@@ -239,6 +239,8 @@ def _apply_morning_section_preferences(briefing, profile: UserProfile) -> None:
         briefing.market_setup.vix = None
     if not profile.morning_section_enabled("macro_context"):
         briefing.macro_context = []
+    if not profile.morning_section_enabled("global_news"):
+        briefing.global_news = []
     if not profile.morning_section_enabled("top_themes"):
         briefing.top_themes = []
     if not profile.morning_section_enabled("portfolio_focus"):
@@ -281,7 +283,7 @@ def run_morning_briefing(settings: Settings | None = None) -> None:
     messengers = _get_messengers(settings, profile, message_type="morning")
     display_events = []
     seen_tracking_ids = set()
-    for evt in briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus + [
+    for evt in briefing.global_news + briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus + [
         sector_evt
         for sector in briefing.sector_scan
         for sector_evt in sector.top_events
@@ -388,7 +390,8 @@ def run_breaking_check(settings: Settings | None = None) -> None:
         market_data=market_svc,
         news_data=news_svc,
     )
-    alerts = generator.check()
+    # Keep breaking delivery concise: one highest-priority alert per cycle.
+    alerts = generator.check(max_alerts=1)
 
     if not alerts:
         logger.debug("No breaking events above configured thresholds")

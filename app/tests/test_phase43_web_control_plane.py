@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db import session as db_session
 from app.db.base import Base, create_app_engine
 from app.settings import Settings
+from app.web.control_plane_service import _display_label
 from app.web.app import create_web_app
 
 
@@ -97,6 +98,15 @@ def test_ui_settings_page_renders(client):
     assert "Saved values are persisted in SQLite as" in response.text
     assert "Home Region Focus" in response.text
     assert "Briefing Impact Preview" in response.text
+    assert "Region Weight — US" in response.text
+    assert "Region Weight — LATAM" in response.text
+
+
+def test_display_label_formats_acronyms():
+    assert _display_label("us") == "US"
+    assert _display_label("latam") == "LATAM"
+    assert _display_label("global_macro") == "Global Macro"
+    assert _display_label("ai") == "AI"
 
 
 def test_api_put_preferences_and_state_roundtrip(client):
@@ -107,6 +117,8 @@ def test_api_put_preferences_and_state_roundtrip(client):
                 "watchlist.primary": ["TSLA", "AMZN"],
                 "delivery.morning_channels": ["email"],
                 "sections.morning.watchlist": False,
+                "sections.global_news": False,
+                "delivery.intraday_global_risk_enabled": False,
             }
         },
     )
@@ -117,6 +129,8 @@ def test_api_put_preferences_and_state_roundtrip(client):
     state = client.get("/api/v1/profile/default_user/state").json()
     assert state["effective"]["watchlist"]["primary"] == ["TSLA", "AMZN"]
     assert state["effective"]["delivery"]["morning_channels"] == ["email"]
+    assert state["effective"]["delivery"]["intraday_global_risk_enabled"] is False
+    assert state["effective"]["sections"]["global_news"] is False
     assert state["effective"]["sections"]["watchlist"] is False
     assert "metadata" in state
     assert "validations" in state
@@ -199,6 +213,7 @@ def test_ui_htmx_save_sections_persists_and_returns_partial(client):
         data={
             "section_market_setup": "on",
             "section_macro_context": "on",
+            "section_global_news": "on",
             "section_top_themes": "on",
             "section_portfolio_focus": "on",
             "section_sector_scan": "on",
@@ -212,6 +227,7 @@ def test_ui_htmx_save_sections_persists_and_returns_partial(client):
 
     state = client.get("/api/v1/profile/default_user/state").json()
     assert state["effective"]["sections"]["watchlist"] is False
+    assert state["effective"]["sections"]["global_news"] is True
 
 
 def test_ui_htmx_save_coverage_persists_watchlist_and_region_focus(client):
@@ -252,6 +268,7 @@ def test_ui_htmx_save_delivery_persists_channel_mix_and_llm_toggles(client):
             "delivery_quiet_hours_end": "07:00",
             "delivery_hourly_updates": "on",
             "delivery_breaking_alerts": "on",
+            # leave intraday global risk off intentionally
             "delivery_llm_email_morning": "on",
             # leave shadow off intentionally
         },
@@ -265,6 +282,7 @@ def test_ui_htmx_save_delivery_persists_channel_mix_and_llm_toggles(client):
     assert state["effective"]["delivery"]["morning_channels"] == ["telegram", "email"]
     assert state["effective"]["delivery"]["intraday_channels"] == ["telegram", "email"]
     assert state["effective"]["delivery"]["breaking_channels"] == ["telegram"]
+    assert state["effective"]["delivery"]["intraday_global_risk_enabled"] is False
     assert state["effective"]["delivery"]["llm_email_morning"] is True
     assert state["effective"]["delivery"]["llm_shadow_mode"] is False
 

@@ -20,6 +20,10 @@ from app.schemas.events import NormalisedEvent
 logger = get_logger("personal_relevance")
 
 
+def _normalize_region_key(region: str) -> str:
+    return str(region or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
 def compute_personal_relevance(
     events: list[NormalisedEvent],
     profile: UserProfile,
@@ -97,9 +101,12 @@ def compute_personal_relevance(
 
         # Region relevance
         if evt.regions:
-            region_score = max(
-                profile.coverage_weights.get(r, 0.3) for r in evt.regions
-            )
+            region_score = 0.3
+            for region in evt.regions:
+                key = _normalize_region_key(region)
+                region_score = max(region_score, profile.coverage_weights.get(key, 0.3))
+                if key == "global_macro":
+                    region_score = max(region_score, profile.coverage_weights.get("global", 0.3))
             scores.append(region_score)
 
         # Theme/keyword matching

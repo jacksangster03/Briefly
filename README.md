@@ -28,12 +28,15 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
 ## Current capabilities
 
 - **Morning briefing**
-  - market setup, macro context, top themes, sector scan, watchlist, and a portfolio-first section
+  - market setup, macro context, global geopolitics section, top themes, sector scan, watchlist, and a portfolio-first section
 - **Intraday updates**
   - only new, material developments above threshold
+  - compact `GLOBAL RISK UPDATE` block when high-trust market-linked geopolitical/macro items are present
   - weekend-aware formatting when cash equity markets are closed
 - **Breaking alerts**
   - high-threshold event checks with clearer market context
+  - strict one-shot suppression: continuation/material-update repeats are filtered out
+  - one alert per cycle (highest-priority only) to prevent notification spam
 - **Portfolio-aware intelligence**
   - holdings import from YAML or CSV
   - holdings persistence in SQLite
@@ -78,6 +81,16 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
   - validation warnings (delivery gaps, weight imbalance) and save timestamps
   - server-rendered panel with partial HTMX updates (no frontend build step)
   - programmatic control-plane API for state, preference updates, followables search, and holdings upload
+- **Phase 4.4 global market/geopolitics intelligence**
+  - deterministic high-trust selector for market-linked global stories (no broad non-market world-news feed)
+  - lightweight region enrichment (`US`, `Europe`, `Middle East`, `Asia`, `LATAM`, `Global Macro`)
+  - `GLOBAL NEWS & GEOPOLITICS` section in morning briefing
+  - `GLOBAL RISK UPDATE` block in intraday (toggleable from preferences/control panel)
+  - cross-section dedupe keeps global stories from repeating in other morning sections
+- **Cross-type anti-repeat policy**
+  - events already sent in one channel/type are suppressed from later morning/intraday/breaking surfacing
+  - intraday and breaking now surface only `new` catalysts (not continuation repeats)
+  - default fallback routing for breaking is Telegram-only when no explicit profile override exists
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths
@@ -141,6 +154,15 @@ python -m app.cli --email-only morning
 python -m app.cli --telegram-only morning
 ```
 
+Recommended per-profile routing for this setup:
+
+```bash
+python -m app.cli prefs-set --profile default_user --key delivery.morning_channels --value '["telegram","email"]'
+python -m app.cli prefs-set --profile default_user --key delivery.intraday_channels --value '["telegram","email"]'
+python -m app.cli prefs-set --profile default_user --key delivery.breaking_channels --value '["telegram"]'
+python -m app.cli prefs-show --profile default_user
+```
+
 ### Dry-run and output inspection
 
 Use `--dry-run` to avoid live delivery:
@@ -172,6 +194,16 @@ This is useful when:
 - you want to inspect the exact rendered message locally
 - you want live delivery **and** terminal output during testing
 - you are debugging scoring/formatter behavior without relying on Telegram history
+
+## Expanding global news coverage (free/low-cost options)
+
+If the current Finnhub + NewsAPI mix is thin during specific windows, next sources to consider:
+- **GDELT 2.1 Events API** (free): broad global event stream with geopolitics coverage.
+- **Mediastack free tier**: global headline aggregation with simple HTTP integration.
+- **Alpha Vantage News & Sentiment** (free key, rate-limited): market-linked news enrichment.
+- **FMP (Financial Modeling Prep) free tier**: additional business/news endpoints.
+
+Keep the same trust-gating and market-link filters before surfacing any new-source stories.
 
 ## Portfolio holdings workflow
 

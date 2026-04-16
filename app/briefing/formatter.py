@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.processing.cleaners import truncate
+from app.briefing.global_news_selector import build_market_relevance_note
 from app.briefing.templates import (
     MAX_EARNINGS_DISPLAY,
     MAX_INTRADAY_EVENTS,
@@ -77,6 +78,10 @@ class TelegramFormatter:
         if macro:
             sections.append(macro)
 
+        global_news = self._format_global_news(briefing.global_news)
+        if global_news:
+            sections.append(global_news)
+
         # Top themes
         themes = self._format_themes_for_mode(briefing.top_themes, briefing.session_mode)
         if themes:
@@ -140,6 +145,10 @@ class TelegramFormatter:
             lines = [format_compact_price(q.display_name or q.symbol, q.change_percent)
                      for q in update.market_snapshot[:6]]
             sections.append(" | ".join(lines))
+
+        global_risk = self._format_global_risk_update(update.global_risk_items)
+        if global_risk:
+            sections.append(global_risk)
 
         lead = self._build_intraday_lead(update)
         if lead:
@@ -255,6 +264,23 @@ class TelegramFormatter:
     def _format_themes(self, themes: list[NormalisedEvent]) -> str:
         return self._format_themes_for_mode(themes, session_mode="weekday")
 
+    def _format_global_news(self, events: list[NormalisedEvent]) -> str:
+        if not events:
+            return ""
+        lines = [f"<b>{SECTION_HEADERS['global_news']}</b>"]
+        for idx, evt in enumerate(events[:6], 1):
+            lines.append(f"{idx}. <b>{evt.title}</b>")
+            lines.append(f"   {build_market_relevance_note(evt)}")
+            meta = self._build_event_meta(
+                evt,
+                include_company=True,
+                include_time=True,
+                include_cluster=True,
+            )
+            if meta:
+                lines.append(f"   <i>{' | '.join(meta)}</i>")
+        return "\n".join(lines)
+
     def _format_themes_for_mode(
         self,
         themes: list[NormalisedEvent],
@@ -339,6 +365,23 @@ class TelegramFormatter:
                 lines.append(f"  {truncate(self._strip_cluster_suffix(event.summary), 180)}")
             meta = self._build_event_meta(
                 event,
+                include_company=True,
+                include_time=True,
+                include_cluster=True,
+            )
+            if meta:
+                lines.append(f"  <i>{' | '.join(meta)}</i>")
+        return "\n".join(lines)
+
+    def _format_global_risk_update(self, events: list[NormalisedEvent]) -> str:
+        if not events:
+            return ""
+        lines = [f"<b>{SECTION_HEADERS['global_risk_update']}</b>"]
+        for evt in events[:3]:
+            lines.append(f"- <b>{evt.title}</b>")
+            lines.append(f"  {build_market_relevance_note(evt)}")
+            meta = self._build_event_meta(
+                evt,
                 include_company=True,
                 include_time=True,
                 include_cluster=True,

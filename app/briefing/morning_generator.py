@@ -11,6 +11,7 @@ from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
 from app.briefing.chart_builder import MorningChartBuilder
+from app.briefing.global_news_selector import select_global_market_events
 from app.briefing.theme_builder import build_top_themes
 from app.logger import get_logger
 from app.personalization.delivery_rules import load_alert_rules
@@ -41,6 +42,7 @@ MACRO_BLEED_TERMS = (
     "war",
 )
 MAX_PORTFOLIO_FOCUS = 5
+MAX_GLOBAL_NEWS = 6
 PORTFOLIO_DIRECT_MIN_SCORE = 2.0
 PORTFOLIO_READTHROUGH_MIN_SCORE = 1.6
 TRUST_TOP_THEMES_MIN_SCORE = 1.0
@@ -273,13 +275,15 @@ class MorningBriefingGenerator:
             sector_lookup=self.universe.sectors_for_ticker,
         )
         briefing.events_after_dedup = len(scored)
+        eligible = [event for event in scored if not event.already_sent and event.update_status == "new"]
 
         # 7. Assemble sections
-        briefing.top_themes = self._build_top_themes(scored, briefing.session_mode)
-        briefing.portfolio_focus = self._build_portfolio_focus(scored)
-        briefing.sector_scan = self._build_sector_scan(scored, briefing.session_mode)
+        briefing.global_news = self._build_global_news(eligible, briefing.session_mode)
+        briefing.top_themes = self._build_top_themes(eligible, briefing.session_mode)
+        briefing.portfolio_focus = self._build_portfolio_focus(eligible)
+        briefing.sector_scan = self._build_sector_scan(eligible, briefing.session_mode)
         briefing.earnings_calendar = self._fetch_earnings()
-        briefing.watchlist_events = self._filter_watchlist_events(scored)
+        briefing.watchlist_events = self._filter_watchlist_events(eligible)
         briefing.watchlist_quotes = self._fetch_watchlist_quotes()
         briefing.portfolio_quotes = self._fetch_portfolio_quotes()
         self._dedupe_cross_section_events(briefing)
@@ -289,7 +293,12 @@ class MorningBriefingGenerator:
                 market_data=self.market_svc,
             ).build(briefing)
         sent_ids: set[str] = set()
-        for event in briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus:
+        for event in (
+            briefing.global_news
+            + briefing.top_themes
+            + briefing.watchlist_events
+            + briefing.portfolio_focus
+        ):
             sent_ids.add(event.cluster_id or event.content_hash or event.event_id)
         for snapshot in briefing.sector_scan:
             for event in snapshot.top_events:
@@ -347,6 +356,20 @@ class MorningBriefingGenerator:
                 session_mode,
                 section="top_themes",
             ),
+        )
+
+    def _build_global_news(
+        self,
+        scored_events: list[NormalisedEvent],
+        session_mode: str,
+    ) -> list[NormalisedEvent]:
+        """Select high-trust, market-linked global/geopolitical stories."""
+        return select_global_market_events(
+            scored_events,
+            session_mode=session_mode,
+            max_items=MAX_GLOBAL_NEWS,
+            region_weights=self.profile.coverage_weights,
+            actionable_check=is_actionable_event,
         )
 
     def _build_sector_scan(
@@ -682,6 +705,7 @@ class MorningBriefingGenerator:
     def _dedupe_cross_section_events(self, briefing: MorningBriefing) -> None:
         """Keep a story from repeating across multiple morning sections."""
         seen_keys: set[str] = set()
+        briefing.global_news = self._dedupe_event_list(briefing.global_news, seen_keys)
         briefing.portfolio_focus = self._dedupe_event_list(briefing.portfolio_focus, seen_keys)
         briefing.top_themes = self._dedupe_event_list(briefing.top_themes, seen_keys)
 

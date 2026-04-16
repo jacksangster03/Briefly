@@ -14,6 +14,7 @@ ALLOWED_CHANNELS = {"telegram", "email"}
 ALLOWED_MORNING_SECTIONS = {
     "market_setup",
     "macro_context",
+    "global_news",
     "top_themes",
     "portfolio_focus",
     "sector_scan",
@@ -159,16 +160,19 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "delivery.morning_brief_time": _normalize_time,
     "delivery.hourly_updates": _normalize_bool,
     "delivery.breaking_alerts": _normalize_bool,
+    "delivery.intraday_global_risk_enabled": _normalize_bool,
     "delivery.llm_email_morning": _normalize_bool,
     "delivery.llm_shadow_mode": _normalize_bool,
     "delivery.quiet_hours_start": _normalize_time,
     "delivery.quiet_hours_end": _normalize_time,
     "sections.morning.market_setup": _normalize_bool,
     "sections.morning.macro_context": _normalize_bool,
+    "sections.morning.global_news": _normalize_bool,
     "sections.morning.top_themes": _normalize_bool,
     "sections.morning.portfolio_focus": _normalize_bool,
     "sections.morning.sector_scan": _normalize_bool,
     "sections.morning.watchlist": _normalize_bool,
+    "sections.global_news": _normalize_bool,
 }
 
 

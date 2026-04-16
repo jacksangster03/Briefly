@@ -31,6 +31,50 @@ from app.settings import Settings
 from app.universe.sector_universe import load_sector_universe
 from app.universe.ticker_metadata import TICKER_DISPLAY_NAMES, format_company_ticker
 
+DISPLAY_ACRONYMS = {
+    "ai": "AI",
+    "api": "API",
+    "cpi": "CPI",
+    "ecb": "ECB",
+    "etf": "ETF",
+    "eu": "EU",
+    "fed": "FED",
+    "fomc": "FOMC",
+    "fx": "FX",
+    "gdp": "GDP",
+    "ipo": "IPO",
+    "latam": "LATAM",
+    "opec": "OPEC",
+    "pce": "PCE",
+    "ppi": "PPI",
+    "sec": "SEC",
+    "uk": "UK",
+    "us": "US",
+    "usa": "USA",
+    "uae": "UAE",
+}
+
+
+def _display_label(value: str) -> str:
+    """Render human labels while preserving finance acronyms in uppercase."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+
+    text = raw.replace("_", " ").replace("-", " ")
+    words: list[str] = []
+    for token in text.split():
+        if "/" in token:
+            parts = [_display_label(part) for part in token.split("/") if part]
+            words.append("/".join(parts))
+            continue
+        lowered = token.lower()
+        if lowered in DISPLAY_ACRONYMS:
+            words.append(DISPLAY_ACRONYMS[lowered])
+        else:
+            words.append(token.capitalize())
+    return " ".join(words)
+
 
 def normalize_profile_name(profile_name: str) -> str:
     return (profile_name or "default_user").strip() or "default_user"
@@ -63,6 +107,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
                 "portfolio_sector_weights": profile.portfolio_sector_weights,
                 "region_weights": profile.coverage_weights,
                 "home_region": profile.home_region,
+                "home_region_label": _display_label(profile.home_region),
             },
             "delivery": {
                 "morning_channels": profile.channels_for("morning"),
@@ -71,6 +116,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
                 "morning_brief_time": profile.morning_brief_time,
                 "hourly_updates": profile.hourly_updates_enabled,
                 "breaking_alerts": profile.breaking_alerts_enabled,
+                "intraday_global_risk_enabled": profile.intraday_global_risk_enabled,
                 "llm_email_morning": bool(
                     profile.delivery.get("llm_email_morning", settings.enable_llm_email_render)
                 ),
@@ -83,6 +129,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
             "sections": {
                 "market_setup": profile.morning_section_enabled("market_setup"),
                 "macro_context": profile.morning_section_enabled("macro_context"),
+                "global_news": profile.morning_section_enabled("global_news"),
                 "top_themes": profile.morning_section_enabled("top_themes"),
                 "portfolio_focus": profile.morning_section_enabled("portfolio_focus"),
                 "sector_scan": profile.morning_section_enabled("sector_scan"),
@@ -288,7 +335,7 @@ def _build_followables_catalog(
         {
             "kind": "region",
             "key": region,
-            "label": region.replace("_", " ").title(),
+            "label": _display_label(region),
         }
         for region in region_keys
     ]
@@ -444,7 +491,9 @@ def _build_portfolio_analysis(*, profile: UserProfile) -> dict[str, Any]:
             "holdings_weight_gap_pct": 100.0 - total_weight if total_weight > 0 else None,
             "largest_position": largest_position,
             "top_sector": top_sector,
+            "top_sector_label": _display_label(top_sector) if top_sector else "",
             "top_region": top_region,
+            "top_region_label": _display_label(top_region) if top_region else "",
             "top5_concentration_pct": top5_share,
             "watchlist_total": (
                 len(profile.watchlist_primary)
@@ -476,7 +525,7 @@ def _build_sector_comparison_rows(profile: UserProfile) -> list[dict[str, Any]]:
         rows.append(
             {
                 "key": key,
-                "label": key.replace("_", " ").title(),
+                "label": _display_label(key),
                 "portfolio_pct": float(profile.portfolio_sector_weights.get(key, 0.0) * 100.0),
                 "coverage_weight": float(profile.sector_weights.get(key, 0.0)),
             }
@@ -489,7 +538,7 @@ def _build_region_rows(profile: UserProfile) -> list[dict[str, Any]]:
     rows = [
         {
             "key": key,
-            "label": key.replace("_", " ").title(),
+            "label": _display_label(key),
             "value": float(value),
         }
         for key, value in profile.coverage_weights.items()
@@ -521,14 +570,14 @@ def _build_briefing_impact_preview(profile: UserProfile) -> str:
     primary_count = len(profile.watchlist_primary)
     top_region = ""
     if profile.coverage_weights:
-        top_region = max(profile.coverage_weights.items(), key=lambda item: item[1])[0].replace("_", " ").title()
+        top_region = _display_label(max(profile.coverage_weights.items(), key=lambda item: item[1])[0])
     top_sectors = sorted(profile.sector_weights.items(), key=lambda item: float(item[1]), reverse=True)[:3]
     sector_text = ", ".join(
-        key.replace("_", " ").title()
+        _display_label(key)
         for key, weight in top_sectors
         if float(weight) > 0
     )
-    region_text = top_region or profile.home_region.replace("_", " ").title()
+    region_text = top_region or _display_label(profile.home_region)
     if not sector_text:
         sector_text = "balanced sector coverage"
     return (

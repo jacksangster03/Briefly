@@ -330,6 +330,7 @@ def _delivery_updates_from_form(form) -> dict[str, Any]:
         "delivery.quiet_hours_end": str(form.get("delivery_quiet_hours_end", "")).strip(),
         "delivery.hourly_updates": "delivery_hourly_updates" in form,
         "delivery.breaking_alerts": "delivery_breaking_alerts" in form,
+        "delivery.intraday_global_risk_enabled": "delivery_intraday_global_risk_enabled" in form,
         "delivery.llm_email_morning": "delivery_llm_email_morning" in form,
         "delivery.llm_shadow_mode": "delivery_llm_shadow_mode" in form,
     }
@@ -340,6 +341,7 @@ def _section_updates_from_form(form) -> dict[str, Any]:
     section_keys = (
         "market_setup",
         "macro_context",
+        "global_news",
         "top_themes",
         "portfolio_focus",
         "sector_scan",
@@ -347,7 +349,8 @@ def _section_updates_from_form(form) -> dict[str, Any]:
     )
     updates: dict[str, Any] = {}
     for section in section_keys:
-        updates[f"sections.morning.{section}"] = f"section_{section}" in form
+        key = "sections.global_news" if section == "global_news" else f"sections.morning.{section}"
+        updates[key] = f"section_{section}" in form
     return updates
 
 

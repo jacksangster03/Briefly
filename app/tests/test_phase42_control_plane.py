@@ -70,9 +70,11 @@ def test_preference_accepts_region_focus_overrides(isolated_db):
 def test_preference_accepts_llm_delivery_toggles(isolated_db):
     set_preference("default_user", "delivery.llm_email_morning", False)
     set_preference("default_user", "delivery.llm_shadow_mode", True)
+    set_preference("default_user", "delivery.intraday_global_risk_enabled", False)
     prefs = get_preferences("default_user")
     assert prefs["delivery.llm_email_morning"] is False
     assert prefs["delivery.llm_shadow_mode"] is True
+    assert prefs["delivery.intraday_global_risk_enabled"] is False
 
 
 def test_load_user_profile_applies_preference_overrides(isolated_db, tmp_path):
@@ -99,6 +101,7 @@ def test_load_user_profile_applies_preference_overrides(isolated_db, tmp_path):
     set_preference("default_user", "watchlist.primary", ["tsla", "nvda"])
     set_preference("default_user", "delivery.morning_channels", ["email"])
     set_preference("default_user", "sections.morning.watchlist", False)
+    set_preference("default_user", "sections.global_news", False)
 
     settings = Settings(configs_dir=str(config_dir))
     profile = load_user_profile(settings)
@@ -106,6 +109,7 @@ def test_load_user_profile_applies_preference_overrides(isolated_db, tmp_path):
     assert profile.watchlist_primary == ["TSLA", "NVDA"]
     assert profile.channels_for("morning") == ["email"]
     assert profile.morning_section_enabled("watchlist") is False
+    assert profile.morning_section_enabled("global_news") is False
 
 
 def test_get_messengers_respects_profile_channel_preferences():
@@ -129,6 +133,20 @@ def test_get_messengers_respects_profile_channel_preferences():
     assert intraday == ["telegram"]
 
 
+def test_get_messengers_breaking_defaults_to_telegram_only():
+    settings = Settings(
+        dry_run=False,
+        telegram_bot_token="token",
+        telegram_chat_id="123",
+        email_user="from@example.com",
+        email_password="secret",
+        email_to="to@example.com",
+    )
+    profile = UserProfile()
+    breaking = [messenger.name for messenger in _get_messengers(settings, profile, message_type="breaking")]
+    assert breaking == ["telegram"]
+
+
 def test_apply_morning_section_preferences_hides_disabled_sections():
     briefing = MorningBriefing(
         market_setup=MarketSetup(
@@ -136,6 +154,7 @@ def test_apply_morning_section_preferences_hides_disabled_sections():
             macro_quotes=[QuoteData(symbol="GLD", current_price=2.0)],
         ),
         macro_context=[],
+        global_news=[NormalisedEvent(title="Global event", event_type="geopolitical")],
         top_themes=[NormalisedEvent(title="Top theme", tickers=["NVDA"])],
         portfolio_focus=[NormalisedEvent(title="Portfolio focus", tickers=["NVDA"])],
         sector_scan=[
@@ -152,6 +171,7 @@ def test_apply_morning_section_preferences_hides_disabled_sections():
     profile = UserProfile(
         morning_section_flags={
             "market_setup": False,
+            "global_news": False,
             "top_themes": False,
             "watchlist": False,
         }
@@ -160,6 +180,7 @@ def test_apply_morning_section_preferences_hides_disabled_sections():
 
     assert briefing.market_setup.index_quotes == []
     assert briefing.market_setup.macro_quotes == []
+    assert briefing.global_news == []
     assert briefing.top_themes == []
     assert briefing.watchlist_events == []
     assert briefing.watchlist_quotes == []

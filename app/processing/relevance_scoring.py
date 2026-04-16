@@ -88,6 +88,10 @@ LOW_SIGNAL_PATTERNS = (
 )
 
 
+def _normalize_region_key(region: str) -> str:
+    return str(region or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
 def score_event(
     event: NormalisedEvent,
     profile: UserProfile,
@@ -196,9 +200,13 @@ def _watchlist_relevance(event: NormalisedEvent, profile: UserProfile) -> float:
 def _region_relevance(event: NormalisedEvent, profile: UserProfile) -> float:
     if not event.regions:
         return 0.3  # default for events with no region tag
-    return max(
-        profile.coverage_weights.get(r, 0.3) for r in event.regions
-    )
+    score = 0.3
+    for region in event.regions:
+        key = _normalize_region_key(region)
+        score = max(score, profile.coverage_weights.get(key, 0.3))
+        if key == "global_macro":
+            score = max(score, profile.coverage_weights.get("global", 0.3))
+    return score
 
 
 def _portfolio_relevance(event: NormalisedEvent, profile: UserProfile) -> float:

@@ -7,6 +7,7 @@ import re
 from datetime import timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.briefing.global_news_selector import build_market_relevance_note
 from app.briefing.formatter import TelegramFormatter
 from app.schemas.briefings import MorningBriefing
 from app.schemas.delivery import EmailRenderResult
@@ -80,6 +81,10 @@ class EmailFormatter:
         market_block = self._market_setup_block(briefing.market_setup.index_quotes, briefing.market_setup.macro_quotes)
         if market_block:
             parts.append(self._section("Market Setup", market_block))
+
+        global_block = self._global_event_block(briefing.global_news, max_items=6)
+        if global_block:
+            parts.append(self._section("Global News & Geopolitics", global_block))
 
         portfolio_block = self._event_block(briefing.portfolio_focus, max_items=5)
         if portfolio_block:
@@ -184,6 +189,35 @@ class EmailFormatter:
         if event_block:
             parts.append(event_block)
         return "".join(parts)
+
+    def _global_event_block(self, events: list[NormalisedEvent], *, max_items: int) -> str:
+        if not events:
+            return ""
+        items = []
+        for event in events[:max_items]:
+            summary = ""
+            if event.summary and not self.telegram_formatter._summary_duplicates_title(event.summary, event.title):
+                summary = self.telegram_formatter._strip_cluster_suffix(event.summary)
+            note = build_market_relevance_note(event)
+            meta = self._event_meta(event)
+            body = (
+                "<li style=\"margin:0 0 12px 0;\">"
+                f"<div style=\"font-weight:700;color:#102a43;\">{html.escape(event.title)}</div>"
+                + (
+                    f"<div style=\"margin-top:4px;color:#486581;line-height:1.55;\">{html.escape(summary[:220])}</div>"
+                    if summary
+                    else ""
+                )
+                + f"<div style=\"margin-top:4px;font-size:12px;color:#627d98;\">{html.escape(note)}</div>"
+                + (
+                    f"<div style=\"margin-top:4px;font-size:12px;color:#829ab1;\">{html.escape(meta)}</div>"
+                    if meta
+                    else ""
+                )
+                + "</li>"
+            )
+            items.append(body)
+        return "<ol style=\"padding-left:20px;margin:0;\">" + "".join(items) + "</ol>"
 
     def _event_meta(self, event: NormalisedEvent) -> str:
         meta = []

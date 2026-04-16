@@ -83,6 +83,28 @@ class TestTelegramFormatter:
         assert len(messages) >= 1
         assert "No material new developments" in messages[0]
 
+    def test_morning_includes_global_news_section(self):
+        briefing = MorningBriefing(
+            generated_at=datetime(2026, 4, 13, 12, 30),
+            global_news=[
+                NormalisedEvent(
+                    title="Oil rises as Strait of Hormuz disruptions persist",
+                    summary="Shipping and insurance costs climb across the energy complex.",
+                    event_type="geopolitical",
+                    final_score=0.82,
+                    cluster_size=4,
+                )
+            ],
+            events_fetched=20,
+            events_after_dedup=12,
+            events_sent=3,
+        )
+        messages = self.formatter.format_morning_briefing(briefing)
+        full = "\n".join(messages)
+        assert "GLOBAL NEWS & GEOPOLITICS" in full
+        assert "Why market-relevant:" in full
+        assert "Oil rises as Strait of Hormuz disruptions persist" in full
+
     def test_breaking_alert_format(self):
         evt = NormalisedEvent(
             title="FDA approves Lilly obesity drug",
@@ -136,6 +158,27 @@ class TestTelegramFormatter:
         full = "\n".join(messages)
         assert "Amazon (AMZN)" in full
         assert "17:09 CEST" in full
+
+    def test_intraday_global_risk_block_renders(self):
+        update = IntradayUpdate(
+            hour_label="12:56",
+            global_risk_items=[
+                NormalisedEvent(
+                    title="Oil tops $100 as US moves to blockade Iran",
+                    summary="Energy shock reprices inflation expectations.",
+                    event_type="geopolitical",
+                    cluster_size=5,
+                )
+            ],
+            new_events=[],
+            events_fetched=10,
+            events_after_dedup=5,
+            events_sent=1,
+        )
+        messages = self.formatter.format_intraday_update(update)
+        full = "\n".join(messages)
+        assert "GLOBAL RISK UPDATE" in full
+        assert "Why market-relevant:" in full
 
     def test_intraday_event_suppresses_duplicate_summary(self):
         """If the summary is just the title repeated, don't echo it."""
@@ -393,6 +436,26 @@ class _DummyNewsData:
         return []
 
 
+class _DummyNewsDataWithEvents:
+    def __init__(self, events):
+        self._events = events
+        self.finnhub = None
+
+    def fetch_all(self, watchlist=None):
+        return self._events
+
+    def fetch_market_news(self):
+        return self._events
+
+    @staticmethod
+    def fetch_company_news(*_args, **_kwargs):
+        return []
+
+    @staticmethod
+    def fetch_filings(*_args, **_kwargs):
+        return []
+
+
 class _DummyMacroData:
     def get_morning_macro(self):
         return []
@@ -449,3 +512,99 @@ class TestMorningSectorSelection:
         titles = [event.title for event in snapshots[0].top_events]
         assert "ASML set to report Q1 earnings next week" in titles
         assert "Powell says no rate hike needed to fight oil shock" not in titles
+
+
+class TestMorningGlobalSectionDedupe:
+    def test_global_news_dedupes_against_other_sections(self):
+        generator = MorningBriefingGenerator(
+            settings=Settings(),
+            profile=UserProfile(sector_weights={"technology": 1.0}),
+            universe=SectorUniverse(
+                sectors=[],
+                indices=[InstrumentDef(symbol="SPY", display="S&P 500")],
+                macro_instruments=[],
+            ),
+            market_data=_DummyMarketData(),
+            news_data=_DummyNewsData(),
+            macro_data=_DummyMacroData(),
+        )
+
+        shared_event = NormalisedEvent(
+            title="Oil tops $100 as shipping risk rises around Hormuz",
+            summary="Energy and logistics costs reprice inflation expectations.",
+            event_type="geopolitical",
+            final_score=0.8,
+            cluster_id="global_story_1",
+        )
+        briefing = MorningBriefing(
+            global_news=[shared_event],
+            top_themes=[shared_event],
+            watchlist_events=[shared_event],
+        )
+
+        generator._dedupe_cross_section_events(briefing)
+
+        assert len(briefing.global_news) == 1
+        assert briefing.top_themes == []
+        assert briefing.watchlist_events == []
+
+
+class TestMorningCrossTypeSuppression:
+    def test_morning_generator_skips_already_sent_and_continuation_events(self, monkeypatch):
+        already_sent = NormalisedEvent(
+            title="US warns buyers of Iranian oil could face sanctions",
+            summary="Energy and inflation sensitivity rise.",
+            source="finnhub",
+            event_type="geopolitical",
+            final_score=0.9,
+            factual_confidence_score=0.85,
+            cluster_size=4,
+            already_sent=True,
+            update_status="duplicate",
+        )
+        continuation = NormalisedEvent(
+            title="Oil tops $100 as shipping risk persists near Hormuz",
+            summary="Cross-asset risk continues to reprice.",
+            source="finnhub",
+            event_type="geopolitical",
+            final_score=0.88,
+            factual_confidence_score=0.82,
+            cluster_size=4,
+            already_sent=False,
+            update_status="material_update",
+        )
+        fresh = NormalisedEvent(
+            title="Fed official signals one rate cut remains possible in 2026",
+            summary="Rates path remains data dependent.",
+            source="finnhub",
+            event_type="macro_release",
+            final_score=0.84,
+            factual_confidence_score=0.83,
+            cluster_size=3,
+            already_sent=False,
+            update_status="new",
+        )
+
+        monkeypatch.setattr(
+            "app.briefing.morning_generator.process_event_stream",
+            lambda *_args, **_kwargs: [already_sent, continuation, fresh],
+        )
+
+        generator = MorningBriefingGenerator(
+            settings=Settings(),
+            profile=UserProfile(sector_weights={"technology": 1.0}),
+            universe=SectorUniverse(
+                sectors=[],
+                indices=[InstrumentDef(symbol="SPY", display="S&P 500")],
+                macro_instruments=[],
+            ),
+            market_data=_DummyMarketData(),
+            news_data=_DummyNewsDataWithEvents([fresh]),
+            macro_data=_DummyMacroData(),
+        )
+
+        briefing = generator.generate()
+        rendered_titles = {evt.title for evt in briefing.global_news + briefing.top_themes}
+        assert "Fed official signals one rate cut remains possible in 2026" in rendered_titles
+        assert "US warns buyers of Iranian oil could face sanctions" not in rendered_titles
+        assert "Oil tops $100 as shipping risk persists near Hormuz" not in rendered_titles

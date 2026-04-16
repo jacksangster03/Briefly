@@ -115,6 +115,10 @@ class UserProfile:
         return self.delivery.get("breaking_alerts", True)
 
     @property
+    def intraday_global_risk_enabled(self) -> bool:
+        return self.delivery.get("intraday_global_risk_enabled", True)
+
+    @property
     def quiet_hours(self) -> tuple[str, str]:
         return (
             self.delivery.get("quiet_hours_start", "23:00"),
@@ -271,12 +275,16 @@ def _load_profile_overrides(profile: UserProfile) -> None:
             "delivery.morning_brief_time",
             "delivery.hourly_updates",
             "delivery.breaking_alerts",
+            "delivery.intraday_global_risk_enabled",
             "delivery.llm_email_morning",
             "delivery.llm_shadow_mode",
             "delivery.quiet_hours_start",
             "delivery.quiet_hours_end",
         }:
             profile.delivery[key.replace("delivery.", "")] = value
+            continue
+        if key == "sections.global_news":
+            profile.morning_section_flags["global_news"] = bool(value)
             continue
         if key.startswith("sections.morning."):
             section = key.replace("sections.morning.", "", 1)
