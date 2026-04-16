@@ -22,6 +22,7 @@ from app.briefing.templates import (
     format_change,
     format_context_price,
     format_compact_price,
+    format_compact_price_with_level,
     format_price_line,
 )
 from app.schemas.briefings import (
@@ -142,9 +143,7 @@ class TelegramFormatter:
 
         # Quick market snapshot
         if update.market_snapshot:
-            lines = [format_compact_price(q.display_name or q.symbol, q.change_percent)
-                     for q in update.market_snapshot[:6]]
-            sections.append(" | ".join(lines))
+            sections.append(self._format_intraday_market_snapshot(update.market_snapshot))
 
         global_risk = self._format_global_risk_update(update.global_risk_items)
         if global_risk:
@@ -427,6 +426,13 @@ class TelegramFormatter:
                     parts.append(f"  {evt.title[:150]}")
 
         return "\n".join(parts) if len(parts) > 1 else ""
+
+    def _format_intraday_market_snapshot(self, quotes: list[QuoteData]) -> str:
+        """Render intraday snapshot with exact levels + % change."""
+        if not quotes:
+            return ""
+        lines = [format_compact_price_with_level(q.display_name or q.symbol, q.current_price, q.change_percent) for q in quotes]
+        return " | ".join(lines)
 
     def _format_empty_sector_compact(
         self,

@@ -173,6 +173,71 @@ def _load_recent_sent_tracking_ids(lookback_hours: int = 24) -> set[str]:
     return tracking_ids
 
 
+def _extract_breaking_title_from_preview(preview: str) -> str:
+    """Best-effort extraction of a breaking headline from stored preview text."""
+    if not preview:
+        return ""
+    text = _HTML_TAG_RE.sub("", preview)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    if lines[0].upper() == "BREAKING" and len(lines) > 1:
+        return lines[1]
+    for line in lines:
+        if line.upper() != "BREAKING":
+            return line
+    return ""
+
+
+def _title_token_set(title: str) -> set[str]:
+    cleaned = re.sub(r"[^a-z0-9\s]", " ", (title or "").lower())
+    return {
+        token
+        for token in cleaned.split()
+        if token and token not in {"the", "a", "an", "and", "or", "to", "of", "in", "for", "on", "with"}
+    }
+
+
+def _title_similarity(left: str, right: str) -> float:
+    left_tokens = _title_token_set(left)
+    right_tokens = _title_token_set(right)
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+
+def _load_recent_breaking_titles(lookback_hours: int = 6) -> list[str]:
+    """Load recently-sent breaking titles for short-term repeat suppression."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+    with get_session() as session:
+        rows = (
+            session.query(SentMessage)
+            .filter(
+                SentMessage.message_type == "breaking",
+                SentMessage.sent_at >= cutoff,
+                SentMessage.success.is_(True),
+            )
+            .order_by(SentMessage.sent_at.desc())
+            .all()
+        )
+
+    titles: list[str] = []
+    for row in rows:
+        title = _extract_breaking_title_from_preview(row.content_preview or "")
+        if title:
+            titles.append(title)
+    return titles
+
+
+def _is_repetitive_breaking_title(
+    candidate_title: str,
+    recent_titles: list[str],
+    *,
+    similarity_threshold: float = 0.55,
+) -> bool:
+    return any(_title_similarity(candidate_title, previous) >= similarity_threshold for previous in recent_titles)
+
+
 @contextmanager
 def _breaking_run_lock(settings: Settings):
     """Prevent concurrent breaking checks across multiple local processes."""
@@ -469,10 +534,28 @@ def run_breaking_check(settings: Settings | None = None) -> None:
             logger.debug("No fresh breaking alerts after recent-delivery suppression")
             return
 
+        recent_breaking_titles = _load_recent_breaking_titles(lookback_hours=6)
+        filtered_alerts: list[BreakingAlert] = []
+        for alert in fresh_alerts:
+            repetitive = _is_repetitive_breaking_title(alert.event.title, recent_breaking_titles)
+            # Suppress near-duplicate thread churn unless significance is
+            # clearly above normal breaking noise.
+            if repetitive and alert.event.final_score < 0.90 and alert.event.cluster_size < 8:
+                logger.info(
+                    "Suppressing repetitive breaking headline in cooldown window: %s",
+                    alert.event.title[:90],
+                )
+                continue
+            filtered_alerts.append(alert)
+
+        if not filtered_alerts:
+            logger.debug("No fresh breaking alerts after repetitive-headline cooldown")
+            return
+
         formatter = TelegramFormatter(profile.timezone)
         messengers = _get_messengers(settings, profile, message_type="breaking")
 
-        for alert in fresh_alerts:
+        for alert in filtered_alerts:
             messages = formatter.format_breaking_alert(alert)
             _deliver(messengers, messages, "breaking", [alert.event], settings=settings)
             logger.info(

@@ -11,6 +11,7 @@ from app.db.base import Base, create_app_engine
 from app.db.models import NormalisedEvent as StoredEvent
 from app.db.models import SentMessage
 from app.db.session import get_session
+from app.main import _extract_breaking_title_from_preview, _is_repetitive_breaking_title
 from app.processing.dedupe import classify_against_sent_history
 from app.processing.event_store import record_sent_events
 from app.schemas.events import NormalisedEvent
@@ -168,3 +169,23 @@ def test_record_sent_events_refreshes_existing_row_recency(tmp_path):
         db_session._engine = old_engine
         db_session._SessionLocal = old_factory
         engine.dispose()
+
+
+def test_extract_breaking_title_from_preview_strips_html():
+    preview = "<b>BREAKING</b>\n\n<b>Iran-US talks turn to interim deal</b>\n\n<i>Why it matters:</i> ..."
+    assert _extract_breaking_title_from_preview(preview) == "Iran-US talks turn to interim deal"
+
+
+def test_repetitive_breaking_title_helper_detects_near_duplicates():
+    recent = [
+        "Pakistan says no dates set for second round of US-Iran talks",
+        "Iran-US talks turn to interim deal amid rifts over nuclear work",
+    ]
+    assert _is_repetitive_breaking_title(
+        "Pakistan says no dates set for second round of U.S.-Iran talks",
+        recent,
+    ) is True
+    assert _is_repetitive_breaking_title(
+        "Starbucks launches beta app in ChatGPT to fuel new drink discovery",
+        recent,
+    ) is False

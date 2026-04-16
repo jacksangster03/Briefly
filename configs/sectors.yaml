@@ -75,14 +75,26 @@ sectors:
 
 # Indices and macro instruments tracked in market setup
 indices:
-  - { symbol: SPY, display: "S&P 500" }
-  - { symbol: QQQ, display: "Nasdaq 100" }
-  - { symbol: DIA, display: "Dow 30" }
-  - { symbol: IWM, display: "Russell 2000" }
+  # US broad + volatility
+  - { symbol: "^GSPC", display: "S&P 500 (^GSPC / SPX)" }
+  - { symbol: "^IXIC", display: "Nasdaq Composite (^IXIC)" }
+  - { symbol: "^DJI", display: "Dow Jones (^DJI)" }
+  - { symbol: "^RUT", display: "Russell 2000 (^RUT)" }
+  - { symbol: "^VIX", display: "VIX (^VIX)" }
+
+  # Europe
+  - { symbol: "^STOXX50E", display: "EURO STOXX 50 (^STOXX50E)" }
+  - { symbol: "^FTSE", display: "FTSE 100 (^FTSE)" }
+  - { symbol: "^GDAXI", display: "DAX (^GDAXI)" }
+  - { symbol: "^FCHI", display: "CAC 40 (^FCHI)" }
+  - { symbol: "^IBEX", display: "IBEX 35 (^IBEX)" }
+
+  # Asia
+  - { symbol: "^N225", display: "Nikkei 225 (^N225)" }
+  - { symbol: "^HSI", display: "Hang Seng (^HSI)" }
 
 macro_instruments:
-  - { symbol: TLT, display: "20Y+ Treasury" }
-  - { symbol: GLD, display: Gold }
-  - { symbol: USO, display: "WTI Crude" }
-  - { symbol: UUP, display: "USD Index" }
-  - { symbol: IBIT, display: Bitcoin }
+  # Rates / commodities
+  - { symbol: "^TNX", display: "10Y US Treasury Yield (^TNX)" }
+  - { symbol: "CL=F", display: "WTI Crude Oil (CL1:COM)" }
+  - { symbol: "GC=F", display: "Gold (GC1:COM)" }

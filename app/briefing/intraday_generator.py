@@ -75,9 +75,15 @@ class IntradayGenerator:
             remaining_budget = max(0, effective_max_events - len(global_risk_items))
             top = top[:remaining_budget]
 
-        # Market snapshot
-        snapshot = self.market_svc.get_quotes(self.universe.all_index_symbols[:4])
+        # Market snapshot (expanded global index + macro view)
+        snapshot_symbols = list(self.universe.all_index_symbols)
+        for symbol in self.universe.all_macro_symbols:
+            if symbol not in snapshot_symbols:
+                snapshot_symbols.append(symbol)
+
+        snapshot = self.market_svc.get_quotes(snapshot_symbols)
         name_map = {i.symbol: i.display for i in self.universe.indices}
+        name_map.update({m.symbol: m.display for m in self.universe.macro_instruments})
         for quote in snapshot:
             quote.display_name = name_map.get(quote.symbol, quote.symbol)
 

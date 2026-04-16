@@ -52,6 +52,12 @@ def format_compact_price(name: str, change_pct: float) -> str:
     return f"{name} {sign}{change_pct:.2f}%"
 
 
+def format_compact_price_with_level(name: str, price: float, change_pct: float) -> str:
+    """Compact with level: 'S&P 500 5,234.50 (+0.24%)'."""
+    sign = "+" if change_pct >= 0 else ""
+    return f"{name} {price:,.2f} ({sign}{change_pct:.2f}%)"
+
+
 def format_context_price(
     name: str,
     symbol: str,

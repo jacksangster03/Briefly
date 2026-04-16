@@ -29,8 +29,10 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
 
 - **Morning briefing**
   - market setup, macro context, global geopolitics section, top themes, sector scan, watchlist, and a portfolio-first section
+  - expanded market setup panel now includes US, Europe, Asia, VIX, 10Y UST, WTI, and gold levels
 - **Intraday updates**
   - only new, material developments above threshold
+  - snapshot now shows exact index/asset levels with percentage moves (not percent-only)
   - compact `GLOBAL RISK UPDATE` block when high-trust market-linked geopolitical/macro items are present
   - weekend-aware formatting when cash equity markets are closed
 - **Breaking alerts**
