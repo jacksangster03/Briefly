@@ -81,6 +81,26 @@ class IntradayUpdate(BaseModel):
     events_sent: int = 0
 
 
+BreakingTier = Literal["breaking", "high_priority", "regular", "ignore"]
+
+
+class BreakingClassification(BaseModel):
+    """Deterministic classification metadata for breaking candidates."""
+
+    tier: BreakingTier = "breaking"
+    category: str = "macro"
+    impact_score: int = 0
+    confidence_score: int = 0
+    novelty_score: int = 0
+    immediacy_score: int = 0
+    breadth_score: int = 0
+    why_markets_care: str = ""
+    watch_assets: list[str] = Field(default_factory=list)
+    confirm_signals: list[str] = Field(default_factory=list)
+    invalidate_signals: list[str] = Field(default_factory=list)
+    storyline_key: str = ""
+
+
 class BreakingAlert(BaseModel):
     """Single high-importance breaking alert."""
 
@@ -88,3 +108,5 @@ class BreakingAlert(BaseModel):
     event: NormalisedEvent
     market_context: list[QuoteData] = Field(default_factory=list)
     reason: str = ""
+    classification: BreakingClassification = Field(default_factory=BreakingClassification)
+    tracking_ids: list[str] = Field(default_factory=list)

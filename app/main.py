@@ -136,18 +136,35 @@ def _record_delivery(
     success: bool,
     content_preview: str,
     events: list | None = None,
+    tracking_ids: list[str] | None = None,
 ) -> None:
     """Persist a delivery attempt to SentMessage."""
     with get_session() as session:
         import hashlib
 
+        event_ids: list[str] = []
+        for evt in events or []:
+            preferred_ids: list[str] = []
+            if getattr(evt, "cluster_id", None):
+                preferred_ids.append(evt.cluster_id)
+            if getattr(evt, "content_hash", None):
+                preferred_ids.append(evt.content_hash)
+            if getattr(evt, "event_id", None):
+                preferred_ids.append(evt.event_id)
+            storyline_key = getattr(evt, "raw_data", {}).get("storyline_key")
+            if isinstance(storyline_key, str) and storyline_key:
+                preferred_ids.append(f"storyline:{storyline_key}")
+            for value in preferred_ids:
+                if value and value not in event_ids:
+                    event_ids.append(value)
+        for value in tracking_ids or []:
+            if isinstance(value, str) and value and value not in event_ids:
+                event_ids.append(value)
+
         record = SentMessage(
             message_type=msg_type,
             channel=channel,
-            event_ids=[
-                evt.cluster_id or evt.content_hash or evt.event_id
-                for evt in (events or [])
-            ],
+            event_ids=event_ids,
             content_preview=content_preview[:500],
             content_hash=hashlib.sha256(content_preview.encode()).hexdigest()[:16],
             sent_at=datetime.now(timezone.utc),
@@ -269,6 +286,7 @@ def _deliver(
     msg_type: str,
     events: list | None = None,
     settings: Settings | None = None,
+    tracking_ids: list[str] | None = None,
 ):
     """Deliver messages via all configured channels and record to DB."""
     if settings and settings.show_output:
@@ -284,6 +302,7 @@ def _deliver(
                     success=success,
                     content_preview="\n".join(messages),
                     events=events,
+                    tracking_ids=tracking_ids,
                 )
         except Exception:
             logger.debug("Failed to record sent message", exc_info=True)
@@ -534,9 +553,24 @@ def run_breaking_check(settings: Settings | None = None) -> None:
             logger.debug("No fresh breaking alerts after recent-delivery suppression")
             return
 
+        tier_filtered_alerts: list[BreakingAlert] = []
+        for alert in fresh_alerts:
+            if alert.classification.tier != "breaking":
+                logger.info(
+                    "Skipping non-breaking tier candidate: %s (tier=%s)",
+                    alert.event.title[:90],
+                    alert.classification.tier,
+                )
+                continue
+            tier_filtered_alerts.append(alert)
+
+        if not tier_filtered_alerts:
+            logger.debug("No breaking-tier candidates after classification")
+            return
+
         recent_breaking_titles = _load_recent_breaking_titles(lookback_hours=6)
         filtered_alerts: list[BreakingAlert] = []
-        for alert in fresh_alerts:
+        for alert in tier_filtered_alerts:
             repetitive = _is_repetitive_breaking_title(alert.event.title, recent_breaking_titles)
             # Suppress near-duplicate thread churn unless significance is
             # clearly above normal breaking noise.
@@ -552,12 +586,39 @@ def run_breaking_check(settings: Settings | None = None) -> None:
             logger.debug("No fresh breaking alerts after repetitive-headline cooldown")
             return
 
+        storyline_filtered_alerts: list[BreakingAlert] = []
+        for alert in filtered_alerts:
+            storyline_id = f"storyline:{alert.classification.storyline_key}" if alert.classification.storyline_key else ""
+            if not storyline_id:
+                storyline_filtered_alerts.append(alert)
+                continue
+            is_recent_storyline = storyline_id in recently_sent_ids
+            if is_recent_storyline and alert.classification.impact_score < 5 and alert.event.final_score < 0.93:
+                logger.info(
+                    "Suppressing repeat storyline within cooldown: %s (storyline=%s)",
+                    alert.event.title[:90],
+                    alert.classification.storyline_key,
+                )
+                continue
+            storyline_filtered_alerts.append(alert)
+
+        if not storyline_filtered_alerts:
+            logger.debug("No fresh breaking alerts after storyline cooldown")
+            return
+
         formatter = TelegramFormatter(profile.timezone)
         messengers = _get_messengers(settings, profile, message_type="breaking")
 
-        for alert in filtered_alerts:
+        for alert in storyline_filtered_alerts:
             messages = formatter.format_breaking_alert(alert)
-            _deliver(messengers, messages, "breaking", [alert.event], settings=settings)
+            _deliver(
+                messengers,
+                messages,
+                "breaking",
+                [alert.event],
+                settings=settings,
+                tracking_ids=alert.tracking_ids,
+            )
             logger.info(
                 "Breaking alert sent: %s (score=%.3f)",
                 alert.event.title[:60],

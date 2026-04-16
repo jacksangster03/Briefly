@@ -175,14 +175,22 @@ class TelegramFormatter:
     def format_breaking_alert(self, alert: BreakingAlert) -> list[str]:
         """Format a breaking alert."""
         evt = alert.event
+        classification = alert.classification
         company_label = self._company_label(evt)
         time_label = self._format_event_time(evt)
         generated_local = alert.generated_at.astimezone(self.local_tz) if alert.generated_at.tzinfo else alert.generated_at
         session_mode = session_mode_for(generated_local)
         reference_label = "Friday prior close" if session_mode in {"saturday", "sunday"} else "prior close"
 
+        tier_header = {
+            "breaking": SECTION_HEADERS["breaking_title"],
+            "high_priority": "HIGH PRIORITY",
+            "regular": "MARKET ALERT",
+            "ignore": "MARKET ALERT",
+        }.get(classification.tier, SECTION_HEADERS["breaking_title"])
+
         sections = [
-            f"<b>{SECTION_HEADERS['breaking_title']}</b>",
+            f"<b>{tier_header}</b>",
             f"<b>{evt.title}</b>",
         ]
 
@@ -192,6 +200,14 @@ class TelegramFormatter:
 
         if alert.reason:
             sections.append(f"<i>Why it matters:</i> {alert.reason}")
+
+        if classification.watch_assets:
+            sections.append(f"<i>Watch:</i> {', '.join(classification.watch_assets[:5])}")
+
+        if classification.confirm_signals:
+            sections.append(f"<i>Confirm:</i> {classification.confirm_signals[0]}")
+        if classification.invalidate_signals:
+            sections.append(f"<i>Invalidate:</i> {classification.invalidate_signals[0]}")
 
         meta = []
         if company_label:

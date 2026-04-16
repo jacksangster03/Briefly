@@ -37,6 +37,8 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
   - weekend-aware formatting when cash equity markets are closed
 - **Breaking alerts**
   - high-threshold event checks with clearer market context
+  - deterministic breaking classifier (`breaking` / `high_priority` / `regular` / `ignore`) with market-link gates
+  - storyline-key cooldown to suppress near-duplicate geopolitical headline churn
   - strict one-shot suppression: continuation/material-update repeats are filtered out
   - one alert per cycle (highest-priority only) to prevent notification spam
 - **Portfolio-aware intelligence**

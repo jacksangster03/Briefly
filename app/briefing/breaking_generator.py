@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+from app.briefing.breaking_classifier import (
+    build_breaking_tracking_ids,
+    classify_breaking_event,
+)
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
 from app.logger import get_logger
@@ -49,11 +55,12 @@ class BreakingAlertGenerator:
             self.settings,
             sector_lookup=self.universe.sectors_for_ticker,
         )
-        if min_score is not None:
-            self.rules.min_final_score = min_score
-        if max_alerts is not None:
-            self.rules.max_per_hour = max_alerts
-        breaking = select_breaking_events(scored, self.rules)
+        rules = replace(
+            self.rules,
+            min_final_score=min_score if min_score is not None else self.rules.min_final_score,
+            max_per_hour=max_alerts if max_alerts is not None else self.rules.max_per_hour,
+        )
+        breaking = select_breaking_events(scored, rules)
 
         if not breaking:
             return []
@@ -65,16 +72,23 @@ class BreakingAlertGenerator:
             quote.display_name = name_map.get(quote.symbol, quote.symbol)
         alerts = []
 
-        for evt in breaking[:max_alerts]:
+        limit = max_alerts if max_alerts is not None else rules.max_per_hour
+        for evt in breaking[:limit]:
+            classification = classify_breaking_event(evt)
+            if classification.storyline_key:
+                evt.raw_data["storyline_key"] = classification.storyline_key
             alert = BreakingAlert(
                 event=evt,
                 market_context=context_quotes,
-                reason=_build_alert_reason(evt),
+                reason=classification.why_markets_care or _build_alert_reason(evt),
+                classification=classification,
+                tracking_ids=build_breaking_tracking_ids(evt, classification),
             )
             alerts.append(alert)
             logger.info(
-                "Breaking alert: %s (score=%.3f)",
+                "Breaking candidate: %s (score=%.3f, tier=%s)",
                 evt.title[:60], evt.final_score,
+                classification.tier,
             )
 
         return alerts
