@@ -71,7 +71,7 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
 - **Phase 4.2 control plane (persisted profile overrides)**
   - per-profile, DB-backed overrides for channels, watchlists, sector weights, and morning sections
   - runtime profile load merges YAML defaults with persisted overrides
-  - per-message routing (`morning` / `intraday` / `breaking`) can be customized by profile
+  - per-message routing (`morning` / `intraday`) can be customized by profile
 - **Phase 4.3 web control center (FastAPI + HTMX)**
   - local-first settings UI for holdings, watchlists, sector weights, delivery routing, and morning section visibility
   - searchable watchlist builders (chip-based add/remove) instead of long multiselect lists
@@ -90,7 +90,8 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
 - **Cross-type anti-repeat policy**
   - events already sent in one channel/type are suppressed from later morning/intraday/breaking surfacing
   - intraday and breaking now surface only `new` catalysts (not continuation repeats)
-  - default fallback routing for breaking is Telegram-only when no explicit profile override exists
+  - breaking delivery is hard-routed to Telegram (no breaking email fan-out)
+  - breaking checks use a cross-process run lock + sent-ID guard to prevent repeat bursts
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths

@@ -8,8 +8,16 @@ Each function here represents a complete workflow:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from datetime import timedelta
 import re
 from datetime import datetime, timezone
+from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-Unix fallback
+    fcntl = None
 
 from app.briefing.email_formatter import EmailFormatter
 from app.briefing.formatter import TelegramFormatter
@@ -57,6 +65,10 @@ def _get_messengers(settings: Settings, profile: UserProfile, *, message_type: s
     messengers = []
     channel = settings.normalized_delivery_channel
     preferred_channels = set(profile.channels_for(message_type))
+    if message_type == "breaking":
+        # Breaking alerts are intentionally Telegram-only to avoid
+        # duplicate push surfaces and noisy email pings.
+        preferred_channels = {"telegram"}
     if not preferred_channels:
         preferred_channels = {"telegram"} if message_type == "breaking" else {"telegram", "email"}
 
@@ -142,6 +154,48 @@ def _record_delivery(
             success=success,
         )
         session.add(record)
+
+
+def _load_recent_sent_tracking_ids(lookback_hours: int = 24) -> set[str]:
+    """Return recently delivered event tracking IDs from SentMessage rows."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+    tracking_ids: set[str] = set()
+    with get_session() as session:
+        rows = (
+            session.query(SentMessage)
+            .filter(SentMessage.sent_at >= cutoff, SentMessage.success.is_(True))
+            .all()
+        )
+    for row in rows:
+        for value in row.event_ids or []:
+            if isinstance(value, str) and value:
+                tracking_ids.add(value)
+    return tracking_ids
+
+
+@contextmanager
+def _breaking_run_lock(settings: Settings):
+    """Prevent concurrent breaking checks across multiple local processes."""
+    if fcntl is None:
+        yield True
+        return
+    lock_path = Path(settings.data_dir) / "state" / "breaking_run.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.warning("Another breaking-check process is already running; skipping this cycle.")
+        handle.close()
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
 
 def _deliver(
@@ -380,34 +434,52 @@ def run_breaking_check(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
     init_db()
 
-    profile = load_user_profile(settings)
-    universe = load_sector_universe(settings)
-    market_svc, news_svc, _ = _build_services(settings)
-    generator = BreakingAlertGenerator(
-        settings=settings,
-        profile=profile,
-        universe=universe,
-        market_data=market_svc,
-        news_data=news_svc,
-    )
-    # Keep breaking delivery concise: one highest-priority alert per cycle.
-    alerts = generator.check(max_alerts=1)
+    with _breaking_run_lock(settings) as acquired:
+        if not acquired:
+            return
 
-    if not alerts:
-        logger.debug("No breaking events above configured thresholds")
-        return
-
-    formatter = TelegramFormatter(profile.timezone)
-    messengers = _get_messengers(settings, profile, message_type="breaking")
-
-    for alert in alerts:
-        messages = formatter.format_breaking_alert(alert)
-        _deliver(messengers, messages, "breaking", [alert.event], settings=settings)
-        logger.info(
-            "Breaking alert sent: %s (score=%.3f)",
-            alert.event.title[:60],
-            alert.event.final_score,
+        profile = load_user_profile(settings)
+        universe = load_sector_universe(settings)
+        market_svc, news_svc, _ = _build_services(settings)
+        generator = BreakingAlertGenerator(
+            settings=settings,
+            profile=profile,
+            universe=universe,
+            market_data=market_svc,
+            news_data=news_svc,
         )
+        # Keep breaking delivery concise: one highest-priority alert per cycle.
+        alerts = generator.check(max_alerts=1)
+
+        if not alerts:
+            logger.debug("No breaking events above configured thresholds")
+            return
+
+        recently_sent_ids = _load_recent_sent_tracking_ids(lookback_hours=24)
+        fresh_alerts: list[BreakingAlert] = []
+        for alert in alerts:
+            evt = alert.event
+            tracking_ids = {evt.cluster_id, evt.content_hash, evt.event_id}
+            if any(value in recently_sent_ids for value in tracking_ids if value):
+                logger.info("Skipping duplicate breaking alert already sent recently: %s", evt.title[:80])
+                continue
+            fresh_alerts.append(alert)
+
+        if not fresh_alerts:
+            logger.debug("No fresh breaking alerts after recent-delivery suppression")
+            return
+
+        formatter = TelegramFormatter(profile.timezone)
+        messengers = _get_messengers(settings, profile, message_type="breaking")
+
+        for alert in fresh_alerts:
+            messages = formatter.format_breaking_alert(alert)
+            _deliver(messengers, messages, "breaking", [alert.event], settings=settings)
+            logger.info(
+                "Breaking alert sent: %s (score=%.3f)",
+                alert.event.title[:60],
+                alert.event.final_score,
+            )
 
 
 if __name__ == "__main__":

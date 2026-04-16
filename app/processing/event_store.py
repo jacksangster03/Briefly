@@ -14,6 +14,7 @@ def record_sent_events(events: list[NormalisedEvent]) -> None:
     if not events:
         return
 
+    now_utc = datetime.now(timezone.utc)
     with get_session() as session:
         for evt in events:
             row = (
@@ -37,10 +38,13 @@ def record_sent_events(events: list[NormalisedEvent]) -> None:
                     event_type=evt.event_type,
                     sentiment=evt.sentiment,
                     content_hash=evt.content_hash,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=now_utc,
                 )
                 session.add(row)
 
+            # Refresh recency so dedupe lookback windows consistently catch
+            # repeat sends even when the same content hash existed earlier.
+            row.created_at = now_utc
             row.cluster_id = evt.cluster_id
             row.importance_score = evt.importance_score
             row.novelty_score = evt.novelty_score

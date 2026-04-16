@@ -147,6 +147,24 @@ def test_get_messengers_breaking_defaults_to_telegram_only():
     assert breaking == ["telegram"]
 
 
+def test_get_messengers_breaking_ignores_email_even_when_profile_requests_it():
+    settings = Settings(
+        dry_run=False,
+        telegram_bot_token="token",
+        telegram_chat_id="123",
+        email_user="from@example.com",
+        email_password="secret",
+        email_to="to@example.com",
+    )
+    profile = UserProfile(
+        delivery_channels={
+            "breaking": ["telegram", "email"],
+        }
+    )
+    breaking = [messenger.name for messenger in _get_messengers(settings, profile, message_type="breaking")]
+    assert breaking == ["telegram"]
+
+
 def test_apply_morning_section_preferences_hides_disabled_sections():
     briefing = MorningBriefing(
         market_setup=MarketSetup(

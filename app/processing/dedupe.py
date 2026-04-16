@@ -99,6 +99,11 @@ def classify_against_sent_history(
     } | {
         row.content_hash for row in recent_sent_events if row.content_hash
     }
+    sent_tracking_ids: set[str] = set()
+    for msg in recent_sent_messages:
+        for value in msg.event_ids or []:
+            if isinstance(value, str) and value:
+                sent_tracking_ids.add(value)
 
     recent_by_cluster: dict[str, list[StoredEvent]] = {}
     for row in recent_sent_events:
@@ -108,6 +113,14 @@ def classify_against_sent_history(
     for evt in events:
         evt.update_status = "new"
         evt.reason_code = evt.reason_code or "new_catalyst"
+
+        tracking_ids = {evt.cluster_id, evt.content_hash, evt.event_id}
+        if any(value in sent_tracking_ids for value in tracking_ids if value):
+            evt.already_sent = True
+            evt.update_status = "duplicate"
+            evt.reason_code = "already_sent_tracking_id"
+            evt.novelty_score = 0.05
+            continue
 
         if evt.content_hash in sent_hashes:
             evt.already_sent = True
