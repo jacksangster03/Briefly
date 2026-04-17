@@ -132,6 +132,13 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
   - top-level Portfolio Analyzer / Market Briefing modules now behave like distinct page modes
   - holdings editor now supports faster rebalancing with inline sector labels, +/- steppers, equal-weight and rebalance helpers
   - overview/analyzer surface now includes snapshot confidence, friendlier briefing summaries, and a cleaner History & Advanced area instead of exposing raw override internals by default
+- **Phase 5.3 CMA Builder + Expected Portfolio Analytics**
+  - CMA Builder: per-asset-class expected return and volatility assumptions, stored in SQLite
+  - Correlation matrix configuration for NxN asset-class pairs
+  - Expected portfolio return, volatility, and Sharpe (actual vs SAA)
+  - Policy gap analysis: expected return vs policy target, expected vol vs policy limit
+  - SAA gap: actual expected metrics vs policy portfolio expected metrics
+  - Breach added to policy fit when expected return falls below policy target
 - **Phase 5.1 policy + allocation foundation**
   - new deterministic `Policy`, `Allocation`, and `Benchmark` modules added to the local control center
   - investor policy is now persisted in SQLite with IPS-style inputs such as return target, volatility cap, drawdown cap, single-name limit, liquidity minimum, and governance cadence

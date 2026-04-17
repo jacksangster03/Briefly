@@ -24,6 +24,8 @@ from app.web.control_plane_service import (
     reset_preferences,
     save_allocation,
     save_benchmark,
+    save_cma,
+    save_cma_corr,
     save_holdings_from_form,
     save_policy,
     save_risk_config,
@@ -52,6 +54,14 @@ class AllocationUpdateRequest(BaseModel):
 
 class BenchmarkUpdateRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class CMAUpdateRequest(BaseModel):
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class CMACorrelationsUpdateRequest(BaseModel):
+    rows: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def create_web_app(settings: Settings | None = None) -> FastAPI:
@@ -458,6 +468,92 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         risk_analytics = state.get("analysis", {}).get("risk_analytics", {})
         return {"profile": normalized_profile, "refreshed": True, "risk_analytics": risk_analytics}
 
+    @app.post(
+        "/ui/profile/{profile}/save/cma",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_cma(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        try:
+            save_cma(normalized_profile, _cma_entries_from_form(form))
+            state = build_profile_state(_settings(request), normalized_profile)
+            timezone = state["effective"]["timezone"]
+            saved_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"CMA assumptions saved. Saved at {saved_at}.",
+                message_kind="success",
+                state=state,
+            )
+        except (ValueError, TypeError) as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"CMA save failed: {exc}",
+                message_kind="error",
+                status_code=400,
+            )
+
+    @app.post(
+        "/ui/profile/{profile}/save/cma-correlations",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_cma_correlations(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        try:
+            save_cma_corr(normalized_profile, _cma_correlations_from_form(form))
+            state = build_profile_state(_settings(request), normalized_profile)
+            timezone = state["effective"]["timezone"]
+            saved_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"CMA correlations saved. Saved at {saved_at}.",
+                message_kind="success",
+                state=state,
+            )
+        except (ValueError, TypeError) as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"CMA correlations save failed: {exc}",
+                message_kind="error",
+                status_code=400,
+            )
+
+    @app.get("/api/v1/profile/{profile}/cma")
+    def api_get_cma(profile: str):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings_from_app(app), normalized_profile)
+        cma_analytics = state.get("analysis", {}).get("cma_analytics", {})
+        return {
+            "profile": normalized_profile,
+            "cma_analytics": cma_analytics,
+            "cma_entries": state.get("cma_entries", []),
+            "cma_correlations": state.get("cma_correlations", []),
+        }
+
+    @app.put("/api/v1/profile/{profile}/cma")
+    def api_update_cma(profile: str, payload: CMAUpdateRequest):
+        normalized_profile = _normalize_profile(profile)
+        try:
+            return {"rows": save_cma(normalized_profile, payload.rows)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
+    @app.put("/api/v1/profile/{profile}/cma/correlations")
+    def api_update_cma_correlations(profile: str, payload: CMACorrelationsUpdateRequest):
+        normalized_profile = _normalize_profile(profile)
+        try:
+            return {"rows": save_cma_corr(normalized_profile, payload.rows)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
     return app
 
 
@@ -642,6 +738,41 @@ def _benchmark_updates_from_form(form) -> dict[str, Any]:
         "components": str(form.get("benchmark_components", "")).strip(),
         "notes": str(form.get("benchmark_notes", "")).strip(),
     }
+
+
+def _cma_entries_from_form(form) -> list[dict[str, Any]]:
+    asset_classes = list(form.getlist("cma_asset_class"))
+    returns = list(form.getlist("cma_expected_return"))
+    vols = list(form.getlist("cma_expected_vol"))
+    notes_list = list(form.getlist("cma_notes"))
+    rows: list[dict[str, Any]] = []
+    for index, asset_class in enumerate(asset_classes):
+        ac = str(asset_class).strip().lower()
+        if not ac:
+            continue
+        rows.append({
+            "asset_class": ac,
+            "expected_return_pct": str(returns[index] if index < len(returns) else "0").strip(),
+            "expected_volatility_pct": str(vols[index] if index < len(vols) else "0").strip(),
+            "notes": str(notes_list[index] if index < len(notes_list) else "").strip(),
+        })
+    return rows
+
+
+def _cma_correlations_from_form(form) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for key, value in form.multi_items():
+        text_key = str(key)
+        if text_key.startswith("corr__"):
+            parts = text_key[len("corr__"):].split("__")
+            if len(parts) == 2:
+                ac_a, ac_b = parts[0], parts[1]
+                try:
+                    corr = float(str(value).strip())
+                except (ValueError, TypeError):
+                    corr = 0.0
+                rows.append({"asset_class_a": ac_a, "asset_class_b": ac_b, "correlation": corr})
+    return rows
 
 
 def _normalize_profile(profile: str) -> str:

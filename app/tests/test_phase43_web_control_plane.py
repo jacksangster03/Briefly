@@ -270,6 +270,15 @@ def test_api_followables_search_filters_by_query_and_kind(client):
     assert all(item["kind"] == "stock" for item in results)
 
 
+def test_state_includes_cma_analytics_key(client):
+    response = client.get("/api/v1/profile/default_user/state")
+    assert response.status_code == 200
+    data = response.json()
+    assert "cma_analytics" in data["analysis"]
+    assert "cma_entries" in data
+    assert "cma_correlations" in data
+
+
 def test_ui_htmx_save_sections_persists_and_returns_partial(client):
     response = client.post(
         "/ui/profile/default_user/save/sections",

@@ -29,6 +29,7 @@ from app.benchmark.service import (
     load_benchmark_config,
     save_benchmark_config,
 )
+from app.cma.service import load_cma_correlations, load_cma_entries, save_cma_entries, save_cma_correlations
 from app.risk.service import invalidate_risk_cache
 from app.db.models import PortfolioHolding as PortfolioHoldingRow
 from app.db.models import UserPreference as UserPreferenceRow
@@ -81,6 +82,8 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     benchmark_view = build_benchmark_summary(benchmark if benchmark.get("name") or benchmark.get("base_symbol") else None)
 
     risk_config = _load_risk_config(normalized_profile)
+    cma_entries = load_cma_entries(normalized_profile)
+    cma_correlations = load_cma_correlations(normalized_profile)
     overrides = get_preferences(normalized_profile)
     catalogs = _build_followables_catalog(settings=settings, profile=profile)
     metadata = _build_profile_metadata(profile=profile, profile_name=normalized_profile)
@@ -96,6 +99,8 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
         benchmark=benchmark_view,
         benchmark_config=benchmark,
         risk_config=risk_config,
+        cma_entries=cma_entries,
+        cma_correlations=cma_correlations,
     )
     holdings = _build_holdings_view(profile=profile, settings=settings)
     metadata["holdings_snapshot_summary"] = _build_holdings_snapshot_summary(profile, analysis)
@@ -108,6 +113,8 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     return {
         "profile": normalized_profile,
         "risk_config": risk_config,
+        "cma_entries": cma_entries,
+        "cma_correlations": cma_correlations,
         "effective": {
             "timezone": profile.timezone,
             "home_region": profile.home_region,
@@ -212,6 +219,16 @@ def save_policy(profile_name: str, payload: dict[str, Any]) -> dict[str, Any]:
 def save_allocation(profile_name: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized_profile = normalize_profile_name(profile_name)
     return save_allocation_targets(normalized_profile, rows)
+
+
+def save_cma(profile_name: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_profile = normalize_profile_name(profile_name)
+    return save_cma_entries(normalized_profile, rows)
+
+
+def save_cma_corr(profile_name: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_profile = normalize_profile_name(profile_name)
+    return save_cma_correlations(normalized_profile, rows)
 
 
 def save_benchmark(profile_name: str, payload: dict[str, Any]) -> dict[str, Any]:

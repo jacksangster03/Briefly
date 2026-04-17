@@ -136,6 +136,8 @@ def build_portfolio_analysis(
     benchmark: dict[str, str] | None = None,
     benchmark_config: dict[str, Any] | None = None,
     risk_config: dict[str, Any] | None = None,
+    cma_entries: list[dict[str, Any]] | None = None,
+    cma_correlations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compute presentation-ready analyzer metrics for the settings UI/API."""
     universe = load_sector_universe(settings)
@@ -239,12 +241,19 @@ def build_portfolio_analysis(
         settings=settings,
         risk_config=risk_config,
     )
+    cma_analytics = _build_cma_analytics(
+        profile=profile,
+        actual_allocation=actual_allocation or [],
+        target_allocation=allocation_targets or [],
+        policy=policy,
+    )
     policy_fit = _build_policy_fit(
         top_positions=top_positions,
         policy=policy or {},
         allocation_targets=allocation_targets or [],
         actual_allocation=actual_allocation or [],
         risk_analytics=risk_analytics,
+        cma_analytics=cma_analytics,
     )
     allocation_drift = _build_allocation_drift(
         allocation_targets=allocation_targets or [],
@@ -347,6 +356,7 @@ def build_portfolio_analysis(
             "description": "Choose a benchmark to anchor future relative analytics.",
         },
         "risk_analytics": risk_analytics,
+        "cma_analytics": cma_analytics,
         "health_checks": health_checks,
         "data_quality": data_quality,
         "charts": {
@@ -788,6 +798,7 @@ def _build_policy_fit(
     allocation_targets: list[dict[str, Any]],
     actual_allocation: list[dict[str, Any]],
     risk_analytics: dict[str, Any] | None = None,
+    cma_analytics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     breaches: list[dict[str, Any]] = []
 
@@ -899,6 +910,23 @@ def _build_policy_fit(
                     "message": (
                         f"Maximum drawdown is {port_dd:.1f}% versus a "
                         f"{max_dd_policy:.1f}% policy limit."
+                    ),
+                }
+            )
+
+    if cma_analytics and cma_analytics.get("available"):
+        policy_gap = cma_analytics.get("policy_gap", {})
+        target_return_pct = cma_analytics.get("policy", {}).get("target_return_pct")
+        if target_return_pct is not None and not policy_gap.get("return_meets_target", True):
+            actual_ret_display = cma_analytics.get("actual", {}).get("expected_return_display", "")
+            breaches.append(
+                {
+                    "code": "expected_return_below_target",
+                    "severity": "warning",
+                    "title": "Expected Return Below Policy Target",
+                    "message": (
+                        f"Portfolio expected return {actual_ret_display} is below the policy target of "
+                        f"{target_return_pct}%."
                     ),
                 }
             )
@@ -1387,6 +1415,23 @@ def _watchlist_role(symbol: str, profile: UserProfile) -> str:
     if symbol in set(profile.watchlist_monitor):
         return "monitor"
     return "none"
+
+
+def _build_cma_analytics(
+    *,
+    profile: "UserProfile",
+    actual_allocation: list[dict[str, Any]],
+    target_allocation: list[dict[str, Any]],
+    policy: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the cma_analytics block. Lazy-imports from app.cma.service."""
+    from app.cma.service import compute_cma_analytics
+    return compute_cma_analytics(
+        profile_name=profile.name,
+        actual_allocation=actual_allocation,
+        target_allocation=target_allocation,
+        policy=policy,
+    )
 
 
 def _rounded_metric(value: float | None, *, digits: int = 1) -> float | None:

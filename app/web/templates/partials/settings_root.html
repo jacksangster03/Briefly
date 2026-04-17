@@ -28,7 +28,10 @@
 {% set allocation_drift = analysis.allocation_drift %}
 {% set benchmark_summary = analysis.benchmark_summary %}
 {% set risk_analytics = analysis.risk_analytics %}
+{% set cma_analytics = analysis.cma_analytics %}
 {% set risk_config = state.risk_config %}
+{% set cma_entries = state.cma_entries %}
+{% set cma_correlations = state.cma_correlations %}
 {% set delivery_summary = metadata.delivery_summary %}
 {% set override_summaries = metadata.override_summaries %}
 {% set policy_summary = metadata.policy_summary %}
@@ -1001,6 +1004,7 @@
   <a href="#section-policy"    data-module-nav="section-policy">Policy</a>
   <a href="#section-allocation" data-module-nav="section-allocation">Allocation</a>
   <a href="#section-risk"      data-module-nav="section-risk">Risk</a>
+  <a href="#section-cma"       data-module-nav="section-cma">CMA</a>
   <a href="#section-benchmark" data-module-nav="section-benchmark">Benchmark</a>
   <a href="#section-holdings"  data-module-nav="section-holdings">Holdings</a>
   <a href="#section-coverage"  data-module-nav="section-coverage">Coverage</a>
@@ -1083,6 +1087,27 @@
           <dd>Active Return: {{ risk_analytics.active_return_display }}</dd>
         {% else %}
           <dd style="color: var(--muted);">Risk metrics not yet computed. Configure a benchmark and click Refresh.</dd>
+        {% endif %}
+      </dl>
+      <dl class="summary">
+        <dt>CMA Preview</dt>
+        {% if cma_analytics and cma_analytics.available %}
+          <dd>
+            Expected Return: <strong>{{ cma_analytics.actual.expected_return_display }}</strong>
+            vs SAA {{ cma_analytics.saa.expected_return_display }}
+          </dd>
+          <dd>
+            Expected Sharpe: <strong>{{ cma_analytics.actual.expected_sharpe_display }}</strong>
+            <span class="severity-badge {{ 'low' if cma_analytics.sharpe_label in ['excellent','good'] else 'medium' if cma_analytics.sharpe_label == 'moderate' else 'high' }}">{{ cma_analytics.sharpe_label }}</span>
+          </dd>
+          {% if cma_analytics.policy.target_return_pct is not none %}
+            <dd style="color:{{ 'var(--success)' if cma_analytics.policy_gap.return_meets_target else 'var(--error)' }};">
+              Policy return target: {{ 'met' if cma_analytics.policy_gap.return_meets_target else 'missed' }}
+              ({{ cma_analytics.policy_gap.return_gap_display }})
+            </dd>
+          {% endif %}
+        {% else %}
+          <dd style="color: var(--muted);">No CMA assumptions configured.</dd>
         {% endif %}
       </dl>
     </div>
@@ -1848,6 +1873,213 @@
     </div>
     {% endif %}
 
+    {% endif %}
+  </section>
+
+  <section class="card" id="section-cma" data-module-section="section-cma">
+    <h2>Capital Market Assumptions (CMA)</h2>
+    <p class="muted">Enter forward-looking expected return and volatility assumptions per asset class. These power expected portfolio analytics and policy gap checks.</p>
+
+    <form
+      hx-post="/ui/profile/{{ state.profile }}/save/cma"
+      hx-target="#settings-root"
+      hx-swap="outerHTML"
+      method="post"
+    >
+      <div style="overflow-x:auto;margin-bottom:12px;">
+        <table style="width:100%;border-collapse:collapse;font-size:0.87rem;">
+          <thead>
+            <tr style="color:var(--muted);text-align:left;border-bottom:1px solid var(--border);">
+              <th style="padding:6px 8px;">Asset Class</th>
+              <th style="padding:6px 8px;">Expected Return (%)</th>
+              <th style="padding:6px 8px;">Expected Vol (%)</th>
+              <th style="padding:6px 8px;">Notes</th>
+            </tr>
+          </thead>
+          <tbody id="cma-table-body">
+            {% if cma_entries %}
+              {% for entry in cma_entries %}
+              <tr>
+                <td style="padding:5px 8px;">
+                  <input type="text" name="cma_asset_class" value="{{ entry.asset_class }}" style="width:100%;min-width:120px;" required>
+                </td>
+                <td style="padding:5px 8px;">
+                  <input type="number" name="cma_expected_return" value="{{ entry.expected_return_pct }}" step="0.1" style="width:80px;">
+                </td>
+                <td style="padding:5px 8px;">
+                  <input type="number" name="cma_expected_vol" value="{{ entry.expected_volatility_pct }}" step="0.1" min="0" style="width:80px;">
+                </td>
+                <td style="padding:5px 8px;">
+                  <input type="text" name="cma_notes" value="{{ entry.notes or '' }}" placeholder="Optional" style="width:100%;">
+                </td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="equities" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="7.5" step="0.1" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="16.0" step="0.1" min="0" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
+              </tr>
+              <tr>
+                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="high_quality_bonds" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="3.5" step="0.1" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="5.0" step="0.1" min="0" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
+              </tr>
+              <tr>
+                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="credit" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="5.0" step="0.1" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="8.0" step="0.1" min="0" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
+              </tr>
+              <tr>
+                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="alternatives" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="6.0" step="0.1" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="10.0" step="0.1" min="0" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
+              </tr>
+              <tr>
+                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="real_assets" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="5.5" step="0.1" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="9.0" step="0.1" min="0" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
+              </tr>
+              <tr>
+                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="gold" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="4.0" step="0.1" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="18.0" step="0.1" min="0" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
+              </tr>
+              <tr>
+                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="cash_liquidity" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="4.5" step="0.1" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="0.5" step="0.1" min="0" style="width:80px;"></td>
+                <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <button type="submit" style="padding:7px 16px;border-radius:8px;border:1px solid var(--accent);background:rgba(245,159,0,0.1);color:var(--accent);font-weight:600;cursor:pointer;">Save Assumptions</button>
+      </div>
+    </form>
+
+    {% if cma_entries and cma_entries | length >= 2 %}
+    <form
+      hx-post="/ui/profile/{{ state.profile }}/save/cma-correlations"
+      hx-target="#settings-root"
+      hx-swap="outerHTML"
+      method="post"
+      style="margin-top:16px;"
+    >
+      <h3 style="margin:0 0 8px;font-size:0.95rem;">Correlation Matrix</h3>
+      <p class="muted">Off-diagonal cells set pairwise correlation (range: -1.0 to 1.0). Diagonal is always 1.00.</p>
+      {% set corr_map = {} %}
+      {% for c in cma_correlations %}
+        {% set _ = corr_map.update({c.asset_class_a ~ "__" ~ c.asset_class_b: c.correlation}) %}
+      {% endfor %}
+      <div style="overflow-x:auto;margin-bottom:12px;">
+        <table style="border-collapse:collapse;font-size:0.82rem;">
+          <thead>
+            <tr>
+              <th style="padding:4px 8px;color:var(--muted);"></th>
+              {% for entry in cma_entries %}
+                <th style="padding:4px 8px;color:var(--muted);white-space:nowrap;">{{ entry.asset_class | replace("_", " ") }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row_entry in cma_entries %}
+              <tr>
+                <td style="padding:4px 8px;color:var(--muted);white-space:nowrap;font-weight:600;">{{ row_entry.asset_class | replace("_", " ") }}</td>
+                {% for col_entry in cma_entries %}
+                  {% if row_entry.asset_class == col_entry.asset_class %}
+                    <td style="padding:4px 8px;text-align:center;color:var(--muted);">1.00</td>
+                  {% else %}
+                    {% set corr_key = row_entry.asset_class ~ "__" ~ col_entry.asset_class %}
+                    {% set corr_val = corr_map.get(corr_key, 0.0) %}
+                    <td style="padding:3px 5px;">
+                      <input
+                        type="number"
+                        name="corr__{{ row_entry.asset_class }}__{{ col_entry.asset_class }}"
+                        value="{{ corr_val }}"
+                        min="-1" max="1" step="0.01"
+                        style="width:62px;text-align:center;"
+                      >
+                    </td>
+                  {% endif %}
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <button type="submit" style="padding:7px 16px;border-radius:8px;border:1px solid var(--accent);background:rgba(245,159,0,0.1);color:var(--accent);font-weight:600;cursor:pointer;">Save Correlations</button>
+    </form>
+    {% else %}
+      <p class="muted" style="margin-top:12px;">Add at least two asset classes above to configure correlations.</p>
+    {% endif %}
+
+    {% if cma_analytics and cma_analytics.available %}
+    <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px;">
+      <h3 style="margin:0 0 10px;font-size:0.95rem;">Expected Portfolio Analytics</h3>
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">Expected Return (Actual)</div>
+          <div class="kpi-value">{{ cma_analytics.actual.expected_return_display }}</div>
+          <div class="kpi-subtext">SAA: {{ cma_analytics.saa.expected_return_display }}
+            {% if cma_analytics.policy.target_return_pct %} | Target: {{ cma_analytics.policy.target_return_pct }}%{% endif %}
+          </div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Expected Volatility (Actual)</div>
+          <div class="kpi-value">{{ cma_analytics.actual.expected_volatility_display }}</div>
+          <div class="kpi-subtext">SAA: {{ cma_analytics.saa.expected_volatility_display }}
+            {% if cma_analytics.policy.max_volatility_pct %} | Cap: {{ cma_analytics.policy.max_volatility_pct }}%{% endif %}
+          </div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Expected Sharpe (Actual)</div>
+          <div class="kpi-value">{{ cma_analytics.actual.expected_sharpe_display }}</div>
+          <div class="kpi-subtext">SAA: {{ cma_analytics.saa.expected_sharpe_display }}
+            <span class="severity-badge {{ 'low' if cma_analytics.sharpe_label in ['excellent','good'] else 'medium' if cma_analytics.sharpe_label == 'moderate' else 'high' }}">{{ cma_analytics.sharpe_label }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr;margin-top:12px;">
+        <div class="snapshot-card">
+          <h3>Policy Gap</h3>
+          <p>{{ cma_analytics.policy_gap.summary }}</p>
+          {% if cma_analytics.policy.target_return_pct is not none %}
+          <p style="font-size:0.83rem;margin-top:6px;">
+            Return gap: <strong style="color:{{ 'var(--success)' if cma_analytics.policy_gap.return_meets_target else 'var(--error)' }};">{{ cma_analytics.policy_gap.return_gap_display }}</strong>
+            &nbsp;|&nbsp;
+            Vol gap: <strong style="color:{{ 'var(--success)' if cma_analytics.policy_gap.vol_within_limit else 'var(--error)' }};">{{ cma_analytics.policy_gap.vol_gap_display }}</strong>
+          </p>
+          {% endif %}
+        </div>
+        <div class="snapshot-card">
+          <h3>SAA Gap</h3>
+          <p>{{ cma_analytics.saa_gap.summary }}</p>
+          <p style="font-size:0.83rem;margin-top:6px;">
+            Return: <strong>{{ cma_analytics.saa_gap.return_shortfall_display }}</strong>
+            &nbsp;|&nbsp;
+            Vol: <strong>{{ cma_analytics.saa_gap.vol_difference_display }}</strong>
+            &nbsp;|&nbsp;
+            Sharpe: <strong>{{ cma_analytics.saa_gap.sharpe_difference_display }}</strong>
+          </p>
+        </div>
+      </div>
+
+      <p class="tiny" style="margin-top:10px;">Coverage: actual {{ cma_analytics.actual.coverage_pct }}% | SAA {{ cma_analytics.saa.coverage_pct }}% | Risk-free rate: {{ cma_analytics.policy.risk_free_rate_pct }}%</p>
+    </div>
+    {% else %}
+      <div class="muted" style="margin-top:16px;padding:10px;border:1px solid var(--border);border-radius:8px;">
+        Save CMA assumptions above to see expected portfolio analytics.
+      </div>
     {% endif %}
   </section>
 

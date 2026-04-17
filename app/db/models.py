@@ -297,6 +297,37 @@ class CadenceMarker(Base):
     updated_at = Column(DateTime, default=_utcnow)
 
 
+class CMAEntry(Base):
+    """Per-asset-class capital market assumptions for a profile."""
+
+    __tablename__ = "cma_entries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    asset_class = Column(String(80), nullable=False)
+    expected_return_pct = Column(Float, nullable=False, default=0.0)
+    expected_volatility_pct = Column(Float, nullable=False, default=0.0)
+    notes = Column(String(255), nullable=True)
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+class CMACorrelation(Base):
+    """Pairwise correlation entries for CMA asset classes."""
+
+    __tablename__ = "cma_correlations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    asset_class_a = Column(String(80), nullable=False)
+    asset_class_b = Column(String(80), nullable=False)
+    correlation = Column(Float, nullable=False, default=0.0)
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
 class BreakingStoryState(Base):
     """State machine for breaking storyline lifecycle and follow-up control."""
 
