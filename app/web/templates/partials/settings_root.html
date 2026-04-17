@@ -7,6 +7,9 @@
 {% set metadata = state.metadata %}
 {% set validations = state.validations %}
 {% set analysis = state.analysis %}
+{% set policy = state.policy %}
+{% set allocation = state.allocation %}
+{% set benchmark = state.benchmark %}
 {% set kpis = analysis.kpis %}
 {% set overview = analysis.overview %}
 {% set holdings_totals = analysis.holdings_totals %}
@@ -21,8 +24,13 @@
 {% set health_checks = analysis.health_checks %}
 {% set data_quality = analysis.data_quality %}
 {% set confidence = analysis.confidence %}
+{% set policy_fit = analysis.policy_fit %}
+{% set allocation_drift = analysis.allocation_drift %}
+{% set benchmark_summary = analysis.benchmark_summary %}
 {% set delivery_summary = metadata.delivery_summary %}
 {% set override_summaries = metadata.override_summaries %}
+{% set policy_summary = metadata.policy_summary %}
+{% set allocation_summary = metadata.allocation_summary %}
 
 <style>
   .grid {
@@ -565,9 +573,11 @@
     letter-spacing: 0.01em;
   }
   input[type="search"],
+  input[type="text"],
   input[type="time"],
   input[type="number"],
   input[type="file"],
+  textarea,
   select {
     width: 100%;
     border: 1px solid var(--border);
@@ -578,10 +588,16 @@
     color: var(--ink);
   }
   input:focus-visible,
+  textarea:focus-visible,
   select:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
     border-color: var(--accent);
+  }
+  textarea {
+    min-height: 88px;
+    resize: vertical;
+    font-family: inherit;
   }
   .pill {
     display: inline-block;
@@ -980,6 +996,9 @@
 <nav class="section-nav" aria-label="Settings sections">
   <a href="#section-overview"  data-module-nav="section-overview">Overview</a>
   <a href="#section-analyzer"  data-module-nav="section-analyzer">Portfolio Analyzer</a>
+  <a href="#section-policy"    data-module-nav="section-policy">Policy</a>
+  <a href="#section-allocation" data-module-nav="section-allocation">Allocation</a>
+  <a href="#section-benchmark" data-module-nav="section-benchmark">Benchmark</a>
   <a href="#section-holdings"  data-module-nav="section-holdings">Holdings</a>
   <a href="#section-coverage"  data-module-nav="section-coverage">Coverage</a>
   <a href="#section-delivery"  data-module-nav="section-delivery">Delivery</a>
@@ -1013,7 +1032,7 @@
         </div>
       </div>
       <div class="snapshot-card">
-        <h3>Briefing Mode</h3>
+        <h3>Briefing Lens</h3>
         <p>{{ metadata.delivery_summary.headline }}</p>
         <div class="mini-chip-row">
           <span class="mini-chip">Quiet hours {{ metadata.delivery_summary.quiet_hours }}</span>
@@ -1029,14 +1048,19 @@
         <dt>Home Region</dt><dd>{{ overview.home_region_label }}</dd>
       </dl>
       <dl class="summary">
-        <dt>Holdings Weight Total</dt><dd>{{ holdings_totals.total_weight_display }}</dd>
-        <dt>Gap vs 100%</dt><dd>{{ holdings_totals.gap_to_100_display }}</dd>
-        <dt>Analyzer Warnings</dt><dd>{{ analysis.warnings | length }}</dd>
+        <dt>Policy Fit</dt><dd>{{ policy_fit.status | replace("_", " ") | title }}</dd>
+        <dt>Policy Breaches</dt><dd>{{ policy_fit.breaches | length }}</dd>
+        <dt>Policy Summary</dt><dd>{{ policy_summary.headline }}</dd>
       </dl>
       <dl class="summary">
-        <dt>Primary Watchlist</dt><dd>{{ overview.primary_watchlist_count }}</dd>
-        <dt>Total Watchlist Symbols</dt><dd>{{ overview.watchlist_total }}</dd>
-        <dt>Active Overrides</dt><dd>{{ overview.active_override_count }}</dd>
+        <dt>Portfolio Structure</dt><dd>{{ holdings_totals.total_weight_display }}</dd>
+        <dt>Gap vs 100%</dt><dd>{{ holdings_totals.gap_to_100_display }}</dd>
+        <dt>Top 5 Concentration</dt><dd>{{ kpis.top5_concentration_display }}</dd>
+      </dl>
+      <dl class="summary">
+        <dt>Allocation Drift</dt><dd>{{ allocation_summary.headline }}</dd>
+        <dt>Benchmark</dt><dd>{{ benchmark_summary.name }}</dd>
+        <dt>Editorial Lead</dt><dd>{{ kpis.top_region_label }}</dd>
       </dl>
       <dl class="summary">
         <dt>Next Morning Send</dt><dd>{{ analysis.timing.next_morning_send_local }}</dd>
@@ -1437,6 +1461,213 @@
     <div class="preview-box">
       <strong>Briefing Impact Preview:</strong> {{ analysis.briefing_impact_preview }}
     </div>
+  </section>
+
+  <section class="card" id="section-policy" data-module-section="section-policy">
+    <h2>Policy</h2>
+    <p class="muted">Define the investor mandate above the holdings book so Briefly can judge fit, drift, and policy breaches deterministically.</p>
+
+    <div class="executive-strip">
+      <strong>Policy Summary</strong>
+      <p>{{ policy_summary.detail }}</p>
+      <div class="hero-chip-row">
+        <span class="hero-chip">{{ policy_summary.headline }}</span>
+        <span class="hero-chip">Status: {{ policy_fit.status | replace("_", " ") }}</span>
+        <span class="hero-chip">{{ policy_fit.breaches | length }} breach(es)</span>
+      </div>
+    </div>
+
+    <div class="health-grid" style="margin-bottom:12px;">
+      <div class="health-card">
+        <div class="health-label">Policy Fit</div>
+        <span class="health-status {{ policy_fit.status }}">{{ policy_fit.status | replace("_", " ") }}</span>
+        <p class="health-message">{{ policy_fit.summary }}</p>
+      </div>
+      <div class="health-card">
+        <div class="health-label">Investor Profile</div>
+        <p class="health-message">
+          {{ policy.investor_type or "Not provided" }} · {{ policy.base_currency or "Not provided" }} ·
+          Horizon {{ policy.investment_horizon_years if policy.investment_horizon_years is not none else "Not provided" }}
+        </p>
+      </div>
+    </div>
+
+    {% if policy_fit.breaches %}
+      <ul class="issue-list" style="margin-bottom:12px;">
+        {% for item in policy_fit.breaches %}
+          <li class="issue-item">
+            <span class="severity-badge {{ item.severity }}">{{ item.severity }}</span>
+            <strong>{{ item.title }}</strong>
+            <p>{{ item.message }}</p>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    <form
+      hx-post="/ui/profile/{{ state.profile }}/save/policy"
+      hx-target="#settings-root"
+      hx-swap="outerHTML"
+      method="post"
+      class="tracked-form"
+    >
+      <div class="inline-grid">
+        <div class="field"><label for="policy_investor_type">Investor Type</label><input id="policy_investor_type" type="text" name="policy_investor_type" value="{{ policy.investor_type or '' }}"></div>
+        <div class="field"><label for="policy_base_currency">Base Currency</label><input id="policy_base_currency" type="text" name="policy_base_currency" value="{{ policy.base_currency or '' }}"></div>
+        <div class="field"><label for="policy_investment_horizon_years">Investment Horizon (years)</label><input id="policy_investment_horizon_years" type="number" step="0.5" name="policy_investment_horizon_years" value="{{ policy.investment_horizon_years if policy.investment_horizon_years is not none else '' }}"></div>
+        <div class="field"><label for="policy_target_return_percent">Target Return %</label><input id="policy_target_return_percent" type="number" step="0.1" name="policy_target_return_percent" value="{{ policy.target_return_percent if policy.target_return_percent is not none else '' }}"></div>
+        <div class="field"><label for="policy_max_volatility_percent">Max Volatility %</label><input id="policy_max_volatility_percent" type="number" step="0.1" name="policy_max_volatility_percent" value="{{ policy.max_volatility_percent if policy.max_volatility_percent is not none else '' }}"></div>
+        <div class="field"><label for="policy_max_drawdown_percent">Max Drawdown %</label><input id="policy_max_drawdown_percent" type="number" step="0.1" name="policy_max_drawdown_percent" value="{{ policy.max_drawdown_percent if policy.max_drawdown_percent is not none else '' }}"></div>
+        <div class="field"><label for="policy_liquidity_need_percent">Liquidity Need %</label><input id="policy_liquidity_need_percent" type="number" step="0.1" name="policy_liquidity_need_percent" value="{{ policy.liquidity_need_percent if policy.liquidity_need_percent is not none else '' }}"></div>
+        <div class="field"><label for="policy_single_name_limit_percent">Single-Name Limit %</label><input id="policy_single_name_limit_percent" type="number" step="0.1" name="policy_single_name_limit_percent" value="{{ policy.single_name_limit_percent if policy.single_name_limit_percent is not none else '' }}"></div>
+        <div class="field"><label for="policy_max_equity_percent">Max Equity %</label><input id="policy_max_equity_percent" type="number" step="0.1" name="policy_max_equity_percent" value="{{ policy.max_equity_percent if policy.max_equity_percent is not none else '' }}"></div>
+        <div class="field"><label for="policy_min_liquid_assets_percent">Min Liquid Assets %</label><input id="policy_min_liquid_assets_percent" type="number" step="0.1" name="policy_min_liquid_assets_percent" value="{{ policy.min_liquid_assets_percent if policy.min_liquid_assets_percent is not none else '' }}"></div>
+        <div class="field"><label for="policy_benchmark_policy">Benchmark Policy</label><input id="policy_benchmark_policy" type="text" name="policy_benchmark_policy" value="{{ policy.benchmark_policy or '' }}"></div>
+        <div class="field"><label for="policy_rebalancing_policy">Rebalancing Policy</label><input id="policy_rebalancing_policy" type="text" name="policy_rebalancing_policy" value="{{ policy.rebalancing_policy or '' }}"></div>
+        <div class="field"><label for="policy_governance_review_frequency">Governance Review Frequency</label><input id="policy_governance_review_frequency" type="text" name="policy_governance_review_frequency" value="{{ policy.governance_review_frequency or '' }}"></div>
+        <div class="field"><label for="policy_prohibited_assets">Prohibited Assets</label><input id="policy_prohibited_assets" type="text" name="policy_prohibited_assets" value="{{ policy.prohibited_assets | join(', ') }}"></div>
+      </div>
+      <div class="field">
+        <label for="policy_notes">Notes</label>
+        <textarea id="policy_notes" name="policy_notes">{{ policy.notes or '' }}</textarea>
+      </div>
+      <div class="actions">
+        <button type="submit">Save Policy</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card" id="section-allocation" data-module-section="section-allocation">
+    <h2>Allocation</h2>
+    <p class="muted">Set policy portfolio targets and allowed ranges, then compare the live holdings book to strategic asset-allocation bands.</p>
+
+    <div class="executive-strip">
+      <strong>Allocation Summary</strong>
+      <p>{{ allocation_drift.summary }}</p>
+      <div class="hero-chip-row">
+        <span class="hero-chip">{{ allocation_summary.headline }}</span>
+        <span class="hero-chip">{{ allocation.targets | length }} policy sleeve(s)</span>
+      </div>
+    </div>
+
+    <form
+      hx-post="/ui/profile/{{ state.profile }}/save/allocation"
+      hx-target="#settings-root"
+      hx-swap="outerHTML"
+      method="post"
+      class="tracked-form"
+    >
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Asset Class</th>
+              <th>Role</th>
+              <th>Target %</th>
+              <th>Min %</th>
+              <th>Max %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in allocation.targets %}
+              <tr>
+                <td>
+                  {{ row.label }}
+                  <input type="hidden" name="allocation_asset_class" value="{{ row.asset_class }}">
+                </td>
+                <td><input type="text" name="allocation_role" value="{{ row.role or '' }}"></td>
+                <td><input type="number" step="0.1" name="allocation_target" value="{{ row.target_weight_pct if row.target_weight_pct is not none else '' }}"></td>
+                <td><input type="number" step="0.1" name="allocation_min" value="{{ row.min_weight_pct if row.min_weight_pct is not none else '' }}"></td>
+                <td><input type="number" step="0.1" name="allocation_max" value="{{ row.max_weight_pct if row.max_weight_pct is not none else '' }}"></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button type="submit">Save Allocation</button>
+      </div>
+    </form>
+
+    <div class="table-wrap" style="margin-top:12px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Asset Class</th>
+            <th>Role</th>
+            <th>Target</th>
+            <th>Actual</th>
+            <th>Band</th>
+            <th>Drift</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in allocation_drift.rows %}
+            <tr>
+              <td>{{ row.label }}</td>
+              <td>{{ row.role }}</td>
+              <td>{{ row.target_display }}</td>
+              <td>{{ row.actual_display }}</td>
+              <td>{{ row.min_display }} → {{ row.max_display }}</td>
+              <td>{{ row.drift_display }}</td>
+              <td>
+                <span class="health-status {{ 'needs_attention' if row.status in ['above_band', 'below_band'] else 'strong' if row.status == 'within_band' else 'mixed' }}">
+                  {{ row.status | replace('_', ' ') }}
+                </span>
+                <div class="tiny">{{ row.rebalance_message }}</div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" id="section-benchmark" data-module-section="section-benchmark">
+    <h2>Benchmark</h2>
+    <p class="muted">Store the benchmark policy now so later active-risk and attribution analytics have a stable reference point.</p>
+
+    <div class="executive-strip">
+      <strong>Benchmark Summary</strong>
+      <p>{{ benchmark_summary.description }}</p>
+      <div class="hero-chip-row">
+        <span class="hero-chip">{{ benchmark_summary.name }}</span>
+        <span class="hero-chip">{{ benchmark_summary.type | replace("_", " ") }}</span>
+      </div>
+    </div>
+
+    <form
+      hx-post="/ui/profile/{{ state.profile }}/save/benchmark"
+      hx-target="#settings-root"
+      hx-swap="outerHTML"
+      method="post"
+      class="tracked-form"
+    >
+      <div class="inline-grid">
+        <div class="field">
+          <label for="benchmark_type">Benchmark Type</label>
+          <select id="benchmark_type" name="benchmark_type">
+            {% for item in benchmark.types %}
+              <option value="{{ item.key }}" {% if benchmark.benchmark_type == item.key %}selected{% endif %}>{{ item.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field"><label for="benchmark_name">Benchmark Name</label><input id="benchmark_name" type="text" name="benchmark_name" value="{{ benchmark.name or '' }}"></div>
+        <div class="field"><label for="benchmark_base_symbol">Base Symbol</label><input id="benchmark_base_symbol" type="text" name="benchmark_base_symbol" value="{{ benchmark.base_symbol or '' }}"></div>
+      </div>
+      <div class="field">
+        <label for="benchmark_components">Components (JSON or shorthand)</label>
+        <textarea id="benchmark_components" name="benchmark_components">{{ benchmark.components | tojson }}</textarea>
+      </div>
+      <div class="field">
+        <label for="benchmark_notes">Notes</label>
+        <textarea id="benchmark_notes" name="benchmark_notes">{{ benchmark.notes or '' }}</textarea>
+      </div>
+      <div class="actions">
+        <button type="submit">Save Benchmark</button>
+      </div>
+    </form>
   </section>
 
   <section class="card" id="section-holdings" data-module-section="section-holdings">

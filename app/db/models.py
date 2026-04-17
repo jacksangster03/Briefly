@@ -150,6 +150,73 @@ class UserPreference(Base):
     updated_at = Column(DateTime, default=_utcnow)
 
 
+class InvestorPolicy(Base):
+    """Profile-level investment policy statement inputs."""
+
+    __tablename__ = "investor_policy"
+    __table_args__ = (
+        UniqueConstraint("profile_name", name="uq_investor_policy_profile"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    investor_type = Column(String(80), nullable=True)
+    base_currency = Column(String(12), nullable=True)
+    investment_horizon_years = Column(Float, nullable=True)
+    liquidity_need_percent = Column(Float, nullable=True)
+    target_return_percent = Column(Float, nullable=True)
+    max_volatility_percent = Column(Float, nullable=True)
+    max_drawdown_percent = Column(Float, nullable=True)
+    single_name_limit_percent = Column(Float, nullable=True)
+    max_equity_percent = Column(Float, nullable=True)
+    min_liquid_assets_percent = Column(Float, nullable=True)
+    benchmark_policy = Column(Text, nullable=True)
+    rebalancing_policy = Column(Text, nullable=True)
+    prohibited_assets_json = Column(JSON, default=list)
+    governance_review_frequency = Column(String(80), nullable=True)
+    notes = Column(Text, nullable=True)
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+class StrategicAllocationTarget(Base):
+    """Profile-level strategic asset allocation targets and allowed ranges."""
+
+    __tablename__ = "strategic_allocation_targets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    asset_class = Column(String(80), nullable=False, index=True)
+    target_weight_pct = Column(Float, nullable=True)
+    min_weight_pct = Column(Float, nullable=True)
+    max_weight_pct = Column(Float, nullable=True)
+    role = Column(String(40), nullable=True)
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+class BenchmarkConfig(Base):
+    """Profile benchmark configuration used for future relative analytics."""
+
+    __tablename__ = "benchmark_config"
+    __table_args__ = (
+        UniqueConstraint("profile_name", name="uq_benchmark_config_profile"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    benchmark_type = Column(String(40), nullable=False, default="market_index")
+    name = Column(String(120), nullable=True)
+    base_symbol = Column(String(32), nullable=True)
+    components_json = Column(JSON, default=list)
+    notes = Column(Text, nullable=True)
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
 class CadenceMarker(Base):
     """Idempotency marker for once-per-day cadence sends."""
 

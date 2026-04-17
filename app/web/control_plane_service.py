@@ -14,6 +14,21 @@ from app.analytics.portfolio_analyzer import (
     build_portfolio_analysis as build_analyzer_payload,
     display_label as analyzer_display_label,
 )
+from app.allocation.service import (
+    allocation_catalog,
+    build_actual_allocation,
+    default_allocation_targets,
+    load_allocation_targets,
+    merge_targets_with_catalog,
+    save_allocation_targets,
+)
+from app.benchmark.service import (
+    benchmark_summary as build_benchmark_summary,
+    benchmark_types,
+    default_benchmark_config,
+    load_benchmark_config,
+    save_benchmark_config,
+)
 from app.db.models import PortfolioHolding as PortfolioHoldingRow
 from app.db.models import UserPreference as UserPreferenceRow
 from app.db.session import get_session
@@ -28,6 +43,11 @@ from app.personalization.user_profile import (
     UserProfile,
     _load_portfolio_context,
     _load_profile_overrides,
+)
+from app.policy.service import (
+    default_investor_policy,
+    load_investor_policy,
+    save_investor_policy,
 )
 from app.portfolio.importer import load_holdings_file
 from app.portfolio.service import load_active_holdings, replace_holdings_snapshot
@@ -48,6 +68,16 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     """Build effective state for UI/API views (effective + overrides + holdings + catalogs)."""
     normalized_profile = normalize_profile_name(profile_name)
     profile = _load_profile_defaults(settings, normalized_profile)
+    policy = load_investor_policy(normalized_profile) or default_investor_policy()
+    allocation_targets_raw = load_allocation_targets(normalized_profile)
+    allocation_targets = (
+        merge_targets_with_catalog(allocation_targets_raw)
+        if allocation_targets_raw
+        else default_allocation_targets()
+    )
+    actual_allocation = build_actual_allocation(profile)
+    benchmark = load_benchmark_config(normalized_profile) or default_benchmark_config()
+    benchmark_view = build_benchmark_summary(benchmark if benchmark.get("name") or benchmark.get("base_symbol") else None)
 
     overrides = get_preferences(normalized_profile)
     catalogs = _build_followables_catalog(settings=settings, profile=profile)
@@ -58,11 +88,18 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
         settings=settings,
         metadata=metadata,
         validations=validations,
+        policy=policy,
+        allocation_targets=allocation_targets,
+        actual_allocation=actual_allocation,
+        benchmark=benchmark_view,
     )
     holdings = _build_holdings_view(profile=profile, settings=settings)
     metadata["holdings_snapshot_summary"] = _build_holdings_snapshot_summary(profile, analysis)
     metadata["override_summaries"] = _build_override_summaries(overrides)
     metadata["delivery_summary"] = _build_delivery_summary(profile)
+    metadata["policy_summary"] = _build_policy_summary(policy)
+    metadata["allocation_summary"] = _build_allocation_summary(analysis.get("allocation_drift", {}))
+    metadata["benchmark_summary"] = benchmark_view
 
     return {
         "profile": normalized_profile,
@@ -109,6 +146,16 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
             },
         },
         "overrides": overrides,
+        "policy": policy,
+        "allocation": {
+            "targets": allocation_targets,
+            "actual": actual_allocation,
+            "catalog": allocation_catalog(),
+        },
+        "benchmark": {
+            **benchmark,
+            "types": benchmark_types(),
+        },
         "holdings": holdings,
         "catalogs": catalogs,
         "metadata": metadata,
@@ -150,6 +197,21 @@ def reset_preferences(profile_name: str) -> dict[str, Any]:
         "removed_count": removed_count,
         "overrides": get_preferences(normalized_profile),
     }
+
+
+def save_policy(profile_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    normalized_profile = normalize_profile_name(profile_name)
+    return save_investor_policy(normalized_profile, payload)
+
+
+def save_allocation(profile_name: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_profile = normalize_profile_name(profile_name)
+    return save_allocation_targets(normalized_profile, rows)
+
+
+def save_benchmark(profile_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    normalized_profile = normalize_profile_name(profile_name)
+    return save_benchmark_config(normalized_profile, payload)
 
 
 def import_holdings_from_upload(
@@ -601,3 +663,57 @@ def _build_delivery_summary(profile: UserProfile) -> dict[str, str]:
             else "Morning email uses the selected primary formatter."
         ),
     }
+
+
+def _build_policy_summary(policy: dict[str, Any]) -> dict[str, str]:
+    investor_type = _display_or_not_provided(_display_label(str(policy.get("investor_type") or "")))
+    base_currency = _display_or_not_provided(str(policy.get("base_currency") or "").upper())
+    horizon = policy.get("investment_horizon_years")
+    target_return = policy.get("target_return_percent")
+    max_vol = policy.get("max_volatility_percent")
+    return {
+        "headline": f"{investor_type} policy in {base_currency}",
+        "detail": (
+            f"Horizon {horizon:g}y, target return {_format_numeric_percent(target_return)}, "
+            f"max volatility {_format_numeric_percent(max_vol)}."
+            if horizon is not None or target_return is not None or max_vol is not None
+            else "No IPS inputs saved yet. Add policy targets to anchor the portfolio to an investor mandate."
+        ),
+    }
+
+
+def _build_allocation_summary(allocation_drift: dict[str, Any]) -> dict[str, str]:
+    rows = allocation_drift.get("rows", []) if isinstance(allocation_drift, dict) else []
+    breaches = [
+        row for row in rows
+        if row.get("status") in {"above_band", "below_band"}
+    ]
+    if not rows:
+        return {
+            "headline": "Allocation targets not configured",
+            "detail": "Add strategic target weights and allowed bands to compare the live book with policy allocation.",
+        }
+    if breaches:
+        lead = breaches[0]
+        return {
+            "headline": f"{len(breaches)} allocation band breach(s)",
+            "detail": f"{lead.get('label', 'Portfolio')} is {lead.get('status', 'off target').replace('_', ' ')} against policy bands.",
+        }
+    return {
+        "headline": "Allocation is within configured bands",
+        "detail": allocation_drift.get("summary") or "Actual allocation is currently inside the configured policy ranges.",
+    }
+
+
+def _format_numeric_percent(value: Any) -> str:
+    try:
+        if value in ("", None):
+            return "Not provided"
+        return f"{float(value):.1f}%"
+    except (TypeError, ValueError):
+        return "Not provided"
+
+
+def _display_or_not_provided(value: str) -> str:
+    text = str(value or "").strip()
+    return text or "Not provided"

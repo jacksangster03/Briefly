@@ -130,6 +130,10 @@ def build_portfolio_analysis(
     settings: Settings,
     metadata: dict[str, Any],
     validations: list[dict[str, str]],
+    policy: dict[str, Any] | None = None,
+    allocation_targets: list[dict[str, Any]] | None = None,
+    actual_allocation: list[dict[str, Any]] | None = None,
+    benchmark: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Compute presentation-ready analyzer metrics for the settings UI/API."""
     universe = load_sector_universe(settings)
@@ -216,6 +220,16 @@ def build_portfolio_analysis(
     scenario_stress = _build_scenario_stress(
         aggregated_positions=aggregated_positions,
         sector_exposure=sector_exposure["rows"],
+    )
+    policy_fit = _build_policy_fit(
+        top_positions=top_positions,
+        policy=policy or {},
+        allocation_targets=allocation_targets or [],
+        actual_allocation=actual_allocation or [],
+    )
+    allocation_drift = _build_allocation_drift(
+        allocation_targets=allocation_targets or [],
+        actual_allocation=actual_allocation or [],
     )
 
     delivery_enabled = {
@@ -306,6 +320,13 @@ def build_portfolio_analysis(
         "alignment_findings": alignment_findings,
         "briefing_influence": briefing_influence,
         "scenario_stress": scenario_stress,
+        "policy_fit": policy_fit,
+        "allocation_drift": allocation_drift,
+        "benchmark_summary": benchmark or {
+            "type": "unconfigured",
+            "name": "No benchmark configured",
+            "description": "Choose a benchmark to anchor future relative analytics.",
+        },
         "health_checks": health_checks,
         "data_quality": data_quality,
         "charts": {
@@ -718,6 +739,198 @@ def _build_health_checks(
     return checks
 
 
+def _build_policy_fit(
+    *,
+    top_positions: list[dict[str, Any]],
+    policy: dict[str, Any],
+    allocation_targets: list[dict[str, Any]],
+    actual_allocation: list[dict[str, Any]],
+) -> dict[str, Any]:
+    breaches: list[dict[str, Any]] = []
+
+    single_name_limit = _float_or_none(policy.get("single_name_limit_percent"))
+    if single_name_limit is not None and top_positions:
+        largest = top_positions[0]
+        largest_weight = _float_or_none(largest.get("weight_pct"))
+        if largest_weight is not None and largest_weight > single_name_limit:
+            breaches.append(
+                {
+                    "code": "single_name_limit_breach",
+                    "severity": "high",
+                    "title": "Single-name limit exceeded",
+                    "message": (
+                        f"{largest['symbol']} is {_format_percent(largest_weight, digits=2)} versus a "
+                        f"{_format_percent(single_name_limit, digits=1)} policy cap."
+                    ),
+                }
+            )
+
+    actual_by_class = {
+        str(row.get("asset_class") or ""): _float_or_none(row.get("actual_pct")) or 0.0
+        for row in actual_allocation
+    }
+    max_equity = _float_or_none(policy.get("max_equity_percent"))
+    actual_equity = actual_by_class.get("equities", 0.0)
+    if max_equity is not None and actual_equity > max_equity:
+        breaches.append(
+            {
+                "code": "equity_max_breach",
+                "severity": "high",
+                "title": "Equity allocation above policy max",
+                "message": (
+                    f"Equities are {_format_percent(actual_equity, digits=1)} versus a "
+                    f"{_format_percent(max_equity, digits=1)} maximum."
+                ),
+            }
+        )
+
+    min_liquid = _float_or_none(policy.get("min_liquid_assets_percent"))
+    actual_liquid = actual_by_class.get("cash_liquidity", 0.0)
+    if min_liquid is not None and actual_liquid < min_liquid:
+        breaches.append(
+            {
+                "code": "liquidity_min_breach",
+                "severity": "medium",
+                "title": "Liquidity sleeve below minimum",
+                "message": (
+                    f"Cash / liquidity is {_format_percent(actual_liquid, digits=1)} versus a "
+                    f"{_format_percent(min_liquid, digits=1)} minimum."
+                ),
+            }
+        )
+
+    for target in allocation_targets:
+        asset_class = str(target.get("asset_class") or "")
+        label = str(target.get("label") or display_label(asset_class))
+        actual_pct = actual_by_class.get(asset_class, 0.0)
+        min_pct = _float_or_none(target.get("min_weight_pct"))
+        max_pct = _float_or_none(target.get("max_weight_pct"))
+        if min_pct is not None and actual_pct < min_pct:
+            breaches.append(
+                {
+                    "code": "allocation_band_breach",
+                    "severity": "medium",
+                    "title": f"{label} below policy band",
+                    "message": (
+                        f"{label} is {_format_percent(actual_pct, digits=1)} versus a "
+                        f"{_format_percent(min_pct, digits=1)} minimum."
+                    ),
+                }
+            )
+        elif max_pct is not None and actual_pct > max_pct:
+            breaches.append(
+                {
+                    "code": "allocation_band_breach",
+                    "severity": "medium",
+                    "title": f"{label} above policy band",
+                    "message": (
+                        f"{label} is {_format_percent(actual_pct, digits=1)} versus a "
+                        f"{_format_percent(max_pct, digits=1)} maximum."
+                    ),
+                }
+            )
+
+    severity_rank = {"high": 0, "medium": 1, "low": 2}
+    breaches.sort(key=lambda item: (severity_rank.get(item["severity"], 9), item["title"]))
+    trimmed = breaches[:6]
+    if not trimmed:
+        return {
+            "status": "strong",
+            "summary": "Current holdings sit inside the configured policy constraints.",
+            "breaches": [],
+        }
+    status = "needs_attention" if any(item["severity"] == "high" for item in trimmed) else "mixed"
+    return {
+        "status": status,
+        "summary": (
+            f"{len(trimmed)} policy breach(es) need attention."
+            if status == "needs_attention"
+            else f"{len(trimmed)} policy drift item(s) are outside preferred ranges."
+        ),
+        "breaches": trimmed,
+    }
+
+
+def _build_allocation_drift(
+    *,
+    allocation_targets: list[dict[str, Any]],
+    actual_allocation: list[dict[str, Any]],
+) -> dict[str, Any]:
+    actual_by_class = {
+        str(row.get("asset_class") or ""): row for row in actual_allocation
+    }
+    rows: list[dict[str, Any]] = []
+    breach_count = 0
+
+    for target in allocation_targets:
+        asset_class = str(target.get("asset_class") or "")
+        actual_row = actual_by_class.get(asset_class, {})
+        target_pct = _float_or_none(target.get("target_weight_pct"))
+        actual_pct = _float_or_none(actual_row.get("actual_pct"))
+        min_pct = _float_or_none(target.get("min_weight_pct"))
+        max_pct = _float_or_none(target.get("max_weight_pct"))
+        drift_pct = None
+        if target_pct is not None and actual_pct is not None:
+            drift_pct = round(actual_pct - target_pct, 2)
+
+        status = "unconfigured"
+        if actual_pct is not None:
+            status = "within_band"
+            if min_pct is not None and actual_pct < min_pct:
+                status = "below_band"
+            elif max_pct is not None and actual_pct > max_pct:
+                status = "above_band"
+        if status in {"below_band", "above_band"}:
+            breach_count += 1
+
+        if status == "below_band":
+            rebalance_message = f"Below band by {_format_percent((min_pct or 0.0) - (actual_pct or 0.0), digits=1)}."
+        elif status == "above_band":
+            rebalance_message = f"Above band by {_format_percent((actual_pct or 0.0) - (max_pct or 0.0), digits=1)}."
+        elif target_pct is not None and actual_pct is not None and abs(actual_pct - target_pct) >= 1.0:
+            rebalance_message = f"Drift versus target is {_format_signed_percent(actual_pct - target_pct, digits=1)}."
+        else:
+            rebalance_message = "Within configured band."
+
+        rows.append(
+            {
+                "asset_class": asset_class,
+                "label": target.get("label") or display_label(asset_class),
+                "role": target.get("role") or "Not provided",
+                "target_pct": _rounded_metric(target_pct),
+                "actual_pct": _rounded_metric(actual_pct),
+                "min_pct": _rounded_metric(min_pct),
+                "max_pct": _rounded_metric(max_pct),
+                "drift_pct": _rounded_metric(drift_pct),
+                "target_display": _format_percent(target_pct),
+                "actual_display": _format_percent(actual_pct),
+                "min_display": _format_percent(min_pct),
+                "max_display": _format_percent(max_pct),
+                "drift_display": _format_signed_percent(drift_pct, digits=1) if drift_pct is not None else "Not provided",
+                "status": status,
+                "rebalance_message": rebalance_message,
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            0 if row["status"] in {"above_band", "below_band"} else 1,
+            -(abs(row["drift_pct"] or 0.0)),
+            row["label"],
+        )
+    )
+    if not rows:
+        return {
+            "rows": [],
+            "summary": "Allocation targets are not configured yet.",
+        }
+    if breach_count:
+        summary = f"{breach_count} asset-class allocation band(s) currently sit outside policy ranges."
+    else:
+        summary = "Current allocation is within the configured strategic bands."
+    return {"rows": rows, "summary": summary}
+
+
 def _build_data_quality(
     *,
     profile: UserProfile,
@@ -1107,6 +1320,15 @@ def _rounded_metric(value: float | None, *, digits: int = 1) -> float | None:
     if value is None:
         return None
     return round(float(value), digits)
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value in ("", None):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _format_percent(value: float | None, *, digits: int = 1) -> str:

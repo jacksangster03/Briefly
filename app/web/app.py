@@ -21,7 +21,10 @@ from app.web.control_plane_service import (
     import_holdings_from_upload,
     remove_preference,
     reset_preferences,
+    save_allocation,
+    save_benchmark,
     save_holdings_from_form,
+    save_policy,
     search_followables,
 )
 
@@ -35,6 +38,18 @@ class PreferenceUpdateRequest(BaseModel):
     """Bulk preference payload for API updates."""
 
     updates: dict[str, Any] = Field(default_factory=dict)
+
+
+class PolicyUpdateRequest(BaseModel):
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AllocationUpdateRequest(BaseModel):
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class BenchmarkUpdateRequest(BaseModel):
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 def create_web_app(settings: Settings | None = None) -> FastAPI:
@@ -116,6 +131,93 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             updates=updates,
             success_message="Morning section visibility saved to DB overrides.",
         )
+
+    @app.post(
+        "/ui/profile/{profile}/save/policy",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_policy(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        try:
+            save_policy(normalized_profile, _policy_updates_from_form(form))
+            state = build_profile_state(_settings(request), normalized_profile)
+            timezone = state["effective"]["timezone"]
+            saved_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Investor policy saved. Saved at {saved_at}.",
+                message_kind="success",
+                state=state,
+            )
+        except ValueError as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Policy save failed: {exc}",
+                message_kind="error",
+                status_code=400,
+            )
+
+    @app.post(
+        "/ui/profile/{profile}/save/allocation",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_allocation(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        try:
+            save_allocation(normalized_profile, _allocation_updates_from_form(form))
+            state = build_profile_state(_settings(request), normalized_profile)
+            timezone = state["effective"]["timezone"]
+            saved_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Strategic allocation targets saved. Saved at {saved_at}.",
+                message_kind="success",
+                state=state,
+            )
+        except ValueError as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Allocation save failed: {exc}",
+                message_kind="error",
+                status_code=400,
+            )
+
+    @app.post(
+        "/ui/profile/{profile}/save/benchmark",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_benchmark(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        try:
+            save_benchmark(normalized_profile, _benchmark_updates_from_form(form))
+            state = build_profile_state(_settings(request), normalized_profile)
+            timezone = state["effective"]["timezone"]
+            saved_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Benchmark configuration saved. Saved at {saved_at}.",
+                message_kind="success",
+                state=state,
+            )
+        except ValueError as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Benchmark save failed: {exc}",
+                message_kind="error",
+                status_code=400,
+            )
 
     @app.post(
         "/ui/profile/{profile}/holdings/save",
@@ -242,6 +344,30 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 filename=file.filename or "holdings.yaml",
                 content=content,
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
+    @app.put("/api/v1/profile/{profile}/policy")
+    def api_update_policy(profile: str, payload: PolicyUpdateRequest):
+        normalized_profile = _normalize_profile(profile)
+        try:
+            return save_policy(normalized_profile, payload.payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
+    @app.put("/api/v1/profile/{profile}/allocation")
+    def api_update_allocation(profile: str, payload: AllocationUpdateRequest):
+        normalized_profile = _normalize_profile(profile)
+        try:
+            return {"rows": save_allocation(normalized_profile, payload.rows)}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
+    @app.put("/api/v1/profile/{profile}/benchmark")
+    def api_update_benchmark(profile: str, payload: BenchmarkUpdateRequest):
+        normalized_profile = _normalize_profile(profile)
+        try:
+            return save_benchmark(normalized_profile, payload.payload)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
@@ -386,6 +512,64 @@ def _section_updates_from_form(form) -> dict[str, Any]:
         key = "sections.global_news" if section == "global_news" else f"sections.morning.{section}"
         updates[key] = f"section_{section}" in form
     return updates
+
+
+def _policy_updates_from_form(form) -> dict[str, Any]:
+    prohibited_assets = [
+        item.strip()
+        for item in str(form.get("policy_prohibited_assets", "")).split(",")
+        if item.strip()
+    ]
+    return {
+        "investor_type": str(form.get("policy_investor_type", "")).strip(),
+        "base_currency": str(form.get("policy_base_currency", "")).strip().upper(),
+        "investment_horizon_years": str(form.get("policy_investment_horizon_years", "")).strip(),
+        "liquidity_need_percent": str(form.get("policy_liquidity_need_percent", "")).strip(),
+        "target_return_percent": str(form.get("policy_target_return_percent", "")).strip(),
+        "max_volatility_percent": str(form.get("policy_max_volatility_percent", "")).strip(),
+        "max_drawdown_percent": str(form.get("policy_max_drawdown_percent", "")).strip(),
+        "single_name_limit_percent": str(form.get("policy_single_name_limit_percent", "")).strip(),
+        "max_equity_percent": str(form.get("policy_max_equity_percent", "")).strip(),
+        "min_liquid_assets_percent": str(form.get("policy_min_liquid_assets_percent", "")).strip(),
+        "benchmark_policy": str(form.get("policy_benchmark_policy", "")).strip(),
+        "rebalancing_policy": str(form.get("policy_rebalancing_policy", "")).strip(),
+        "prohibited_assets": prohibited_assets,
+        "governance_review_frequency": str(form.get("policy_governance_review_frequency", "")).strip(),
+        "notes": str(form.get("policy_notes", "")).strip(),
+    }
+
+
+def _allocation_updates_from_form(form) -> list[dict[str, Any]]:
+    asset_classes = list(form.getlist("allocation_asset_class"))
+    roles = list(form.getlist("allocation_role"))
+    targets = list(form.getlist("allocation_target"))
+    minimums = list(form.getlist("allocation_min"))
+    maximums = list(form.getlist("allocation_max"))
+    rows: list[dict[str, Any]] = []
+    for index, asset_class in enumerate(asset_classes):
+        asset_text = str(asset_class).strip().lower()
+        if not asset_text:
+            continue
+        rows.append(
+            {
+                "asset_class": asset_text,
+                "role": str(roles[index] if index < len(roles) else "").strip().lower(),
+                "target_weight_pct": str(targets[index] if index < len(targets) else "").strip(),
+                "min_weight_pct": str(minimums[index] if index < len(minimums) else "").strip(),
+                "max_weight_pct": str(maximums[index] if index < len(maximums) else "").strip(),
+            }
+        )
+    return rows
+
+
+def _benchmark_updates_from_form(form) -> dict[str, Any]:
+    return {
+        "benchmark_type": str(form.get("benchmark_type", "market_index")).strip(),
+        "name": str(form.get("benchmark_name", "")).strip(),
+        "base_symbol": str(form.get("benchmark_base_symbol", "")).strip().upper(),
+        "components": str(form.get("benchmark_components", "")).strip(),
+        "notes": str(form.get("benchmark_notes", "")).strip(),
+    }
 
 
 def _normalize_profile(profile: str) -> str:

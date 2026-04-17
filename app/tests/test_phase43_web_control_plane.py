@@ -95,6 +95,9 @@ def test_ui_settings_page_renders(client):
     assert response.status_code == 200
     assert "Briefly" in response.text
     assert "Portfolio Analyzer" in response.text
+    assert "Policy" in response.text
+    assert "Allocation" in response.text
+    assert "Benchmark" in response.text
     assert "Saved values are persisted in SQLite as" in response.text
     assert "Executive Summary" in response.text
     assert "Coverage Alignment" in response.text
@@ -102,6 +105,10 @@ def test_ui_settings_page_renders(client):
     assert "Scenario Stress Tests" in response.text
     assert "Briefing Summary" in response.text
     assert "History & Advanced" in response.text
+    assert "Policy Summary" in response.text
+    assert "Save Policy" in response.text
+    assert "Save Allocation" in response.text
+    assert "Save Benchmark" in response.text
     assert "Equal Weight" in response.text
     assert "Scale Core Only" in response.text
     assert "Holdings Data Quality" in response.text
@@ -152,6 +159,9 @@ def test_api_put_preferences_and_state_roundtrip(client):
     assert "delivery_summary" in state["metadata"]
     assert "validations" in state
     assert "analysis" in state
+    assert "policy" in state
+    assert "allocation" in state
+    assert "benchmark" in state
     assert "kpis" in state["analysis"]
     assert "chart_max" in state["analysis"]
     assert "holdings_totals" in state["analysis"]
@@ -166,6 +176,9 @@ def test_api_put_preferences_and_state_roundtrip(client):
     assert "alignment_findings" in state["analysis"]
     assert "briefing_influence" in state["analysis"]
     assert "scenario_stress" in state["analysis"]
+    assert "policy_fit" in state["analysis"]
+    assert "allocation_drift" in state["analysis"]
+    assert "benchmark_summary" in state["analysis"]
     assert "health_checks" in state["analysis"]
     assert "data_quality" in state["analysis"]
 
@@ -514,6 +527,153 @@ def test_analysis_confidence_and_override_summary_for_clean_portfolio(client):
     state = client.get("/api/v1/profile/default_user/state").json()
     assert state["analysis"]["confidence"]["status"] == "high"
     assert state["metadata"]["delivery_summary"]["headline"].startswith("Morning:")
+
+
+def test_api_policy_allocation_and_benchmark_roundtrip(client):
+    policy_response = client.put(
+        "/api/v1/profile/default_user/policy",
+        json={
+            "payload": {
+                "investor_type": "family_office",
+                "base_currency": "EUR",
+                "investment_horizon_years": 10,
+                "target_return_percent": 6.0,
+                "max_volatility_percent": 12.0,
+                "max_drawdown_percent": 18.0,
+                "single_name_limit_percent": 10.0,
+                "max_equity_percent": 70.0,
+                "min_liquid_assets_percent": 10.0,
+                "benchmark_policy": "60/30/10 policy mix",
+                "rebalancing_policy": "quarterly or 5pp drift",
+                "governance_review_frequency": "quarterly",
+            }
+        },
+    )
+    assert policy_response.status_code == 200
+    assert policy_response.json()["investor_type"] == "family_office"
+
+    allocation_response = client.put(
+        "/api/v1/profile/default_user/allocation",
+        json={
+            "rows": [
+                {"asset_class": "equities", "role": "growth", "target_weight_pct": 45, "min_weight_pct": 40, "max_weight_pct": 55},
+                {"asset_class": "cash_liquidity", "role": "liquidity", "target_weight_pct": 15, "min_weight_pct": 10, "max_weight_pct": 20},
+            ]
+        },
+    )
+    assert allocation_response.status_code == 200
+    assert len(allocation_response.json()["rows"]) >= 2
+
+    benchmark_response = client.put(
+        "/api/v1/profile/default_user/benchmark",
+        json={"payload": {"benchmark_type": "market_index", "name": "ACWI", "base_symbol": "ACWI"}},
+    )
+    assert benchmark_response.status_code == 200
+    assert benchmark_response.json()["base_symbol"] == "ACWI"
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert state["policy"]["investor_type"] == "family_office"
+    assert state["benchmark"]["base_symbol"] == "ACWI"
+    assert state["metadata"]["policy_summary"]["headline"].startswith("Family Office")
+    assert any(row["asset_class"] == "cash_liquidity" for row in state["allocation"]["targets"])
+
+
+def test_policy_fit_flags_single_name_equity_and_liquidity_breaches(client):
+    import_response = client.post(
+        "/api/v1/profile/default_user/holdings/import",
+        files={
+            "file": (
+                "holdings.yaml",
+                io.BytesIO(
+                    "\n".join(
+                        [
+                            "profile: default_user",
+                            "holdings:",
+                            "  - symbol: NVDA",
+                            "    weight_pct: 12.0",
+                            "  - symbol: MSFT",
+                            "    weight_pct: 10.0",
+                            "  - symbol: JPM",
+                            "    weight_pct: 10.0",
+                        ]
+                    ).encode("utf-8")
+                ),
+                "application/x-yaml",
+            )
+        },
+    )
+    assert import_response.status_code == 200
+
+    client.put(
+        "/api/v1/profile/default_user/policy",
+        json={
+            "payload": {
+                "single_name_limit_percent": 10.0,
+                "max_equity_percent": 25.0,
+                "min_liquid_assets_percent": 80.0,
+            }
+        },
+    )
+    client.put(
+        "/api/v1/profile/default_user/allocation",
+        json={
+            "rows": [
+                {"asset_class": "equities", "role": "growth", "target_weight_pct": 20, "min_weight_pct": 10, "max_weight_pct": 25},
+                {"asset_class": "cash_liquidity", "role": "liquidity", "target_weight_pct": 80, "min_weight_pct": 80, "max_weight_pct": 90},
+            ]
+        },
+    )
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    breach_codes = {item["code"] for item in state["analysis"]["policy_fit"]["breaches"]}
+    assert "single_name_limit_breach" in breach_codes
+    assert "equity_max_breach" in breach_codes
+    assert "liquidity_min_breach" in breach_codes
+    assert "allocation_band_breach" in breach_codes
+    assert state["analysis"]["policy_fit"]["status"] == "needs_attention"
+    assert any(row["status"] in {"above_band", "below_band"} for row in state["analysis"]["allocation_drift"]["rows"])
+
+
+def test_ui_htmx_save_policy_allocation_and_benchmark_render_success(client):
+    policy_response = client.post(
+        "/ui/profile/default_user/save/policy",
+        data={
+            "policy_investor_type": "family_office",
+            "policy_base_currency": "EUR",
+            "policy_investment_horizon_years": "10",
+            "policy_target_return_percent": "6.0",
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert policy_response.status_code == 200
+    assert "Investor policy saved." in policy_response.text
+
+    allocation_response = client.post(
+        "/ui/profile/default_user/save/allocation",
+        data={
+            "allocation_asset_class": ["equities", "cash_liquidity"],
+            "allocation_role": ["growth", "liquidity"],
+            "allocation_target": ["45", "15"],
+            "allocation_min": ["40", "10"],
+            "allocation_max": ["55", "20"],
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert allocation_response.status_code == 200
+    assert "Strategic allocation targets saved." in allocation_response.text
+
+    benchmark_response = client.post(
+        "/ui/profile/default_user/save/benchmark",
+        data={
+            "benchmark_type": "market_index",
+            "benchmark_name": "ACWI",
+            "benchmark_base_symbol": "ACWI",
+            "benchmark_components": "[]",
+        },
+        headers={"HX-Request": "true"},
+    )
+    assert benchmark_response.status_code == 200
+    assert "Benchmark configuration saved." in benchmark_response.text
 
 
 # ── Holdings editor (inline save) ─────────────────────────────────────────────

@@ -132,6 +132,12 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
   - top-level Portfolio Analyzer / Market Briefing modules now behave like distinct page modes
   - holdings editor now supports faster rebalancing with inline sector labels, +/- steppers, equal-weight and rebalance helpers
   - overview/analyzer surface now includes snapshot confidence, friendlier briefing summaries, and a cleaner History & Advanced area instead of exposing raw override internals by default
+- **Phase 5.1 policy + allocation foundation**
+  - new deterministic `Policy`, `Allocation`, and `Benchmark` modules added to the local control center
+  - investor policy is now persisted in SQLite with IPS-style inputs such as return target, volatility cap, drawdown cap, single-name limit, liquidity minimum, and governance cadence
+  - strategic allocation targets and allowed bands now compare against the live holdings book, including residual `Cash / Liquidity` when the portfolio does not sum to 100%
+  - analyzer now flags policy breaches such as single-name cap, max-equity, liquidity-minimum, and allocation-band violations
+  - benchmark configuration is now stored as a first-class profile object so later active-risk and attribution work has a stable reference layer
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths
