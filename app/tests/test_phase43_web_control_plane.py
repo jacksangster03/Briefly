@@ -97,6 +97,9 @@ def test_ui_settings_page_renders(client):
     assert "Portfolio Analyzer" in response.text
     assert "Saved values are persisted in SQLite as" in response.text
     assert "Executive Summary" in response.text
+    assert "Coverage Alignment" in response.text
+    assert "What Will Drive Tomorrow" in response.text
+    assert "Holdings Data Quality" in response.text
     assert "Top Holdings Concentration" in response.text
     assert "Sector Exposure vs Coverage Weight" in response.text
     assert "Analyzer Warnings" in response.text
@@ -153,6 +156,10 @@ def test_api_put_preferences_and_state_roundtrip(client):
     assert "warnings" in state["analysis"]
     assert "timing" in state["analysis"]
     assert "executive_summary" in state["analysis"]
+    assert "alignment_findings" in state["analysis"]
+    assert "briefing_influence" in state["analysis"]
+    assert "health_checks" in state["analysis"]
+    assert "data_quality" in state["analysis"]
 
 
 def test_api_put_preferences_rejects_invalid_values(client):
@@ -217,6 +224,12 @@ def test_api_holdings_import_yaml_and_reject_bad_csv(client):
     assert state["analysis"]["kpis"]["top_region_label"] == "US"
     assert "NVDA is the anchor holding at 8.50%" in state["analysis"]["executive_summary"]
     assert "Tomorrow's brief is set to lead with US context" in state["analysis"]["briefing_impact_preview"]
+    assert "will lean on US context" in state["analysis"]["briefing_influence"]["summary"]
+
+    coverage_fit = next(
+        item for item in state["analysis"]["health_checks"] if item["key"] == "coverage_fit"
+    )
+    assert coverage_fit["status"] in {"mixed", "needs_attention", "strong"}
 
     bad_csv = b"symbol,weight_pct\n,8.2\n"
     bad_response = client.post(
@@ -341,3 +354,101 @@ def test_analyzer_warning_strip_hides_when_issues_are_cleared(client):
     page = client.get("/ui/settings?profile=default_user")
     assert page.status_code == 200
     assert "<h3>Analyzer Warnings</h3>" not in page.text
+
+
+def test_analysis_alignment_finding_flags_undercovered_sector(client):
+    yaml_content = "\n".join(
+        [
+            "profile: default_user",
+            "holdings:",
+            "  - symbol: NVDA",
+            "    weight_pct: 12.0",
+            "  - symbol: AMD",
+            "    weight_pct: 10.0",
+        ]
+    ).encode("utf-8")
+    import_response = client.post(
+        "/api/v1/profile/default_user/holdings/import",
+        files={"file": ("holdings.yaml", io.BytesIO(yaml_content), "application/x-yaml")},
+    )
+    assert import_response.status_code == 200
+
+    pref_response = client.put(
+        "/api/v1/profile/default_user/preferences",
+        json={"updates": {"sector.weights": {"technology": 1.2, "semiconductors": 0.1}}},
+    )
+    assert pref_response.status_code == 200
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    findings = state["analysis"]["alignment_findings"]
+    assert any(item["code"] == "undercovered_sector" for item in findings)
+    assert any("Semiconductors" in item["message"] for item in findings)
+
+
+def test_analysis_watchlist_support_and_delivery_health_checks(client):
+    yaml_content = "\n".join(
+        [
+            "profile: default_user",
+            "holdings:",
+            "  - symbol: TSLA",
+            "    weight_pct: 12.0",
+            "  - symbol: AMZN",
+            "    weight_pct: 8.0",
+            "  - symbol: NVDA",
+            "    weight_pct: 6.0",
+        ]
+    ).encode("utf-8")
+    import_response = client.post(
+        "/api/v1/profile/default_user/holdings/import",
+        files={"file": ("holdings.yaml", io.BytesIO(yaml_content), "application/x-yaml")},
+    )
+    assert import_response.status_code == 200
+
+    pref_response = client.put(
+        "/api/v1/profile/default_user/preferences",
+        json={
+            "updates": {
+                "delivery.morning_channels": ["telegram", "email"],
+                "delivery.intraday_channels": ["telegram", "email"],
+                "delivery.breaking_channels": ["telegram"],
+            }
+        },
+    )
+    assert pref_response.status_code == 200
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    findings = state["analysis"]["alignment_findings"]
+    assert any(item["code"] == "weak_watchlist_support" for item in findings)
+
+    checks = {item["key"]: item for item in state["analysis"]["health_checks"]}
+    assert checks["watchlist_support"]["status"] == "needs_attention"
+    assert checks["delivery_readiness"]["status"] == "strong"
+
+
+def test_analysis_data_quality_flags_duplicates_missing_weights_and_sector_gaps(client):
+    yaml_content = "\n".join(
+        [
+            "profile: default_user",
+            "holdings:",
+            "  - symbol: AAPL",
+            "    weight_pct: 7.0",
+            "  - symbol: AAPL",
+            "  - symbol: ZZZZ",
+            "    weight_pct: 5.0",
+        ]
+    ).encode("utf-8")
+    response = client.post(
+        "/api/v1/profile/default_user/holdings/import",
+        files={"file": ("holdings.yaml", io.BytesIO(yaml_content), "application/x-yaml")},
+    )
+    assert response.status_code == 200
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    quality = state["analysis"]["data_quality"]
+    issue_codes = {item["code"] for item in quality["issues"]}
+    assert "missing_weights" in issue_codes
+    assert "duplicate_symbols" in issue_codes
+    assert "unlabeled_buckets" in issue_codes
+    assert "sector_inference_gaps" in issue_codes
+    assert quality["duplicate_symbols"][0]["symbol"] == "AAPL"
+    assert "ZZZZ" in quality["inferred_sector_gaps"]

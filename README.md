@@ -112,6 +112,14 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
   - US cash open is computed from `09:30 America/New_York` converted into user local timezone via IANA zones (DST-safe)
   - NYSE holiday + half-day awareness added for pre-open gating
   - daily idempotency markers persisted in SQLite (`morning:{local_date}`, `intraday:{local_date}`)
+- **Phase 4.7B portfolio analyzer intelligence**
+  - analyzer logic extracted into a dedicated deterministic analytics module
+  - live portfolio page now surfaces:
+    - coverage alignment findings
+    - tomorrow's briefing influence map
+    - health checks for coverage/watchlist/region/delivery fit
+    - holdings data-quality diagnostics
+  - analyzer stays local-first and explanation-driven, with no forecasting or trading logic mixed in
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths

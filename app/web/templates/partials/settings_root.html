@@ -15,6 +15,10 @@
 {% set sector_exposure = analysis.sector_exposure %}
 {% set region_emphasis = analysis.region_emphasis %}
 {% set bucket_allocation = analysis.bucket_allocation %}
+{% set alignment_findings = analysis.alignment_findings %}
+{% set briefing_influence = analysis.briefing_influence %}
+{% set health_checks = analysis.health_checks %}
+{% set data_quality = analysis.data_quality %}
 
 <style>
   .grid {
@@ -263,6 +267,131 @@
     margin: 0;
     color: var(--muted);
     font-size: 0.78rem;
+  }
+  .health-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    margin-bottom: 10px;
+  }
+  .health-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    padding: 10px;
+  }
+  .health-label {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .health-status {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 3px 9px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .health-status.strong {
+    background: rgba(31, 170, 111, 0.14);
+    color: var(--success);
+  }
+  .health-status.mixed {
+    background: rgba(245, 159, 0, 0.14);
+    color: var(--accent-strong);
+  }
+  .health-status.needs_attention {
+    background: rgba(234, 84, 85, 0.14);
+    color: var(--error);
+  }
+  .health-message {
+    margin: 0;
+    color: var(--ink);
+    font-size: 0.8rem;
+  }
+  .insight-list,
+  .issue-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 8px;
+  }
+  .insight-item,
+  .issue-item {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 10px;
+  }
+  .severity-badge {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-right: 8px;
+  }
+  .severity-badge.high {
+    background: rgba(234, 84, 85, 0.14);
+    color: var(--error);
+  }
+  .severity-badge.medium {
+    background: rgba(245, 159, 0, 0.14);
+    color: var(--accent-strong);
+  }
+  .severity-badge.low {
+    background: rgba(59, 130, 246, 0.14);
+    color: #60a5fa;
+  }
+  .insight-item strong,
+  .issue-item strong {
+    color: var(--ink);
+  }
+  .insight-item p,
+  .issue-item p {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  .driver-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    margin-top: 8px;
+  }
+  .driver-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 10px;
+  }
+  .driver-card h3 {
+    margin: 0 0 8px;
+    font-size: 0.82rem;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .driver-card ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 6px;
+  }
+  .driver-card li {
+    font-size: 0.8rem;
+    color: var(--ink);
+  }
+  .driver-card p {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--ink);
   }
   .mono {
     margin: 0;
@@ -596,7 +725,106 @@
       </div>
     </div>
 
+    <div class="health-grid">
+      {% for item in health_checks %}
+        <div class="health-card">
+          <div class="health-label">{{ item.label }}</div>
+          <span class="health-status {{ item.status }}">{{ item.status | replace("_", " ") }}</span>
+          <p class="health-message">{{ item.message }}</p>
+        </div>
+      {% endfor %}
+    </div>
+
     <div class="chart-grid">
+      <div class="chart-card wide">
+        <p class="chart-title">Coverage Alignment</p>
+        {% if alignment_findings %}
+          <ul class="insight-list">
+            {% for item in alignment_findings %}
+              <li class="insight-item">
+                <span class="severity-badge {{ item.severity }}">{{ item.severity | replace("_", " ") }}</span>
+                <strong>{{ item.title }}</strong>
+                <p>{{ item.message }}</p>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted">Portfolio exposure and editorial coverage are broadly aligned right now.</p>
+        {% endif %}
+      </div>
+
+      <div class="chart-card wide">
+        <p class="chart-title">What Will Drive Tomorrow&apos;s Brief</p>
+        <div class="preview-box">
+          <strong>Summary:</strong> {{ briefing_influence.summary }}
+        </div>
+        <div class="driver-grid">
+          <div class="driver-card">
+            <h3>Likely Holdings Drivers</h3>
+            {% if briefing_influence.top_holdings %}
+              <ul>
+                {% for item in briefing_influence.top_holdings %}
+                  <li>
+                    <strong>{{ item.symbol }}</strong> {{ item.weight_display }}
+                    {% if item.watchlist_role != "none" %}
+                      · {{ item.watchlist_role | capitalize }}
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p>No weighted holdings are currently available.</p>
+            {% endif %}
+          </div>
+          <div class="driver-card">
+            <h3>Likely Sector Drivers</h3>
+            {% if briefing_influence.top_sectors %}
+              <ul>
+                {% for item in briefing_influence.top_sectors %}
+                  <li><strong>{{ item.label }}</strong> · P {{ item.portfolio_display }} / C {{ item.coverage_display }}</li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p>No sector drivers are currently available.</p>
+            {% endif %}
+          </div>
+          <div class="driver-card">
+            <h3>Regional Lead</h3>
+            <p><strong>{{ briefing_influence.lead_region.label }}</strong> · {{ briefing_influence.lead_region.display }}</p>
+          </div>
+          <div class="driver-card">
+            <h3>Section Drivers</h3>
+            <ul>
+              <li>{{ briefing_influence.section_drivers.portfolio_focus }}</li>
+              <li>{{ briefing_influence.section_drivers.sector_scan }}</li>
+              <li>{{ briefing_influence.section_drivers.global_news }}</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <p class="chart-title">Holdings Data Quality</p>
+        <div class="tiny" style="margin-top:0; margin-bottom:8px;">
+          Weighted {{ data_quality.weighted_count }} / Unweighted {{ data_quality.unweighted_count }}
+          {% if data_quality.total_weight_pct is not none %}
+            · Total {{ "%.1f"|format(data_quality.total_weight_pct) }}%
+          {% endif %}
+        </div>
+        {% if data_quality.issues %}
+          <ul class="issue-list">
+            {% for item in data_quality.issues %}
+              <li class="issue-item">
+                <strong>{{ item.title }}</strong>
+                <p>{{ item.message }}</p>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="muted">No material holdings-data quality issues detected.</p>
+        {% endif %}
+      </div>
+
       <div class="chart-card wide">
         <p class="chart-title">Top Holdings Concentration</p>
         {% if top_positions %}
