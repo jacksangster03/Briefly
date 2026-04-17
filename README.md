@@ -120,6 +120,14 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
     - health checks for coverage/watchlist/region/delivery fit
     - holdings data-quality diagnostics
   - analyzer stays local-first and explanation-driven, with no forecasting or trading logic mixed in
+- **Phase 4.7C scenario stress tests**
+  - portfolio analyzer now adds deterministic stress checks for:
+    - semis down 10%
+    - rates +50 bps
+    - oil shock
+    - dollar spike
+    - small-cap risk-off
+  - each scenario estimates current portfolio sensitivity, highlights exposed holdings/sectors, and stays explicit that it is a static shock test rather than a forecast
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths

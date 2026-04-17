@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import re
 from typing import Any
 
 from app.personalization.user_profile import UserProfile
@@ -35,6 +36,71 @@ DISPLAY_ACRONYMS = {
 
 STATUS_ORDER = {"needs_attention": 0, "mixed": 1, "strong": 2}
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+SCENARIO_DEFINITIONS = (
+    {
+        "key": "semis_down_10",
+        "label": "Semis Down 10%",
+        "description": "AI and semiconductor leadership unwind together.",
+        "shocks": {
+            "semiconductors": -10.0,
+            "technology": -4.0,
+            "software_internet": -3.0,
+            "communication_services": -2.0,
+        },
+    },
+    {
+        "key": "rates_up_50bps",
+        "label": "Rates +50 bps",
+        "description": "A higher-rate shock hits duration-sensitive leadership.",
+        "shocks": {
+            "technology": -4.0,
+            "software_internet": -4.5,
+            "semiconductors": -3.0,
+            "real_estate": -6.0,
+            "utilities": -4.0,
+            "financials": 1.5,
+            "consumer_discretionary": -2.0,
+        },
+    },
+    {
+        "key": "oil_shock",
+        "label": "Oil Shock",
+        "description": "Energy spikes while transport and consumer margins compress.",
+        "shocks": {
+            "energy": 8.0,
+            "industrials": -3.0,
+            "consumer_discretionary": -4.0,
+            "consumer_staples": -2.0,
+            "materials": 2.0,
+            "financials": -1.0,
+        },
+    },
+    {
+        "key": "dollar_spike",
+        "label": "Dollar Spike",
+        "description": "A stronger USD pressures exporters, cyclicals, and commodity sensitivity.",
+        "shocks": {
+            "semiconductors": -3.0,
+            "technology": -2.0,
+            "materials": -3.0,
+            "energy": -2.0,
+            "healthcare": -1.5,
+            "consumer_staples": -1.5,
+        },
+    },
+    {
+        "key": "small_cap_risk_off",
+        "label": "Small-Cap Risk-Off",
+        "description": "Risk appetite fades and cyclicals/smaller-beta exposure lags.",
+        "shocks": {
+            "consumer_discretionary": -3.0,
+            "industrials": -2.5,
+            "financials": -2.0,
+            "semiconductors": -2.5,
+            "technology": -1.5,
+        },
+    },
+)
 
 
 def display_label(value: str) -> str:
@@ -143,6 +209,10 @@ def build_portfolio_analysis(
         region_emphasis=region_emphasis["rows"],
         next_morning_send_local=metadata["next_morning_send_local"],
     )
+    scenario_stress = _build_scenario_stress(
+        aggregated_positions=aggregated_positions,
+        sector_exposure=sector_exposure["rows"],
+    )
 
     delivery_enabled = {
         "morning": bool(profile.channels_for("morning")),
@@ -228,6 +298,7 @@ def build_portfolio_analysis(
         },
         "alignment_findings": alignment_findings,
         "briefing_influence": briefing_influence,
+        "scenario_stress": scenario_stress,
         "health_checks": health_checks,
         "data_quality": data_quality,
         "charts": {
@@ -708,6 +779,123 @@ def _build_data_quality(
     }
 
 
+def _build_scenario_stress(
+    *,
+    aggregated_positions: list[dict[str, Any]],
+    sector_exposure: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build deterministic scenario stress tests from current sector weights."""
+    sector_label_by_key = {row["key"]: row["label"] for row in sector_exposure}
+    sector_weight_by_key = {
+        row["key"]: float(row["portfolio_pct"] or 0.0) for row in sector_exposure if row["key"]
+    }
+    scenarios: list[dict[str, Any]] = []
+
+    for definition in SCENARIO_DEFINITIONS:
+        normalized_shocks = {_normalized_key(key): float(value) for key, value in definition["shocks"].items()}
+        holding_rows: list[dict[str, Any]] = []
+        for row in aggregated_positions:
+            if row["weight_pct"] is None or not row.get("sector"):
+                continue
+            shock_pct = normalized_shocks.get(_normalized_key(row["sector"]), 0.0)
+            contribution_pct = float(row["weight_pct"]) * shock_pct / 100.0
+            if abs(contribution_pct) < 0.01:
+                continue
+            holding_rows.append(
+                {
+                    "symbol": row["symbol"],
+                    "sector_label": row["sector_label"],
+                    "weight_display": row["weight_display"] if "weight_display" in row else _format_percent(row["weight_pct"], digits=2),
+                    "contribution_pct": _rounded_metric(contribution_pct, digits=2) or 0.0,
+                    "contribution_display": _format_signed_percent(contribution_pct, digits=2),
+                }
+            )
+
+        sector_rows: list[dict[str, Any]] = []
+        for sector_key, shock_pct in normalized_shocks.items():
+            matched_key = next(
+                (key for key in sector_weight_by_key if _normalized_key(key) == sector_key),
+                None,
+            )
+            if not matched_key:
+                continue
+            portfolio_pct = sector_weight_by_key.get(matched_key, 0.0)
+            contribution_pct = portfolio_pct * shock_pct / 100.0
+            if abs(contribution_pct) < 0.01:
+                continue
+            sector_rows.append(
+                {
+                    "key": matched_key,
+                    "label": sector_label_by_key.get(matched_key, display_label(matched_key)),
+                    "portfolio_pct": _rounded_metric(portfolio_pct) or 0.0,
+                    "portfolio_display": _format_percent(portfolio_pct),
+                    "shock_pct": _rounded_metric(shock_pct, digits=1) or 0.0,
+                    "shock_display": _format_signed_percent(shock_pct, digits=1),
+                    "estimated_contribution_pct": _rounded_metric(contribution_pct, digits=2) or 0.0,
+                    "estimated_contribution_display": _format_signed_percent(contribution_pct, digits=2),
+                }
+            )
+
+        holding_rows.sort(key=lambda item: abs(item["contribution_pct"]), reverse=True)
+        sector_rows.sort(key=lambda item: abs(item["estimated_contribution_pct"]), reverse=True)
+        estimated_impact = float(sum(item["contribution_pct"] for item in holding_rows))
+
+        top_holdings = holding_rows[:3]
+        top_sectors = sector_rows[:3]
+        if not top_holdings and not top_sectors:
+            scenario_summary = "No mapped holdings currently participate in this scenario."
+        elif estimated_impact <= -0.25:
+            scenario_summary = (
+                f"{definition['label']} would likely pressure "
+                f"{', '.join(item['symbol'] for item in top_holdings[:2]) or 'the mapped book'} first."
+            )
+        elif estimated_impact >= 0.25:
+            scenario_summary = (
+                f"{definition['label']} would likely help "
+                f"{', '.join(item['symbol'] for item in top_holdings[:2]) or 'the mapped book'} on current weights."
+            )
+        else:
+            scenario_summary = (
+                f"{definition['label']} looks relatively balanced against the current portfolio mix."
+            )
+
+        scenarios.append(
+            {
+                "key": definition["key"],
+                "label": definition["label"],
+                "description": definition["description"],
+                "estimated_portfolio_impact_pct": _rounded_metric(estimated_impact, digits=2) or 0.0,
+                "estimated_portfolio_impact_display": _format_signed_percent(estimated_impact, digits=2),
+                "impact_class": _impact_class(estimated_impact),
+                "summary": scenario_summary,
+                "top_holdings": top_holdings,
+                "top_sectors": top_sectors,
+            }
+        )
+
+    has_mapped_exposure = any(item["top_holdings"] or item["top_sectors"] for item in scenarios)
+    worst_drawdown = min(scenarios, key=lambda item: item["estimated_portfolio_impact_pct"], default=None)
+    summary = (
+        "Scenario stress tests will populate once weighted holdings are mapped into sectors."
+        if not has_mapped_exposure
+        else (
+            f"Current portfolio looks most exposed to {worst_drawdown['label']} "
+            f"({worst_drawdown['estimated_portfolio_impact_display']}) under the static sector-shock assumptions."
+            if worst_drawdown is not None
+            else "Scenario stress tests will appear once weighted holdings are available."
+        )
+    )
+
+    return {
+        "methodology": (
+            "Static sector-shock test using current holdings weights and inferred sector mapping. "
+            "Useful for sensitivity checks, not forecasting."
+        ),
+        "summary": summary,
+        "scenarios": scenarios,
+    }
+
+
 def _build_briefing_influence(
     *,
     profile: UserProfile,
@@ -895,6 +1083,12 @@ def _format_percent(value: float | None, *, digits: int = 1) -> str:
     return f"{float(value):.{digits}f}%"
 
 
+def _format_signed_percent(value: float | None, *, digits: int = 1) -> str:
+    if value is None:
+        return "Not provided"
+    return f"{float(value):+.{digits}f}%"
+
+
 def _format_gap(value: float | None, *, digits: int = 1) -> str:
     if value is None:
         return "Not provided"
@@ -913,3 +1107,21 @@ def _bar_pct(value: float | None, max_value: float | None) -> float:
     if value is None or not max_value or max_value <= 0:
         return 0.0
     return round(max(0.0, min(float(value) / float(max_value) * 100.0, 100.0)), 1)
+
+
+def _impact_class(value: float | None) -> str:
+    if value is None:
+        return "neutral"
+    if value <= -0.25:
+        return "negative"
+    if value >= 0.25:
+        return "positive"
+    return "neutral"
+
+
+def _normalized_key(value: str | None) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"[^a-z0-9]+", "_", text)
+    return re.sub(r"_+", "_", text).strip("_")

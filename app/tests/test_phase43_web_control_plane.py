@@ -99,6 +99,7 @@ def test_ui_settings_page_renders(client):
     assert "Executive Summary" in response.text
     assert "Coverage Alignment" in response.text
     assert "What Will Drive Tomorrow" in response.text
+    assert "Scenario Stress Tests" in response.text
     assert "Holdings Data Quality" in response.text
     assert "Top Holdings Concentration" in response.text
     assert "Sector Exposure vs Coverage Weight" in response.text
@@ -158,6 +159,7 @@ def test_api_put_preferences_and_state_roundtrip(client):
     assert "executive_summary" in state["analysis"]
     assert "alignment_findings" in state["analysis"]
     assert "briefing_influence" in state["analysis"]
+    assert "scenario_stress" in state["analysis"]
     assert "health_checks" in state["analysis"]
     assert "data_quality" in state["analysis"]
 
@@ -423,6 +425,36 @@ def test_analysis_watchlist_support_and_delivery_health_checks(client):
     checks = {item["key"]: item for item in state["analysis"]["health_checks"]}
     assert checks["watchlist_support"]["status"] == "needs_attention"
     assert checks["delivery_readiness"]["status"] == "strong"
+
+
+def test_analysis_scenario_stress_identifies_semiconductor_drawdown(client):
+    yaml_content = "\n".join(
+        [
+            "profile: default_user",
+            "holdings:",
+            "  - symbol: NVDA",
+            "    weight_pct: 12.0",
+            "  - symbol: AMD",
+            "    weight_pct: 10.0",
+            "  - symbol: MSFT",
+            "    weight_pct: 8.0",
+        ]
+    ).encode("utf-8")
+    response = client.post(
+        "/api/v1/profile/default_user/holdings/import",
+        files={"file": ("holdings.yaml", io.BytesIO(yaml_content), "application/x-yaml")},
+    )
+    assert response.status_code == 200
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    stress = state["analysis"]["scenario_stress"]
+    assert "Static sector-shock test" in stress["methodology"]
+
+    semis = next(item for item in stress["scenarios"] if item["key"] == "semis_down_10")
+    assert semis["estimated_portfolio_impact_pct"] < 0
+    assert semis["impact_class"] == "negative"
+    assert any(item["symbol"] == "NVDA" for item in semis["top_holdings"])
+    assert any(item["label"] == "Semiconductors" for item in semis["top_sectors"])
 
 
 def test_analysis_data_quality_flags_duplicates_missing_weights_and_sector_gaps(client):

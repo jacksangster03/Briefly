@@ -17,6 +17,7 @@
 {% set bucket_allocation = analysis.bucket_allocation %}
 {% set alignment_findings = analysis.alignment_findings %}
 {% set briefing_influence = analysis.briefing_influence %}
+{% set scenario_stress = analysis.scenario_stress %}
 {% set health_checks = analysis.health_checks %}
 {% set data_quality = analysis.data_quality %}
 
@@ -392,6 +393,79 @@
     margin: 0;
     font-size: 0.8rem;
     color: var(--ink);
+  }
+  .scenario-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    margin-top: 10px;
+  }
+  .scenario-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 10px;
+  }
+  .scenario-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .scenario-head h3 {
+    margin: 0 0 4px;
+    font-size: 0.9rem;
+    color: var(--ink);
+  }
+  .scenario-head p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.76rem;
+  }
+  .scenario-impact {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .scenario-impact.negative {
+    background: rgba(234, 84, 85, 0.14);
+    color: var(--error);
+  }
+  .scenario-impact.positive {
+    background: rgba(31, 170, 111, 0.14);
+    color: var(--success);
+  }
+  .scenario-impact.neutral {
+    background: rgba(107, 114, 128, 0.14);
+    color: var(--muted);
+  }
+  .scenario-summary {
+    margin: 0 0 8px;
+    color: var(--ink);
+    font-size: 0.8rem;
+  }
+  .scenario-block {
+    margin-top: 8px;
+  }
+  .scenario-block strong {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--ink);
+    font-size: 0.77rem;
+  }
+  .scenario-block ul {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--ink);
+    font-size: 0.78rem;
+  }
+  .scenario-block li + li {
+    margin-top: 4px;
   }
   .mono {
     margin: 0;
@@ -800,6 +874,61 @@
               <li>{{ briefing_influence.section_drivers.global_news }}</li>
             </ul>
           </div>
+        </div>
+      </div>
+
+      <div class="chart-card wide">
+        <p class="chart-title">Scenario Stress Tests</p>
+        <div class="preview-box">
+          <strong>Method:</strong> {{ scenario_stress.methodology }}
+          <br />
+          <strong>Current read:</strong> {{ scenario_stress.summary }}
+        </div>
+        <div class="scenario-grid">
+          {% for item in scenario_stress.scenarios %}
+            <div class="scenario-card">
+              <div class="scenario-head">
+                <div>
+                  <h3>{{ item.label }}</h3>
+                  <p>{{ item.description }}</p>
+                </div>
+                <span class="scenario-impact {{ item.impact_class }}">{{ item.estimated_portfolio_impact_display }}</span>
+              </div>
+              <p class="scenario-summary">{{ item.summary }}</p>
+              <div class="scenario-block">
+                <strong>Top Holdings</strong>
+                {% if item.top_holdings %}
+                  <ul>
+                    {% for holding in item.top_holdings %}
+                      <li>
+                        {{ holding.symbol }} · {{ holding.contribution_display }}
+                        {% if holding.weight_display %}
+                          · {{ holding.weight_display }}
+                        {% endif %}
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <p class="tiny">No mapped holdings carry material sensitivity here.</p>
+                {% endif %}
+              </div>
+              <div class="scenario-block">
+                <strong>Top Sectors</strong>
+                {% if item.top_sectors %}
+                  <ul>
+                    {% for sector in item.top_sectors %}
+                      <li>
+                        {{ sector.label }} · {{ sector.estimated_contribution_display }}
+                        · Shock {{ sector.shock_display }}
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <p class="tiny">Current sector mix is not materially exposed in this stress test.</p>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
         </div>
       </div>
 
