@@ -8,6 +8,13 @@
 {% set validations = state.validations %}
 {% set analysis = state.analysis %}
 {% set kpis = analysis.kpis %}
+{% set overview = analysis.overview %}
+{% set holdings_totals = analysis.holdings_totals %}
+{% set top_positions = analysis.top_positions %}
+{% set concentration = analysis.concentration %}
+{% set sector_exposure = analysis.sector_exposure %}
+{% set region_emphasis = analysis.region_emphasis %}
+{% set bucket_allocation = analysis.bucket_allocation %}
 
 <style>
   .grid {
@@ -105,6 +112,28 @@
     gap: 10px;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
+  .executive-strip {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    background:
+      linear-gradient(90deg, rgba(245, 159, 0, 0.10), transparent 42%),
+      var(--bg-secondary);
+  }
+  .executive-strip strong {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  .executive-strip p {
+    margin: 0;
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
   .summary {
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -160,6 +189,9 @@
     background: var(--bg-secondary);
     padding: 10px;
   }
+  .chart-card.wide {
+    grid-column: 1 / -1;
+  }
   .chart-title {
     margin: 0 0 8px;
     font-size: 0.86rem;
@@ -208,6 +240,29 @@
     font-size: 0.86rem;
     color: var(--ink);
     margin-top: 8px;
+  }
+  .definition-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    margin-bottom: 10px;
+  }
+  .definition-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    padding: 10px;
+  }
+  .definition-card strong {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--ink);
+    font-size: 0.82rem;
+  }
+  .definition-card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.78rem;
   }
   .mono {
     margin: 0;
@@ -418,19 +473,9 @@
   </div>
 {% endif %}
 
-{% if validations %}
-  <div class="warning-box">
-    <h3>Configuration Warnings</h3>
-    <ul class="warning-list">
-      {% for warning in validations %}
-        <li>{{ warning.message }}</li>
-      {% endfor %}
-    </ul>
-  </div>
-{% endif %}
-
 <nav class="section-nav" aria-label="Settings sections">
   <a href="#section-overview">Overview</a>
+  <a href="#section-analyzer">Portfolio Analyzer</a>
   <a href="#section-holdings">Holdings</a>
   <a href="#section-coverage">Coverage</a>
   <a href="#section-delivery">Delivery</a>
@@ -441,77 +486,193 @@
 <div class="grid">
   <section class="card" id="section-overview">
     <h2>Overview</h2>
-    <p class="muted">Portfolio analysis layer: current exposure shape and how it will influence briefing prioritization.</p>
+    <p class="muted">Analyzer-first summary of exposure, editorial fit, and the next morning run for this profile.</p>
+
+    <div class="executive-strip">
+      <strong>Executive Summary</strong>
+      <p>{{ analysis.executive_summary }}</p>
+    </div>
+
+    <div class="summary-grid">
+      <dl class="summary">
+        <dt>Profile</dt><dd>{{ overview.profile }}</dd>
+        <dt>Timezone</dt><dd>{{ overview.timezone }}</dd>
+        <dt>Home Region</dt><dd>{{ overview.home_region_label }}</dd>
+      </dl>
+      <dl class="summary">
+        <dt>Holdings Weight Total</dt><dd>{{ holdings_totals.total_weight_display }}</dd>
+        <dt>Gap vs 100%</dt><dd>{{ holdings_totals.gap_to_100_display }}</dd>
+        <dt>Analyzer Warnings</dt><dd>{{ analysis.warnings | length }}</dd>
+      </dl>
+      <dl class="summary">
+        <dt>Primary Watchlist</dt><dd>{{ overview.primary_watchlist_count }}</dd>
+        <dt>Total Watchlist Symbols</dt><dd>{{ overview.watchlist_total }}</dd>
+        <dt>Active Overrides</dt><dd>{{ overview.active_override_count }}</dd>
+      </dl>
+      <dl class="summary">
+        <dt>Next Morning Send</dt><dd>{{ analysis.timing.next_morning_send_local }}</dd>
+        <dt>Last Holdings Update</dt><dd>{{ analysis.timing.last_holdings_update_local }}</dd>
+        <dt>Last Preferences Update</dt><dd>{{ analysis.timing.last_preferences_update_local }}</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section class="card" id="section-analyzer">
+    <h2>Portfolio Analyzer</h2>
+    <p class="muted">Exposure, concentration, and briefing-impact analysis from the live holdings snapshot and saved preferences.</p>
+
+    <div class="definition-grid">
+      <div class="definition-card">
+        <strong>Portfolio Exposure</strong>
+        <p>Shows each sector or bucket as a share of weighted holdings so you can see where the portfolio is actually concentrated.</p>
+      </div>
+      <div class="definition-card">
+        <strong>Editorial Coverage Weight</strong>
+        <p>Normalizes your saved sector preferences into the ranking mix that determines which stories Briefly prioritizes.</p>
+      </div>
+      <div class="definition-card">
+        <strong>Briefing Impact</strong>
+        <p>Explains how holdings, watchlists, region emphasis, and morning section settings will shape the next brief.</p>
+      </div>
+    </div>
+
+    {% if analysis.warnings %}
+      <div class="warning-box">
+        <h3>Analyzer Warnings</h3>
+        <ul class="warning-list">
+          {% for warning in analysis.warnings %}
+            <li><strong>{{ warning.title }}:</strong> {{ warning.message }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
 
     <div class="kpi-grid">
       <div class="kpi">
         <div class="kpi-label">Holdings Weight Total</div>
-        <div class="kpi-value">{{ "%.2f"|format(kpis.holdings_weight_total_pct) }}%</div>
-        <div class="kpi-note">Gap vs 100%: {{ "%.2f"|format(kpis.holdings_weight_gap_pct) if kpis.holdings_weight_gap_pct is not none else "Not provided" }}%</div>
+        <div class="kpi-value">{{ kpis.holdings_weight_total_display }}</div>
+        <div class="kpi-note">Weighted {{ holdings_totals.weighted_positions }} / Unweighted {{ holdings_totals.unweighted_positions }}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Gap vs 100%</div>
+        <div class="kpi-value">{{ kpis.holdings_weight_gap_display }}</div>
+        <div class="kpi-note">
+          {% if holdings_totals.total_weight_pct is not none %}
+            {{ "Within" if holdings_totals.near_100 else "Outside" }} 5% normalization band
+          {% else %}
+            Awaiting weighted holdings
+          {% endif %}
+        </div>
       </div>
       <div class="kpi">
         <div class="kpi-label">Largest Position</div>
         <div class="kpi-value">
           {{ kpis.largest_position.symbol if kpis.largest_position else "Not provided" }}
           {% if kpis.largest_position and kpis.largest_position.weight_pct is not none %}
-            ({{ "%.2f"|format(kpis.largest_position.weight_pct) }}%)
+            {{ kpis.largest_position.weight_display }}
+          {% endif %}
+        </div>
+        <div class="kpi-note">
+          {{ kpis.largest_position.bucket_label if kpis.largest_position else "Not provided" }}
+          {% if kpis.largest_position %}
+            · {{ kpis.largest_position.sector_label }}
           {% endif %}
         </div>
       </div>
       <div class="kpi">
         <div class="kpi-label">Top 5 Concentration</div>
-        <div class="kpi-value">{{ "%.2f"|format(kpis.top5_concentration_pct) }}%</div>
+        <div class="kpi-value">{{ kpis.top5_concentration_display }}</div>
+        <div class="kpi-note">{{ kpis.top5_share_of_holdings_display }} of weighted holdings</div>
       </div>
       <div class="kpi">
-        <div class="kpi-label">Top Portfolio Sector</div>
-        <div class="kpi-value">{{ kpis.top_sector_label if kpis.top_sector_label else "Not provided" }}</div>
+        <div class="kpi-label">Top Sector</div>
+        <div class="kpi-value">{{ kpis.top_sector_label }}</div>
+        <div class="kpi-note">From current portfolio sector exposure</div>
       </div>
       <div class="kpi">
-        <div class="kpi-label">Top Region Focus</div>
-        <div class="kpi-value">{{ kpis.top_region_label if kpis.top_region_label else state.effective.coverage.home_region_label }}</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Next Morning Send</div>
-        <div class="kpi-value">{{ metadata.next_morning_send_local }}</div>
-        <div class="kpi-note">Delivery enabled: M {{ "yes" if kpis.delivery_enabled.morning else "no" }}, I {{ "yes" if kpis.delivery_enabled.intraday else "no" }}, B {{ "yes" if kpis.delivery_enabled.breaking else "no" }}</div>
+        <div class="kpi-label">Top Region</div>
+        <div class="kpi-value">{{ kpis.top_region_label }}</div>
+        <div class="kpi-note">Configured emphasis used in editorial ranking</div>
       </div>
     </div>
 
     <div class="chart-grid">
+      <div class="chart-card wide">
+        <p class="chart-title">Top Holdings Concentration</p>
+        {% if top_positions %}
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Weight</th>
+                  <th>Share</th>
+                  <th>Bucket</th>
+                  <th>Sector</th>
+                  <th>Scale</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in top_positions %}
+                  <tr>
+                    <td>{{ row.symbol }}</td>
+                    <td>{{ row.weight_display }}</td>
+                    <td>{{ row.share_of_total_display }}</td>
+                    <td>{{ row.bucket_label }}</td>
+                    <td>{{ row.sector_label }}</td>
+                    <td style="min-width: 180px;">
+                      {% if row.weight_pct is not none %}
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ row.bar_pct }}%;"></div></div>
+                      {% else %}
+                        <span class="muted">Not provided</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="muted">No active holdings found for this profile.</p>
+        {% endif %}
+      </div>
+
       <div class="chart-card">
-        <p class="chart-title">Portfolio Bucket Allocation</p>
-        {% set bucket_rows = analysis.charts.bucket_allocation %}
-        {% if bucket_rows %}
-          {% set max_bucket = analysis.chart_max.bucket %}
+        <p class="chart-title">Concentration Breakdown</p>
+        {% if holdings_totals.total_weight_pct is not none %}
           <div class="bar-list">
-            {% for row in bucket_rows %}
+            {% for row in concentration.rows %}
               <div class="bar-row">
                 <div>
                   <div class="bar-label">{{ row.label }}</div>
-                  <div class="bar-track"><div class="bar-fill" style="width: {{ (row.value / max_bucket * 100) if max_bucket > 0 else 0 }}%;"></div></div>
+                  <div class="bar-track"><div class="bar-fill" style="width: {{ row.bar_pct }}%;"></div></div>
                 </div>
-                <div class="bar-value">{{ "%.2f"|format(row.value) }}</div>
+                <div class="bar-value">
+                  {{ row.display }}
+                  {% if row.share_of_total_pct is not none %}
+                    / {{ "%.1f"|format(row.share_of_total_pct) }}%
+                  {% endif %}
+                </div>
               </div>
             {% endfor %}
           </div>
+          <p class="tiny">Values show absolute weight first, then share of weighted holdings.</p>
         {% else %}
-          <p class="muted">No weighted holdings data available.</p>
+          <p class="muted">Concentration metrics appear after holdings weights are provided.</p>
         {% endif %}
       </div>
 
       <div class="chart-card">
         <p class="chart-title">Region Emphasis</p>
-        {% set region_rows = analysis.charts.region_weights %}
-        {% if region_rows %}
-          {% set max_region = analysis.chart_max.region %}
+        {% if region_emphasis.rows %}
           <div class="bar-list">
-            {% for row in region_rows %}
+            {% for row in region_emphasis.rows %}
               <div class="bar-row">
                 <div>
                   <div class="bar-label">{{ row.label }}</div>
-                  <div class="bar-track"><div class="bar-fill secondary" style="width: {{ (row.value / max_region * 100) if max_region > 0 else 0 }}%;"></div></div>
+                  <div class="bar-track"><div class="bar-fill secondary" style="width: {{ row.bar_pct }}%;"></div></div>
                 </div>
-                <div class="bar-value">{{ "%.2f"|format(row.value) }}</div>
+                <div class="bar-value">{{ row.display }}</div>
               </div>
             {% endfor %}
           </div>
@@ -521,41 +682,43 @@
       </div>
 
       <div class="chart-card">
-        <p class="chart-title">Watchlist Priority Ladder</p>
-        {% set watch_rows = analysis.charts.watchlist_priority %}
-        {% if watch_rows %}
-          {% set max_watch = analysis.chart_max.watchlist %}
+        <p class="chart-title">Bucket Allocation</p>
+        {% if bucket_allocation.rows %}
           <div class="bar-list">
-            {% for row in watch_rows %}
+            {% for row in bucket_allocation.rows %}
               <div class="bar-row">
                 <div>
                   <div class="bar-label">{{ row.label }}</div>
-                  <div class="bar-track"><div class="bar-fill" style="width: {{ (row.count / max_watch * 100) if max_watch > 0 else 0 }}%;"></div></div>
+                  <div class="bar-track"><div class="bar-fill" style="width: {{ row.bar_pct }}%;"></div></div>
                 </div>
-                <div class="bar-value">{{ row.count }}</div>
+                <div class="bar-value">{{ row.display }}</div>
               </div>
             {% endfor %}
           </div>
+          {% if bucket_allocation.unweighted_positions %}
+            <p class="tiny">{{ bucket_allocation.unweighted_positions }} unweighted position(s) are excluded from bucket totals.</p>
+          {% endif %}
+        {% else %}
+          <p class="muted">No weighted holdings data available.</p>
         {% endif %}
       </div>
 
-      <div class="chart-card">
-        <p class="chart-title">Sector: Portfolio vs Coverage Weight</p>
-        {% set sector_rows = analysis.charts.sector_comparison %}
-        {% if sector_rows %}
-          {% set max_sector = analysis.chart_max.sector %}
+      <div class="chart-card wide">
+        <p class="chart-title">Sector Exposure vs Coverage Weight</p>
+        {% if sector_exposure.rows %}
           <div class="bar-list">
-            {% for row in sector_rows %}
+            {% for row in sector_exposure.rows %}
               <div class="bar-row">
                 <div>
                   <div class="bar-label">{{ row.label }}</div>
-                  <div class="bar-track"><div class="bar-fill" style="width: {{ (row.portfolio_pct / max_sector * 100) if max_sector > 0 else 0 }}%;"></div></div>
-                  <div class="bar-track" style="margin-top:3px;"><div class="bar-fill secondary" style="width: {{ (row.coverage_weight / max_sector * 100) if max_sector > 0 else 0 }}%;"></div></div>
+                  <div class="bar-track"><div class="bar-fill" style="width: {{ row.portfolio_bar_pct }}%;"></div></div>
+                  <div class="bar-track" style="margin-top: 3px;"><div class="bar-fill secondary" style="width: {{ row.coverage_bar_pct }}%;"></div></div>
                 </div>
-                <div class="bar-value">P {{ "%.1f"|format(row.portfolio_pct) }} / C {{ "%.1f"|format(row.coverage_weight) }}</div>
+                <div class="bar-value">P {{ row.portfolio_display }} / C {{ row.coverage_display }}</div>
               </div>
             {% endfor %}
           </div>
+          <p class="tiny">Portfolio exposure and editorial coverage are both normalized to percentage share for comparison.</p>
         {% else %}
           <p class="muted">No sector comparison data available yet.</p>
         {% endif %}
@@ -564,42 +727,6 @@
 
     <div class="preview-box">
       <strong>Briefing Impact Preview:</strong> {{ analysis.briefing_impact_preview }}
-    </div>
-
-    <div class="summary-grid" style="margin-top:10px;">
-      <dl class="summary">
-        <dt>Profile</dt><dd>{{ state.profile }}</dd>
-        <dt>Timezone</dt><dd>{{ state.effective.timezone }}</dd>
-        <dt>Home Region</dt><dd>{{ state.effective.coverage.home_region_label }}</dd>
-      </dl>
-      <dl class="summary">
-        <dt>Holdings</dt><dd>{{ state.holdings | length }}</dd>
-        <dt>Watchlist Symbols</dt><dd>{{ watchlist.primary | length + watchlist.secondary | length + watchlist.monitor | length }}</dd>
-        <dt>Active Overrides</dt><dd>{{ state.overrides | length }}</dd>
-      </dl>
-      <dl class="summary">
-        <dt>Morning Channels</dt><dd>{{ delivery.morning_channels | join(", ") if delivery.morning_channels else "Not configured" }}</dd>
-        <dt>Intraday Channels</dt><dd>{{ delivery.intraday_channels | join(", ") if delivery.intraday_channels else "Not configured" }}</dd>
-        <dt>Breaking Channels</dt><dd>{{ delivery.breaking_channels | join(", ") if delivery.breaking_channels else "Not configured" }}</dd>
-      </dl>
-      <dl class="summary">
-        <dt>Last Holdings Update</dt><dd title="UTC: {{ metadata.last_holdings_update or 'Not provided' }}">{{ metadata.last_holdings_update_local }}</dd>
-        <dt>Last Preferences Update</dt><dd title="UTC: {{ metadata.last_preferences_update or 'Not provided' }}">{{ metadata.last_preferences_update_local }}</dd>
-        <dt>Supported Keys</dt><dd>{{ state.supported_preference_keys | length }}</dd>
-      </dl>
-    </div>
-
-    <div class="actions">
-      <form
-        hx-post="/ui/profile/{{ state.profile }}/reset"
-        hx-target="#settings-root"
-        hx-swap="outerHTML"
-        method="post"
-      >
-        <button type="submit" class="danger" onclick="return confirm('Reset all DB overrides for this profile?');">
-          Reset Overrides
-        </button>
-      </form>
     </div>
   </section>
 
@@ -944,6 +1071,18 @@
         <dt style="color: var(--muted); font-size: 0.78rem;">Active DB Overrides</dt>
         <pre class="mono">{{ state.overrides | tojson(indent=2) }}</pre>
       </div>
+    </div>
+    <div class="actions">
+      <form
+        hx-post="/ui/profile/{{ state.profile }}/reset"
+        hx-target="#settings-root"
+        hx-swap="outerHTML"
+        method="post"
+      >
+        <button type="submit" class="danger" onclick="return confirm('Reset all DB overrides for this profile?');">
+          Reset Overrides
+        </button>
+      </form>
     </div>
   </section>
 </div>

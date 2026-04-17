@@ -42,6 +42,7 @@ DISPLAY_ACRONYMS = {
     "fomc": "FOMC",
     "fx": "FX",
     "gdp": "GDP",
+    "ibex": "IBEX",
     "ipo": "IPO",
     "latam": "LATAM",
     "opec": "OPEC",
@@ -90,7 +91,12 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     catalogs = _build_followables_catalog(settings=settings, profile=profile)
     metadata = _build_profile_metadata(profile=profile, profile_name=normalized_profile)
     validations = _build_profile_validations(profile=profile)
-    analysis = _build_portfolio_analysis(profile=profile)
+    analysis = _build_portfolio_analysis(
+        profile=profile,
+        settings=settings,
+        metadata=metadata,
+        validations=validations,
+    )
 
     return {
         "profile": normalized_profile,
@@ -432,158 +438,432 @@ def _build_profile_validations(*, profile: UserProfile) -> list[dict[str, str]]:
     return warnings
 
 
-def _build_portfolio_analysis(*, profile: UserProfile) -> dict[str, Any]:
-    """Compute concise analysis metrics for overview cards/charts."""
-    weights = [
-        float(position.weight_pct)
-        for position in profile.portfolio_holdings
-        if position.weight_pct is not None
-    ]
-    weights_sorted = sorted(weights, reverse=True)
-    total_weight = float(sum(weights))
-    top5_weight = float(sum(weights_sorted[:5])) if weights_sorted else 0.0
-    top5_share = (top5_weight / total_weight * 100.0) if total_weight > 0 else 0.0
+def _build_portfolio_analysis(
+    *,
+    profile: UserProfile,
+    settings: Settings,
+    metadata: dict[str, Any],
+    validations: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Compute presentation-ready analyzer metrics for the settings UI/API."""
+    universe = load_sector_universe(settings)
+    sector_label_by_key = {
+        sector.key: (sector.display_name or _display_label(sector.key))
+        for sector in universe.sectors
+    }
+    ticker_to_sector: dict[str, str] = {}
+    for sector in universe.sectors:
+        for ticker in sector.key_names:
+            ticker_to_sector[ticker.upper()] = sector.key
 
-    largest_position = None
-    if profile.portfolio_holdings:
-        ranked_positions = sorted(
-            profile.portfolio_holdings,
-            key=lambda p: (p.weight_pct is not None, p.weight_pct or 0.0),
-            reverse=True,
+    ranked_positions = sorted(
+        profile.portfolio_holdings,
+        key=lambda p: (p.weight_pct is None, -(p.weight_pct or 0.0), p.symbol),
+    )
+    weighted_positions = [position for position in ranked_positions if position.weight_pct is not None]
+    weights_sorted = [float(position.weight_pct) for position in weighted_positions]
+    total_weight = float(sum(weights_sorted)) if weights_sorted else None
+    gap_to_100 = (100.0 - total_weight) if total_weight is not None else None
+    largest_weight = weights_sorted[0] if weights_sorted else None
+
+    top_positions: list[dict[str, Any]] = []
+    for position in ranked_positions[:8]:
+        sector_key = position.sector_override or ticker_to_sector.get(position.symbol)
+        sector_label = sector_label_by_key.get(sector_key, _display_label(sector_key)) if sector_key else None
+        weight_pct = _rounded_metric(position.weight_pct, digits=2) if position.weight_pct is not None else None
+        share_of_total_pct = None
+        if position.weight_pct is not None and total_weight and total_weight > 0:
+            share_of_total_pct = _rounded_metric(position.weight_pct / total_weight * 100.0)
+        top_positions.append(
+            {
+                "symbol": position.symbol,
+                "weight_pct": weight_pct,
+                "weight_display": _format_percent(weight_pct, digits=2),
+                "share_of_total_pct": share_of_total_pct,
+                "share_of_total_display": _format_percent(share_of_total_pct),
+                "bucket": position.bucket or None,
+                "bucket_label": _display_or_not_provided(_display_label(position.bucket) if position.bucket else ""),
+                "sector": sector_key,
+                "sector_label": _display_or_not_provided(sector_label or ""),
+                "bar_pct": _bar_pct(weight_pct, largest_weight),
+            }
         )
-        head = ranked_positions[0]
-        largest_position = {
-            "symbol": head.symbol,
-            "weight_pct": float(head.weight_pct or 0.0) if head.weight_pct is not None else None,
-            "bucket": head.bucket or "",
-        }
 
-    top_sector = ""
-    if profile.portfolio_sector_weights:
-        top_sector = max(profile.portfolio_sector_weights.items(), key=lambda item: item[1])[0]
-    top_region = ""
-    if profile.coverage_weights:
-        top_region = max(profile.coverage_weights.items(), key=lambda item: item[1])[0]
+    largest_position = top_positions[0] if top_positions else None
+    concentration = _build_concentration_rows(weights_sorted, total_weight)
+    sector_exposure = _build_sector_comparison_rows(profile, sector_label_by_key)
+    region_emphasis = _build_region_rows(profile)
+    bucket_allocation = _build_bucket_rows(profile)
+    analyzer_warnings = _build_analyzer_warning_rows(validations)
+
+    top_sector_row = next((row for row in sector_exposure["rows"] if row["portfolio_pct"] and row["portfolio_pct"] > 0), None)
+    top_region_row = next((row for row in region_emphasis["rows"] if row["normalized_pct"] and row["normalized_pct"] > 0), None)
 
     delivery_enabled = {
         "morning": bool(profile.channels_for("morning")),
         "intraday": bool(profile.channels_for("intraday")),
         "breaking": bool(profile.channels_for("breaking")),
     }
-
-    sector_comparison = _build_sector_comparison_rows(profile)
-    region_rows = _build_region_rows(profile)
     watchlist_rows = [
         {"label": "Primary", "count": len(profile.watchlist_primary)},
         {"label": "Secondary", "count": len(profile.watchlist_secondary)},
         {"label": "Monitor", "count": len(profile.watchlist_monitor)},
     ]
-    bucket_rows = _build_bucket_rows(profile)
-    max_sector_pct = max((row["portfolio_pct"] for row in sector_comparison), default=0.0)
-    max_sector_weight = max((row["coverage_weight"] for row in sector_comparison), default=0.0)
-    max_region_weight = max((row["value"] for row in region_rows), default=0.0)
     max_watch_count = max((row["count"] for row in watchlist_rows), default=0)
-    max_bucket_value = max((row["value"] for row in bucket_rows), default=0.0)
+
+    top5_weight = concentration["top5_weight_pct"]
+    top5_share = concentration["top5_share_of_total_pct"]
 
     return {
+        "overview": {
+            "profile": profile.name,
+            "timezone": profile.timezone,
+            "home_region_label": _display_label(profile.home_region),
+            "holdings_count": len(profile.portfolio_holdings),
+            "watchlist_total": (
+                len(profile.watchlist_primary)
+                + len(profile.watchlist_secondary)
+                + len(profile.watchlist_monitor)
+            ),
+            "primary_watchlist_count": len(profile.watchlist_primary),
+            "active_override_count": len(profile.preference_overrides),
+            "next_morning_send_local": metadata["next_morning_send_local"],
+            "last_holdings_update_local": metadata["last_holdings_update_local"],
+            "last_preferences_update_local": metadata["last_preferences_update_local"],
+        },
+        "executive_summary": _build_executive_summary(
+            profile=profile,
+            holdings_count=len(profile.portfolio_holdings),
+            total_weight=total_weight,
+            largest_position=largest_position,
+            top_sector_label=top_sector_row["label"] if top_sector_row else "Not provided",
+            top_region_label=top_region_row["label"] if top_region_row else "Not provided",
+            next_morning_send_local=metadata["next_morning_send_local"],
+        ),
+        "warnings": analyzer_warnings,
+        "holdings_totals": {
+            "weighted_positions": len(weighted_positions),
+            "unweighted_positions": len([position for position in ranked_positions if position.weight_pct is None]),
+            "total_weight_pct": _rounded_metric(total_weight),
+            "total_weight_display": _format_percent(total_weight),
+            "gap_to_100_pct": _rounded_metric(gap_to_100),
+            "gap_to_100_display": _format_gap(gap_to_100),
+            "near_100": bool(total_weight is not None and 95.0 <= total_weight <= 105.0),
+        },
         "kpis": {
-            "holdings_weight_total_pct": total_weight,
-            "holdings_weight_gap_pct": 100.0 - total_weight if total_weight > 0 else None,
+            "holdings_weight_total_pct": _rounded_metric(total_weight),
+            "holdings_weight_total_display": _format_percent(total_weight),
+            "holdings_weight_gap_pct": _rounded_metric(gap_to_100),
+            "holdings_weight_gap_display": _format_gap(gap_to_100),
             "largest_position": largest_position,
-            "top_sector": top_sector,
-            "top_sector_label": _display_label(top_sector) if top_sector else "",
-            "top_region": top_region,
-            "top_region_label": _display_label(top_region) if top_region else "",
-            "top5_concentration_pct": top5_share,
+            "top_sector": top_sector_row["key"] if top_sector_row else "",
+            "top_sector_label": top_sector_row["label"] if top_sector_row else "Not provided",
+            "top_region": top_region_row["key"] if top_region_row else "",
+            "top_region_label": top_region_row["label"] if top_region_row else "Not provided",
+            "top5_concentration_pct": top5_weight,
+            "top5_concentration_display": _format_percent(top5_weight),
+            "top5_share_of_holdings_pct": top5_share,
+            "top5_share_of_holdings_display": _format_percent(top5_share),
             "watchlist_total": (
                 len(profile.watchlist_primary)
                 + len(profile.watchlist_secondary)
                 + len(profile.watchlist_monitor)
             ),
             "delivery_enabled": delivery_enabled,
+            "next_morning_send_local": metadata["next_morning_send_local"],
+        },
+        "top_positions": top_positions,
+        "concentration": concentration,
+        "sector_exposure": sector_exposure,
+        "region_emphasis": region_emphasis,
+        "bucket_allocation": bucket_allocation,
+        "timing": {
+            "next_morning_send_local": metadata["next_morning_send_local"],
+            "last_holdings_update_local": metadata["last_holdings_update_local"],
+            "last_preferences_update_local": metadata["last_preferences_update_local"],
         },
         "charts": {
-            "sector_comparison": sector_comparison,
-            "region_weights": region_rows,
+            "sector_comparison": sector_exposure["rows"],
+            "region_weights": region_emphasis["rows"],
             "watchlist_priority": watchlist_rows,
-            "bucket_allocation": bucket_rows,
+            "bucket_allocation": bucket_allocation["rows"],
         },
         "chart_max": {
-            "sector": max(max_sector_pct, max_sector_weight),
-            "region": max_region_weight,
+            "sector": sector_exposure["max_scale_pct"],
+            "region": region_emphasis["max_scale_pct"],
             "watchlist": float(max_watch_count),
-            "bucket": max_bucket_value,
+            "bucket": bucket_allocation["max_scale_pct"],
+            "positions": largest_weight or 0.0,
+            "concentration": concentration["max_scale_pct"],
         },
-        "briefing_impact_preview": _build_briefing_impact_preview(profile),
+        "briefing_impact_preview": _build_briefing_impact_preview(
+            profile=profile,
+            top_positions=top_positions,
+            top_sector_label=top_sector_row["label"] if top_sector_row else "Not provided",
+            top_region_label=top_region_row["label"] if top_region_row else "Not provided",
+            next_morning_send_local=metadata["next_morning_send_local"],
+        ),
     }
 
 
-def _build_sector_comparison_rows(profile: UserProfile) -> list[dict[str, Any]]:
+def _build_sector_comparison_rows(
+    profile: UserProfile,
+    sector_label_by_key: dict[str, str],
+) -> dict[str, Any]:
+    coverage_total = sum(float(weight) for weight in profile.sector_weights.values() if float(weight) > 0)
     keys = set(profile.portfolio_sector_weights.keys()) | set(profile.sector_weights.keys())
     rows: list[dict[str, Any]] = []
     for key in sorted(keys):
+        portfolio_pct = float(profile.portfolio_sector_weights.get(key, 0.0) * 100.0)
+        coverage_weight_raw = float(profile.sector_weights.get(key, 0.0))
+        coverage_pct = (coverage_weight_raw / coverage_total * 100.0) if coverage_total > 0 else 0.0
         rows.append(
             {
                 "key": key,
-                "label": _display_label(key),
-                "portfolio_pct": float(profile.portfolio_sector_weights.get(key, 0.0) * 100.0),
-                "coverage_weight": float(profile.sector_weights.get(key, 0.0)),
+                "label": sector_label_by_key.get(key, _display_label(key)),
+                "portfolio_pct": _rounded_metric(portfolio_pct),
+                "coverage_pct": _rounded_metric(coverage_pct),
+                "coverage_weight": _rounded_metric(coverage_weight_raw, digits=2),
+                "portfolio_display": _format_percent(portfolio_pct),
+                "coverage_display": _format_percent(coverage_pct),
             }
         )
-    rows.sort(key=lambda row: max(row["portfolio_pct"], row["coverage_weight"]), reverse=True)
-    return rows[:8]
+    rows.sort(key=lambda row: max(row["portfolio_pct"] or 0.0, row["coverage_pct"] or 0.0), reverse=True)
+    trimmed = rows[:8]
+    max_scale = max(
+        (
+            max(row["portfolio_pct"] or 0.0, row["coverage_pct"] or 0.0)
+            for row in trimmed
+        ),
+        default=0.0,
+    )
+    for row in trimmed:
+        row["portfolio_bar_pct"] = _bar_pct(row["portfolio_pct"], max_scale)
+        row["coverage_bar_pct"] = _bar_pct(row["coverage_pct"], max_scale)
+    return {
+        "rows": trimmed,
+        "max_scale_pct": _rounded_metric(max_scale) or 0.0,
+    }
 
 
-def _build_region_rows(profile: UserProfile) -> list[dict[str, Any]]:
+def _build_region_rows(profile: UserProfile) -> dict[str, Any]:
+    positive_total = sum(float(value) for value in profile.coverage_weights.values() if float(value) > 0)
     rows = [
         {
             "key": key,
             "label": _display_label(key),
-            "value": float(value),
+            "value": _rounded_metric(float(value), digits=2),
+            "normalized_pct": _rounded_metric((float(value) / positive_total * 100.0) if positive_total > 0 else 0.0),
         }
         for key, value in profile.coverage_weights.items()
     ]
-    rows.sort(key=lambda row: row["value"], reverse=True)
-    return rows[:8]
+    rows.sort(key=lambda row: (row["value"] or 0.0, row["label"]), reverse=True)
+    trimmed = rows[:8]
+    max_scale = max((row["normalized_pct"] or 0.0 for row in trimmed), default=0.0)
+    for row in trimmed:
+        row["display"] = _format_percent(row["normalized_pct"])
+        row["bar_pct"] = _bar_pct(row["normalized_pct"], max_scale)
+    return {
+        "rows": trimmed,
+        "max_scale_pct": _rounded_metric(max_scale) or 0.0,
+    }
 
 
-def _build_bucket_rows(profile: UserProfile) -> list[dict[str, Any]]:
+def _build_bucket_rows(profile: UserProfile) -> dict[str, Any]:
     bucket_totals: dict[str, float] = {}
+    bucket_counts: dict[str, int] = {}
     unweighted_count = 0
     for position in profile.portfolio_holdings:
         bucket = (position.bucket or "unlabeled").strip().lower()
+        bucket_counts[bucket] = bucket_counts.get(bucket, 0) + 1
         if position.weight_pct is None:
             unweighted_count += 1
             continue
         bucket_totals[bucket] = bucket_totals.get(bucket, 0.0) + float(position.weight_pct)
+    max_value = max(bucket_totals.values(), default=0.0)
     rows = [
-        {"label": bucket.replace("_", " ").title(), "value": value}
+        {
+            "key": bucket,
+            "label": _display_label(bucket),
+            "value": _rounded_metric(value),
+            "display": _format_percent(value),
+            "holdings_count": bucket_counts.get(bucket, 0),
+            "bar_pct": _bar_pct(value, max_value),
+        }
         for bucket, value in bucket_totals.items()
     ]
-    rows.sort(key=lambda row: row["value"], reverse=True)
-    if unweighted_count > 0:
-        rows.append({"label": "Unweighted Positions", "value": float(unweighted_count)})
-    return rows[:6]
+    rows.sort(key=lambda row: ((row["value"] or 0.0), row["holdings_count"]), reverse=True)
+    return {
+        "rows": rows[:6],
+        "unweighted_positions": unweighted_count,
+        "max_scale_pct": _rounded_metric(max_value) or 0.0,
+    }
 
 
-def _build_briefing_impact_preview(profile: UserProfile) -> str:
+def _build_concentration_rows(weights_sorted: list[float], total_weight: float | None) -> dict[str, Any]:
+    def _sum_slice(limit: int) -> float | None:
+        if not weights_sorted:
+            return None
+        return float(sum(weights_sorted[:limit]))
+
+    top1_weight = _sum_slice(1)
+    top3_weight = _sum_slice(3)
+    top5_weight = _sum_slice(5)
+    tail_weight = None
+    if total_weight is not None and top5_weight is not None:
+        tail_weight = max(total_weight - top5_weight, 0.0)
+
+    rows = [
+        {"key": "top1", "label": "Top 1", "value_pct": _rounded_metric(top1_weight)},
+        {"key": "top3", "label": "Top 3", "value_pct": _rounded_metric(top3_weight)},
+        {"key": "top5", "label": "Top 5", "value_pct": _rounded_metric(top5_weight)},
+        {"key": "tail", "label": "Residual Tail", "value_pct": _rounded_metric(tail_weight)},
+    ]
+    max_scale = max((row["value_pct"] or 0.0 for row in rows), default=0.0)
+    for row in rows:
+        share = None
+        if row["value_pct"] is not None and total_weight and total_weight > 0:
+            share = row["value_pct"] / total_weight * 100.0
+        row["share_of_total_pct"] = _rounded_metric(share)
+        row["display"] = _format_percent(row["value_pct"])
+        row["bar_pct"] = _bar_pct(row["value_pct"], max_scale)
+
+    return {
+        "rows": rows,
+        "top1_weight_pct": _rounded_metric(top1_weight),
+        "top3_weight_pct": _rounded_metric(top3_weight),
+        "top5_weight_pct": _rounded_metric(top5_weight),
+        "tail_weight_pct": _rounded_metric(tail_weight),
+        "top1_share_of_total_pct": rows[0]["share_of_total_pct"],
+        "top3_share_of_total_pct": rows[1]["share_of_total_pct"],
+        "top5_share_of_total_pct": rows[2]["share_of_total_pct"],
+        "tail_share_of_total_pct": rows[3]["share_of_total_pct"],
+        "max_scale_pct": _rounded_metric(max_scale) or 0.0,
+    }
+
+
+def _build_analyzer_warning_rows(validations: list[dict[str, str]]) -> list[dict[str, str]]:
+    warning_titles = {
+        "holdings_weight_sum": "Holdings Weight Check",
+        "watchlist_primary_empty": "Primary Watchlist Empty",
+        "region_weights_empty": "Region Emphasis Missing",
+    }
+    analyzer_codes = {
+        "holdings_weight_sum",
+        "watchlist_primary_empty",
+        "region_weights_empty",
+    }
+    warnings: list[dict[str, str]] = []
+    for item in validations:
+        code = item.get("code", "")
+        if code.startswith("delivery_missing_"):
+            title = "Delivery Channel Missing"
+        elif code in analyzer_codes:
+            title = warning_titles.get(code, "Analyzer Warning")
+        else:
+            continue
+        warnings.append(
+            {
+                "code": code,
+                "title": title,
+                "message": item.get("message", ""),
+            }
+        )
+    return warnings
+
+
+def _build_briefing_impact_preview(
+    *,
+    profile: UserProfile,
+    top_positions: list[dict[str, Any]],
+    top_sector_label: str,
+    top_region_label: str,
+    next_morning_send_local: str,
+) -> str:
+    focus_positions = [
+        f"{row['symbol']} ({row['weight_display']})"
+        for row in top_positions[:2]
+        if row.get("weight_pct") is not None
+    ]
+    focus_text = (
+        f"Direct portfolio attention will skew toward {', '.join(focus_positions)}."
+        if focus_positions
+        else "No weighted holdings are configured yet, so direct holding emphasis is limited."
+    )
+    sector_text = top_sector_label if top_sector_label != "Not provided" else "balanced sector coverage"
+    region_text = top_region_label if top_region_label != "Not provided" else _display_label(profile.home_region)
     primary_count = len(profile.watchlist_primary)
-    top_region = ""
-    if profile.coverage_weights:
-        top_region = _display_label(max(profile.coverage_weights.items(), key=lambda item: item[1])[0])
-    top_sectors = sorted(profile.sector_weights.items(), key=lambda item: float(item[1]), reverse=True)[:3]
-    sector_text = ", ".join(
-        _display_label(key)
-        for key, weight in top_sectors
-        if float(weight) > 0
+    morning_channels = ", ".join(profile.channels_for("morning")) or "no enabled morning channels"
+    portfolio_focus = (
+        "Portfolio focus remains enabled in the morning brief."
+        if profile.morning_section_enabled("portfolio_focus")
+        else "Portfolio focus is disabled in the morning brief."
     )
-    region_text = top_region or _display_label(profile.home_region)
-    if not sector_text:
-        sector_text = "balanced sector coverage"
     return (
-        f"Current settings emphasize {region_text} context and {sector_text}. "
-        f"Primary watchlist contains {primary_count} symbol(s), which drives strongest ranking impact."
+        f"Tomorrow's brief is set to lead with {region_text} context and {sector_text} exposure. "
+        f"{focus_text} Primary watchlist has {primary_count} symbol(s). "
+        f"Next scheduled morning send is {next_morning_send_local} via {morning_channels}. "
+        f"{portfolio_focus}"
     )
+
+
+def _build_executive_summary(
+    *,
+    profile: UserProfile,
+    holdings_count: int,
+    total_weight: float | None,
+    largest_position: dict[str, Any] | None,
+    top_sector_label: str,
+    top_region_label: str,
+    next_morning_send_local: str,
+) -> str:
+    largest_text = "No weighted lead position is configured yet"
+    if largest_position and largest_position.get("weight_display") != "Not provided":
+        largest_text = (
+            f"{largest_position['symbol']} is the anchor holding at {largest_position['weight_display']}"
+        )
+
+    sector_text = top_sector_label if top_sector_label != "Not provided" else "balanced sector exposure"
+    region_text = top_region_label if top_region_label != "Not provided" else _display_label(profile.home_region)
+    total_weight_text = _format_percent(total_weight) if total_weight is not None else "Not provided"
+    return (
+        f"{holdings_count} active holding(s), {total_weight_text} weighted in total. "
+        f"{largest_text}. Sector tilt is strongest in {sector_text}, "
+        f"while editorial emphasis leads with {region_text}. "
+        f"Next local morning brief is due at {next_morning_send_local}."
+    )
+
+
+def _rounded_metric(value: float | None, *, digits: int = 1) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), digits)
+
+
+def _format_percent(value: float | None, *, digits: int = 1) -> str:
+    if value is None:
+        return "Not provided"
+    return f"{float(value):.{digits}f}%"
+
+
+def _format_gap(value: float | None, *, digits: int = 1) -> str:
+    if value is None:
+        return "Not provided"
+    if abs(float(value)) < 0.05:
+        return "0.0% vs 100%"
+    direction = "below" if value > 0 else "above"
+    return f"{abs(float(value)):.{digits}f}% {direction} 100%"
+
+
+def _display_or_not_provided(value: str | None) -> str:
+    text = str(value or "").strip()
+    return text or "Not provided"
+
+
+def _bar_pct(value: float | None, max_value: float | None) -> float:
+    if value is None or not max_value or max_value <= 0:
+        return 0.0
+    return round(max(0.0, min(float(value) / float(max_value) * 100.0, 100.0)), 1)
 
 
 def _latest_holdings_update(profile_name: str) -> datetime | None:

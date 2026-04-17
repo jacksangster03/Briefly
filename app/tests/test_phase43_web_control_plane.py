@@ -94,8 +94,14 @@ def test_ui_settings_page_renders(client):
     response = client.get("/ui/settings?profile=default_user")
     assert response.status_code == 200
     assert "Briefly" in response.text
-    assert "Control Center" in response.text
+    assert "Portfolio Analyzer" in response.text
     assert "Saved values are persisted in SQLite as" in response.text
+    assert "Executive Summary" in response.text
+    assert "Top Holdings Concentration" in response.text
+    assert "Sector Exposure vs Coverage Weight" in response.text
+    assert "Analyzer Warnings" in response.text
+    assert "Portfolio Exposure" in response.text
+    assert "Editorial Coverage Weight" in response.text
     assert "Home Region Focus" in response.text
     assert "Briefing Impact Preview" in response.text
     assert "Region Weight — US" in response.text
@@ -107,6 +113,7 @@ def test_display_label_formats_acronyms():
     assert _display_label("latam") == "LATAM"
     assert _display_label("global_macro") == "Global Macro"
     assert _display_label("ai") == "AI"
+    assert _display_label("ibex") == "IBEX"
 
 
 def test_api_put_preferences_and_state_roundtrip(client):
@@ -137,6 +144,15 @@ def test_api_put_preferences_and_state_roundtrip(client):
     assert "analysis" in state
     assert "kpis" in state["analysis"]
     assert "chart_max" in state["analysis"]
+    assert "holdings_totals" in state["analysis"]
+    assert "top_positions" in state["analysis"]
+    assert "concentration" in state["analysis"]
+    assert "sector_exposure" in state["analysis"]
+    assert "region_emphasis" in state["analysis"]
+    assert "bucket_allocation" in state["analysis"]
+    assert "warnings" in state["analysis"]
+    assert "timing" in state["analysis"]
+    assert "executive_summary" in state["analysis"]
 
 
 def test_api_put_preferences_rejects_invalid_values(client):
@@ -190,6 +206,17 @@ def test_api_holdings_import_yaml_and_reject_bad_csv(client):
 
     state = client.get("/api/v1/profile/default_user/state").json()
     assert len(state["holdings"]) == 2
+    assert state["analysis"]["holdings_totals"]["total_weight_pct"] == pytest.approx(14.7)
+    assert state["analysis"]["holdings_totals"]["gap_to_100_pct"] == pytest.approx(85.3)
+    assert state["analysis"]["top_positions"][0]["symbol"] == "NVDA"
+    assert state["analysis"]["top_positions"][0]["sector_label"] == "Semiconductors"
+    assert state["analysis"]["concentration"]["top1_weight_pct"] == pytest.approx(8.5)
+    assert state["analysis"]["concentration"]["top3_weight_pct"] == pytest.approx(14.7)
+    assert state["analysis"]["concentration"]["tail_weight_pct"] == pytest.approx(0.0)
+    assert state["analysis"]["kpis"]["top_sector_label"] == "Semiconductors"
+    assert state["analysis"]["kpis"]["top_region_label"] == "US"
+    assert "NVDA is the anchor holding at 8.50%" in state["analysis"]["executive_summary"]
+    assert "Tomorrow's brief is set to lead with US context" in state["analysis"]["briefing_impact_preview"]
 
     bad_csv = b"symbol,weight_pct\n,8.2\n"
     bad_response = client.post(
@@ -291,3 +318,26 @@ def test_state_exposes_validation_warnings_when_delivery_channels_missing(client
     state = client.get("/api/v1/profile/default_user/state").json()
     warnings = state["validations"]
     assert any("No channels enabled for morning briefing delivery." in item["message"] for item in warnings)
+    analyzer_warnings = state["analysis"]["warnings"]
+    assert any(item["code"] == "delivery_missing_morning" for item in analyzer_warnings)
+
+
+def test_analyzer_warning_strip_hides_when_issues_are_cleared(client):
+    response = client.put(
+        "/api/v1/profile/default_user/preferences",
+        json={
+            "updates": {
+                "delivery.morning_channels": ["email"],
+                "delivery.intraday_channels": ["email"],
+                "delivery.breaking_channels": ["telegram"],
+            }
+        },
+    )
+    assert response.status_code == 200
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert state["analysis"]["warnings"] == []
+
+    page = client.get("/ui/settings?profile=default_user")
+    assert page.status_code == 200
+    assert "<h3>Analyzer Warnings</h3>" not in page.text
