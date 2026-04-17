@@ -782,3 +782,11 @@ def test_ui_save_holdings_clears_when_no_rows_submitted(client):
     assert response.status_code == 200
     state = client.get("/api/v1/profile/default_user/state").json()
     assert state["holdings"] == []
+
+
+def test_state_includes_risk_analytics_key(client):
+    """GET /api/v1/profile/default_user/state must include risk_analytics in analysis."""
+    response = client.get("/api/v1/profile/default_user/state")
+    assert response.status_code == 200
+    data = response.json()
+    assert "risk_analytics" in data["analysis"]

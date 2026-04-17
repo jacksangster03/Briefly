@@ -27,6 +27,8 @@
 {% set policy_fit = analysis.policy_fit %}
 {% set allocation_drift = analysis.allocation_drift %}
 {% set benchmark_summary = analysis.benchmark_summary %}
+{% set risk_analytics = analysis.risk_analytics %}
+{% set risk_config = state.risk_config %}
 {% set delivery_summary = metadata.delivery_summary %}
 {% set override_summaries = metadata.override_summaries %}
 {% set policy_summary = metadata.policy_summary %}
@@ -998,6 +1000,7 @@
   <a href="#section-analyzer"  data-module-nav="section-analyzer">Portfolio Analyzer</a>
   <a href="#section-policy"    data-module-nav="section-policy">Policy</a>
   <a href="#section-allocation" data-module-nav="section-allocation">Allocation</a>
+  <a href="#section-risk"      data-module-nav="section-risk">Risk</a>
   <a href="#section-benchmark" data-module-nav="section-benchmark">Benchmark</a>
   <a href="#section-holdings"  data-module-nav="section-holdings">Holdings</a>
   <a href="#section-coverage"  data-module-nav="section-coverage">Coverage</a>
@@ -1066,6 +1069,21 @@
         <dt>Next Morning Send</dt><dd>{{ analysis.timing.next_morning_send_local }}</dd>
         <dt>Last Holdings Update</dt><dd>{{ analysis.timing.last_holdings_update_local }}</dd>
         <dt>Last Preferences Update</dt><dd>{{ analysis.timing.last_preferences_update_local }}</dd>
+      </dl>
+      <dl class="summary">
+        <dt>Risk Snapshot</dt>
+        {% if risk_analytics and risk_analytics.available %}
+          <dd>
+            Sharpe: <strong>{{ risk_analytics.sharpe_display }}</strong>
+            <span class="severity-badge {{ 'low' if risk_analytics.sharpe_label in ['excellent','good'] else 'medium' if risk_analytics.sharpe_label == 'moderate' else 'high' }}">{{ risk_analytics.sharpe_label }}</span>
+          </dd>
+          <dd>Volatility: {{ risk_analytics.volatility_display }} vs {{ risk_analytics.benchmark_volatility_display }}</dd>
+          <dd>Max Drawdown: {{ risk_analytics.max_drawdown_display }} vs {{ risk_analytics.benchmark_max_drawdown_display }}</dd>
+          <dd>Tracking Error: {{ risk_analytics.tracking_error_display }}</dd>
+          <dd>Active Return: {{ risk_analytics.active_return_display }}</dd>
+        {% else %}
+          <dd style="color: var(--muted);">Risk metrics not yet computed. Configure a benchmark and click Refresh.</dd>
+        {% endif %}
       </dl>
     </div>
   </section>
@@ -1622,6 +1640,215 @@
         </tbody>
       </table>
     </div>
+  </section>
+
+  <section class="card" id="section-risk" data-module-section="section-risk">
+    <h2>Risk &amp; Benchmark Analytics</h2>
+    <p class="muted">Annualised risk-adjusted return metrics computed from historical price data. Requires a configured benchmark and weighted holdings.</p>
+
+    <div class="inline-grid">
+      <form
+        hx-post="/ui/profile/{{ state.profile }}/save/risk-config"
+        hx-target="#settings-root"
+        hx-swap="outerHTML"
+        method="post"
+        class="tracked-form"
+      >
+        <div class="field">
+          <label for="risk_lookback_days">Lookback Period</label>
+          <select id="risk_lookback_days" name="risk_lookback_days">
+            <option value="63"  {% if risk_config and risk_config.lookback_days == 63  %}selected{% endif %}>3 months (63 days)</option>
+            <option value="126" {% if risk_config and risk_config.lookback_days == 126 %}selected{% endif %}>6 months (126 days)</option>
+            <option value="252" {% if not risk_config or risk_config.lookback_days == 252 %}selected{% endif %}>1 year (252 days)</option>
+            <option value="504" {% if risk_config and risk_config.lookback_days == 504 %}selected{% endif %}>2 years (504 days)</option>
+            <option value="756" {% if risk_config and risk_config.lookback_days == 756 %}selected{% endif %}>3 years (756 days)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="risk_free_rate_pct">Risk-Free Rate (%)</label>
+          <input id="risk_free_rate_pct" type="number" name="risk_free_rate_pct" step="0.1" min="0" max="20"
+            value="{{ risk_config.risk_free_rate_pct if risk_config else 4.5 }}">
+        </div>
+        <div class="actions" style="margin-top: 8px;">
+          <button type="submit">Save Config</button>
+        </div>
+      </form>
+
+      <form
+        hx-post="/ui/profile/{{ state.profile }}/refresh/risk"
+        hx-target="#settings-root"
+        hx-swap="outerHTML"
+        method="post"
+      >
+        <div class="field">
+          <label>&nbsp;</label>
+          <p class="muted" style="margin: 0 0 8px; font-size: 0.82rem;">Force a fresh fetch of price data and recompute all metrics.</p>
+        </div>
+        <div class="actions" style="margin-top: 8px;">
+          <button type="submit">Refresh Metrics</button>
+        </div>
+      </form>
+    </div>
+
+    {% if not risk_analytics or not risk_analytics.available %}
+      <div class="status" style="margin-top: 12px;">
+        <strong>Risk analytics unavailable.</strong>
+        {{ risk_analytics.error if risk_analytics else "Configure a benchmark and ensure weighted holdings are present." }}
+        <br>
+        To enable: configure a benchmark symbol in the Benchmark section, then click Refresh Metrics above.
+      </div>
+    {% else %}
+
+    <div class="executive-strip" style="margin-top: 14px;">
+      <strong>Risk Summary</strong>
+      <p>{{ risk_analytics.risk_summary }}</p>
+      <div class="hero-chip-row">
+        <span class="hero-chip">{{ risk_analytics.lookback_label }}</span>
+        <span class="hero-chip">{{ risk_analytics.benchmark_name }}</span>
+        <span class="hero-chip">{{ risk_analytics.data_completeness_pct }}% data completeness</span>
+      </div>
+    </div>
+
+    <div class="kpi-grid" style="margin-top: 14px;">
+      <div class="kpi">
+        <div class="kpi-label">Portfolio Return</div>
+        <div class="kpi-value" style="color: {{ 'var(--success)' if risk_analytics.total_return_pct >= 0 else 'var(--error)' }};">
+          {{ risk_analytics.total_return_display }}
+        </div>
+        <div class="kpi-note">{{ risk_analytics.lookback_label }}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Benchmark Return</div>
+        <div class="kpi-value" style="color: {{ 'var(--success)' if risk_analytics.benchmark_return_pct >= 0 else 'var(--error)' }};">
+          {{ risk_analytics.benchmark_return_display }}
+        </div>
+        <div class="kpi-note">{{ risk_analytics.benchmark_name }}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Active Return</div>
+        <div class="kpi-value" style="color: {{ 'var(--success)' if risk_analytics.active_return_pct >= 0 else 'var(--error)' }};">
+          {{ risk_analytics.active_return_display }}
+        </div>
+        <div class="kpi-note">Portfolio vs benchmark</div>
+      </div>
+    </div>
+
+    <div class="chart-grid" style="margin-top: 8px;">
+      <div class="chart-card">
+        <p class="chart-title">Volatility (Annualised)</p>
+        <div class="bar-list">
+          <div class="bar-row">
+            <div>
+              <div class="bar-label">Portfolio</div>
+              <div class="bar-track"><div class="bar-fill" style="width: {{ [risk_analytics.volatility_pct / [risk_analytics.volatility_pct, risk_analytics.benchmark_volatility_pct] | max * 100, 100] | min if [risk_analytics.volatility_pct, risk_analytics.benchmark_volatility_pct] | max > 0 else 0 }}%;"></div></div>
+            </div>
+            <div class="bar-value">{{ risk_analytics.volatility_display }}</div>
+          </div>
+          <div class="bar-row">
+            <div>
+              <div class="bar-label">Benchmark</div>
+              <div class="bar-track"><div class="bar-fill secondary" style="width: {{ [risk_analytics.benchmark_volatility_pct / [risk_analytics.volatility_pct, risk_analytics.benchmark_volatility_pct] | max * 100, 100] | min if [risk_analytics.volatility_pct, risk_analytics.benchmark_volatility_pct] | max > 0 else 0 }}%;"></div></div>
+            </div>
+            <div class="bar-value">{{ risk_analytics.benchmark_volatility_display }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <p class="chart-title">Max Drawdown</p>
+        <div class="bar-list">
+          <div class="bar-row">
+            <div>
+              <div class="bar-label">Portfolio</div>
+              <div class="bar-track"><div class="bar-fill" style="width: {{ [risk_analytics.max_drawdown_pct | abs / ([risk_analytics.max_drawdown_pct | abs, risk_analytics.benchmark_max_drawdown_pct | abs] | max) * 100, 100] | min if [risk_analytics.max_drawdown_pct | abs, risk_analytics.benchmark_max_drawdown_pct | abs] | max > 0 else 0 }}%;"></div></div>
+            </div>
+            <div class="bar-value">{{ risk_analytics.max_drawdown_display }}</div>
+          </div>
+          <div class="bar-row">
+            <div>
+              <div class="bar-label">Benchmark</div>
+              <div class="bar-track"><div class="bar-fill secondary" style="width: {{ [risk_analytics.benchmark_max_drawdown_pct | abs / ([risk_analytics.max_drawdown_pct | abs, risk_analytics.benchmark_max_drawdown_pct | abs] | max) * 100, 100] | min if [risk_analytics.max_drawdown_pct | abs, risk_analytics.benchmark_max_drawdown_pct | abs] | max > 0 else 0 }}%;"></div></div>
+            </div>
+            <div class="bar-value">{{ risk_analytics.benchmark_max_drawdown_display }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <p class="chart-title">Risk-Adjusted Metrics</p>
+        <div class="bar-list">
+          <div class="bar-row">
+            <div>
+              <div class="bar-label">
+                Sharpe Ratio
+                <span class="severity-badge {{ 'low' if risk_analytics.sharpe_label in ['excellent','good'] else 'medium' if risk_analytics.sharpe_label == 'moderate' else 'high' }}">{{ risk_analytics.sharpe_label }}</span>
+              </div>
+            </div>
+            <div class="bar-value">{{ risk_analytics.sharpe_display }}</div>
+          </div>
+          <div class="bar-row">
+            <div><div class="bar-label">Sortino Ratio</div></div>
+            <div class="bar-value">{{ risk_analytics.sortino_display }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="chart-card">
+        <p class="chart-title">Benchmark Analytics</p>
+        <div class="bar-list">
+          <div class="bar-row">
+            <div>
+              <div class="bar-label">
+                Tracking Error
+              </div>
+            </div>
+            <div class="bar-value">{{ risk_analytics.tracking_error_display }}</div>
+          </div>
+          <div class="bar-row">
+            <div>
+              <div class="bar-label">
+                Information Ratio
+                <span class="severity-badge {{ 'low' if risk_analytics.ir_label == 'strong alpha' else 'medium' if risk_analytics.ir_label == 'neutral' else 'high' }}">{{ risk_analytics.ir_label }}</span>
+              </div>
+            </div>
+            <div class="bar-value">{{ risk_analytics.information_ratio_display }}</div>
+          </div>
+          <div class="bar-row">
+            <div><div class="bar-label">Risk-Free Rate</div></div>
+            <div class="bar-value">{{ risk_analytics.risk_free_rate_pct }}%</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% if risk_analytics.rolling and risk_analytics.rolling['30d'] %}
+    <div class="chart-card wide" style="margin-top: 8px;">
+      <p class="chart-title">Rolling 30-Day Returns (last 10 observations)</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Portfolio</th>
+              <th>Benchmark</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in risk_analytics.rolling['30d'][-10:] %}
+            <tr>
+              <td>{{ row.date }}</td>
+              <td style="color: {{ 'var(--success)' if row.portfolio_pct >= 0 else 'var(--error)' }};">
+                {{ '+' if row.portfolio_pct >= 0 else '' }}{{ "%.2f"|format(row.portfolio_pct) }}%
+              </td>
+              <td style="color: {{ 'var(--success)' if row.benchmark_pct >= 0 else 'var(--error)' }};">
+                {{ '+' if row.benchmark_pct >= 0 else '' }}{{ "%.2f"|format(row.benchmark_pct) }}%
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    {% endif %}
   </section>
 
   <section class="card" id="section-benchmark" data-module-section="section-benchmark">

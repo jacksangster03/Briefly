@@ -19,12 +19,14 @@ from app.web.control_plane_service import (
     apply_preference_updates,
     build_profile_state,
     import_holdings_from_upload,
+    refresh_risk_for_profile,
     remove_preference,
     reset_preferences,
     save_allocation,
     save_benchmark,
     save_holdings_from_form,
     save_policy,
+    save_risk_config,
     search_followables,
 )
 
@@ -385,6 +387,76 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 limit=limit,
             )
         }
+
+    @app.post(
+        "/ui/profile/{profile}/save/risk-config",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_risk_config(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        try:
+            raw_lookback = str(form.get("risk_lookback_days", "252")).strip()
+            raw_rfr = str(form.get("risk_free_rate_pct", "4.5")).strip()
+            lookback_days = int(raw_lookback) if raw_lookback else 252
+            risk_free_rate_pct = float(raw_rfr) if raw_rfr else 4.5
+            save_risk_config(normalized_profile, lookback_days, risk_free_rate_pct)
+            state = build_profile_state(_settings(request), normalized_profile)
+            timezone = state["effective"]["timezone"]
+            saved_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Risk configuration saved. Saved at {saved_at}.",
+                message_kind="success",
+                state=state,
+            )
+        except (ValueError, TypeError) as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Risk config save failed: {exc}",
+                message_kind="error",
+                status_code=400,
+            )
+
+    @app.post(
+        "/ui/profile/{profile}/refresh/risk",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_refresh_risk(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        refresh_risk_for_profile(normalized_profile)
+        state = build_profile_state(_settings(request), normalized_profile)
+        timezone = state["effective"]["timezone"]
+        refreshed_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
+        return _render_settings_root(
+            request,
+            profile=normalized_profile,
+            message=f"Risk metrics refreshed at {refreshed_at}.",
+            message_kind="success",
+            state=state,
+        )
+
+    @app.get("/api/v1/profile/{profile}/risk")
+    def api_get_risk(
+        profile: str,
+        lookback_days: int = Query(default=252),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings_from_app(app), normalized_profile)
+        risk_analytics = state.get("analysis", {}).get("risk_analytics", {})
+        return {"profile": normalized_profile, "risk_analytics": risk_analytics}
+
+    @app.post("/api/v1/profile/{profile}/risk/refresh")
+    def api_refresh_risk(profile: str):
+        normalized_profile = _normalize_profile(profile)
+        refresh_risk_for_profile(normalized_profile)
+        state = build_profile_state(_settings_from_app(app), normalized_profile)
+        risk_analytics = state.get("analysis", {}).get("risk_analytics", {})
+        return {"profile": normalized_profile, "refreshed": True, "risk_analytics": risk_analytics}
 
     return app
 

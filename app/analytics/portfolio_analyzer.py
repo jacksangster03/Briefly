@@ -134,6 +134,8 @@ def build_portfolio_analysis(
     allocation_targets: list[dict[str, Any]] | None = None,
     actual_allocation: list[dict[str, Any]] | None = None,
     benchmark: dict[str, str] | None = None,
+    benchmark_config: dict[str, Any] | None = None,
+    risk_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compute presentation-ready analyzer metrics for the settings UI/API."""
     universe = load_sector_universe(settings)
@@ -221,11 +223,28 @@ def build_portfolio_analysis(
         aggregated_positions=aggregated_positions,
         sector_exposure=sector_exposure["rows"],
     )
+    holdings_data = [
+        {
+            "symbol": h.symbol,
+            "weight_pct": h.weight_pct,
+        }
+        for h in profile.portfolio_holdings
+        if h.weight_pct is not None
+    ]
+    risk_analytics = _build_risk_analytics(
+        profile=profile,
+        holdings_data=holdings_data,
+        benchmark_config=benchmark_config,
+        policy=policy,
+        settings=settings,
+        risk_config=risk_config,
+    )
     policy_fit = _build_policy_fit(
         top_positions=top_positions,
         policy=policy or {},
         allocation_targets=allocation_targets or [],
         actual_allocation=actual_allocation or [],
+        risk_analytics=risk_analytics,
     )
     allocation_drift = _build_allocation_drift(
         allocation_targets=allocation_targets or [],
@@ -327,6 +346,7 @@ def build_portfolio_analysis(
             "name": "No benchmark configured",
             "description": "Choose a benchmark to anchor future relative analytics.",
         },
+        "risk_analytics": risk_analytics,
         "health_checks": health_checks,
         "data_quality": data_quality,
         "charts": {
@@ -739,12 +759,35 @@ def _build_health_checks(
     return checks
 
 
+def _build_risk_analytics(
+    *,
+    profile: UserProfile,
+    holdings_data: list[dict[str, Any]],
+    benchmark_config: dict[str, Any] | None,
+    policy: dict[str, Any] | None,
+    settings: Settings,
+    risk_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Call risk service to compute analytics. Uses lazy import to avoid circular imports."""
+    from app.risk.service import compute_risk_analytics
+
+    lookback_days = int((risk_config or {}).get("lookback_days", 252)) if risk_config else 252
+    return compute_risk_analytics(
+        profile_name=profile.name,
+        holdings=holdings_data,
+        benchmark_config=benchmark_config,
+        policy=policy,
+        lookback_days=lookback_days,
+    )
+
+
 def _build_policy_fit(
     *,
     top_positions: list[dict[str, Any]],
     policy: dict[str, Any],
     allocation_targets: list[dict[str, Any]],
     actual_allocation: list[dict[str, Any]],
+    risk_analytics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     breaches: list[dict[str, Any]] = []
 
@@ -830,7 +873,37 @@ def _build_policy_fit(
                 }
             )
 
-    severity_rank = {"high": 0, "medium": 1, "low": 2}
+    if risk_analytics and risk_analytics.get("available"):
+        vol_pct = risk_analytics.get("volatility_pct") or 0.0
+        max_vol_policy = _float_or_none(policy.get("max_volatility_percent"))
+        if max_vol_policy is not None and vol_pct > max_vol_policy:
+            breaches.append(
+                {
+                    "code": "volatility_breach",
+                    "severity": "warning",
+                    "title": "Portfolio volatility exceeds policy limit",
+                    "message": (
+                        f"Annualised volatility is {vol_pct:.1f}% versus a "
+                        f"{max_vol_policy:.1f}% policy maximum."
+                    ),
+                }
+            )
+        port_dd = risk_analytics.get("max_drawdown_pct") or 0.0
+        max_dd_policy = _float_or_none(policy.get("max_drawdown_percent"))
+        if max_dd_policy is not None and abs(port_dd) > max_dd_policy:
+            breaches.append(
+                {
+                    "code": "max_drawdown_breach",
+                    "severity": "warning",
+                    "title": "Portfolio drawdown exceeds policy limit",
+                    "message": (
+                        f"Maximum drawdown is {port_dd:.1f}% versus a "
+                        f"{max_dd_policy:.1f}% policy limit."
+                    ),
+                }
+            )
+
+    severity_rank = {"high": 0, "medium": 1, "low": 2, "warning": 3}
     breaches.sort(key=lambda item: (severity_rank.get(item["severity"], 9), item["title"]))
     trimmed = breaches[:6]
     if not trimmed:

@@ -217,6 +217,67 @@ class BenchmarkConfig(Base):
     updated_at = Column(DateTime, default=_utcnow)
 
 
+class PortfolioReturnSeries(Base):
+    """Cached daily portfolio and benchmark returns per profile."""
+
+    __tablename__ = "portfolio_return_series"
+    __table_args__ = (
+        UniqueConstraint("profile_name", "date", name="uq_portfolio_return_profile_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    portfolio_return_pct = Column(Float, nullable=True)
+    benchmark_return_pct = Column(Float, nullable=True)
+    active_return_pct = Column(Float, nullable=True)
+    stale = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class BenchmarkPriceCache(Base):
+    """Daily close prices for benchmark symbols."""
+
+    __tablename__ = "benchmark_price_cache"
+    __table_args__ = (
+        UniqueConstraint("symbol", "date", name="uq_benchmark_price_symbol_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(32), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    close_price = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class RiskMetricsSnapshot(Base):
+    """Persisted scalar risk metrics per profile."""
+
+    __tablename__ = "risk_metrics_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    computed_at = Column(DateTime, nullable=False)
+    lookback_days = Column(Integer, nullable=False, default=252)
+    sharpe_ratio = Column(Float, nullable=True)
+    sortino_ratio = Column(Float, nullable=True)
+    max_drawdown_pct = Column(Float, nullable=True)
+    benchmark_max_drawdown_pct = Column(Float, nullable=True)
+    volatility_pct = Column(Float, nullable=True)
+    benchmark_volatility_pct = Column(Float, nullable=True)
+    total_return_pct = Column(Float, nullable=True)
+    benchmark_return_pct = Column(Float, nullable=True)
+    active_return_pct = Column(Float, nullable=True)
+    tracking_error_pct = Column(Float, nullable=True)
+    information_ratio = Column(Float, nullable=True)
+    risk_free_rate_pct = Column(Float, nullable=True)
+    data_completeness_pct = Column(Float, nullable=True)
+    rolling_30d_json = Column(Text, nullable=True)
+    rolling_90d_json = Column(Text, nullable=True)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
 class CadenceMarker(Base):
     """Idempotency marker for once-per-day cadence sends."""
 

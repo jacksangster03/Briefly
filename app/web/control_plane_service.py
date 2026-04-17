@@ -29,6 +29,7 @@ from app.benchmark.service import (
     load_benchmark_config,
     save_benchmark_config,
 )
+from app.risk.service import invalidate_risk_cache
 from app.db.models import PortfolioHolding as PortfolioHoldingRow
 from app.db.models import UserPreference as UserPreferenceRow
 from app.db.session import get_session
@@ -79,6 +80,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     benchmark = load_benchmark_config(normalized_profile) or default_benchmark_config()
     benchmark_view = build_benchmark_summary(benchmark if benchmark.get("name") or benchmark.get("base_symbol") else None)
 
+    risk_config = _load_risk_config(normalized_profile)
     overrides = get_preferences(normalized_profile)
     catalogs = _build_followables_catalog(settings=settings, profile=profile)
     metadata = _build_profile_metadata(profile=profile, profile_name=normalized_profile)
@@ -92,6 +94,8 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
         allocation_targets=allocation_targets,
         actual_allocation=actual_allocation,
         benchmark=benchmark_view,
+        benchmark_config=benchmark,
+        risk_config=risk_config,
     )
     holdings = _build_holdings_view(profile=profile, settings=settings)
     metadata["holdings_snapshot_summary"] = _build_holdings_snapshot_summary(profile, analysis)
@@ -103,6 +107,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
 
     return {
         "profile": normalized_profile,
+        "risk_config": risk_config,
         "effective": {
             "timezone": profile.timezone,
             "home_region": profile.home_region,
@@ -717,3 +722,77 @@ def _format_numeric_percent(value: Any) -> str:
 def _display_or_not_provided(value: str) -> str:
     text = str(value or "").strip()
     return text or "Not provided"
+
+
+def _load_risk_config(profile_name: str) -> dict:
+    """Load risk configuration from UserPreference store."""
+    with get_session() as session:
+        def _get_pref(key: str):
+            row = (
+                session.query(UserPreferenceRow)
+                .filter(
+                    UserPreferenceRow.profile_name == profile_name,
+                    UserPreferenceRow.pref_key == key,
+                    UserPreferenceRow.active.is_(True),
+                )
+                .first()
+            )
+            return row.pref_value if row else None
+
+        lookback_raw = _get_pref("risk.lookback_days")
+        rfr_raw = _get_pref("risk.risk_free_rate_pct")
+
+    try:
+        lookback_days = int(lookback_raw) if lookback_raw is not None else 252
+    except (TypeError, ValueError):
+        lookback_days = 252
+
+    try:
+        risk_free_rate_pct = float(rfr_raw) if rfr_raw is not None else 4.5
+    except (TypeError, ValueError):
+        risk_free_rate_pct = 4.5
+
+    return {"lookback_days": lookback_days, "risk_free_rate_pct": risk_free_rate_pct}
+
+
+def save_risk_config(profile_name: str, lookback_days: int, risk_free_rate_pct: float) -> dict:
+    """Persist risk configuration to UserPreference."""
+    from app.personalization.preferences_service import get_preferences
+    from app.db.models import UserPreference as UserPreferenceModel
+
+    normalized = normalize_profile_name(profile_name)
+    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+
+    with get_session() as session:
+        for key, value in [
+            ("risk.lookback_days", lookback_days),
+            ("risk.risk_free_rate_pct", risk_free_rate_pct),
+        ]:
+            row = (
+                session.query(UserPreferenceModel)
+                .filter(
+                    UserPreferenceModel.profile_name == normalized,
+                    UserPreferenceModel.pref_key == key,
+                )
+                .first()
+            )
+            if row is None:
+                row = UserPreferenceModel(
+                    profile_name=normalized,
+                    pref_key=key,
+                    pref_value=value,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(row)
+            else:
+                row.pref_value = value
+                row.updated_at = now
+                row.active = True
+
+    return {"lookback_days": lookback_days, "risk_free_rate_pct": risk_free_rate_pct}
+
+
+def refresh_risk_for_profile(profile_name: str) -> None:
+    """Invalidate cache so next state build recomputes risk analytics."""
+    invalidate_risk_cache(normalize_profile_name(profile_name))
