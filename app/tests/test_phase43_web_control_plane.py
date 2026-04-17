@@ -100,6 +100,10 @@ def test_ui_settings_page_renders(client):
     assert "Coverage Alignment" in response.text
     assert "What Will Drive Tomorrow" in response.text
     assert "Scenario Stress Tests" in response.text
+    assert "Briefing Summary" in response.text
+    assert "History & Advanced" in response.text
+    assert "Equal Weight" in response.text
+    assert "Scale Core Only" in response.text
     assert "Holdings Data Quality" in response.text
     assert "Top Holdings Concentration" in response.text
     assert "Sector Exposure vs Coverage Weight" in response.text
@@ -144,6 +148,8 @@ def test_api_put_preferences_and_state_roundtrip(client):
     assert state["effective"]["sections"]["global_news"] is False
     assert state["effective"]["sections"]["watchlist"] is False
     assert "metadata" in state
+    assert "override_summaries" in state["metadata"]
+    assert "delivery_summary" in state["metadata"]
     assert "validations" in state
     assert "analysis" in state
     assert "kpis" in state["analysis"]
@@ -215,6 +221,7 @@ def test_api_holdings_import_yaml_and_reject_bad_csv(client):
 
     state = client.get("/api/v1/profile/default_user/state").json()
     assert len(state["holdings"]) == 2
+    assert state["holdings"][0]["sector_label"] == "Semiconductors"
     assert state["analysis"]["holdings_totals"]["total_weight_pct"] == pytest.approx(14.7)
     assert state["analysis"]["holdings_totals"]["gap_to_100_pct"] == pytest.approx(85.3)
     assert state["analysis"]["top_positions"][0]["symbol"] == "NVDA"
@@ -225,6 +232,7 @@ def test_api_holdings_import_yaml_and_reject_bad_csv(client):
     assert state["analysis"]["kpis"]["top_sector_label"] == "Semiconductors"
     assert state["analysis"]["kpis"]["top_region_label"] == "US"
     assert "NVDA is the anchor holding at 8.50%" in state["analysis"]["executive_summary"]
+    assert state["analysis"]["confidence"]["status"] in {"partial", "low"}
     assert "Tomorrow's brief is set to lead with US context" in state["analysis"]["briefing_impact_preview"]
     assert "will lean on US context" in state["analysis"]["briefing_influence"]["summary"]
 
@@ -484,6 +492,28 @@ def test_analysis_data_quality_flags_duplicates_missing_weights_and_sector_gaps(
     assert "sector_inference_gaps" in issue_codes
     assert quality["duplicate_symbols"][0]["symbol"] == "AAPL"
     assert "ZZZZ" in quality["inferred_sector_gaps"]
+
+
+def test_analysis_confidence_and_override_summary_for_clean_portfolio(client):
+    yaml_content = "\n".join(
+        [
+            "profile: default_user",
+            "holdings:",
+            "  - symbol: NVDA",
+            "    weight_pct: 50.0",
+            "  - symbol: MSFT",
+            "    weight_pct: 50.0",
+        ]
+    ).encode("utf-8")
+    response = client.post(
+        "/api/v1/profile/default_user/holdings/import",
+        files={"file": ("holdings.yaml", io.BytesIO(yaml_content), "application/x-yaml")},
+    )
+    assert response.status_code == 200
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert state["analysis"]["confidence"]["status"] == "high"
+    assert state["metadata"]["delivery_summary"]["headline"].startswith("Morning:")
 
 
 # ── Holdings editor (inline save) ─────────────────────────────────────────────

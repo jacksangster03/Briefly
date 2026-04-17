@@ -128,6 +128,10 @@ See [docs/product_modules.md](/Users/jack/briefly/docs/product_modules.md) for t
     - dollar spike
     - small-cap risk-off
   - each scenario estimates current portfolio sensitivity, highlights exposed holdings/sectors, and stays explicit that it is a static shock test rather than a forecast
+- **Phase 4.8 portfolio UX + control-plane upgrade**
+  - top-level Portfolio Analyzer / Market Briefing modules now behave like distinct page modes
+  - holdings editor now supports faster rebalancing with inline sector labels, +/- steppers, equal-weight and rebalance helpers
+  - overview/analyzer surface now includes snapshot confidence, friendlier briefing summaries, and a cleaner History & Advanced area instead of exposing raw override internals by default
 - **Operational resilience**
   - quote fallback to `yfinance`
   - fail-fast behavior for degraded quote/news paths

@@ -190,6 +190,10 @@ def build_portfolio_analysis(
         duplicate_symbols=duplicate_symbols,
         total_weight=total_weight,
     )
+    confidence = _build_analyzer_confidence(
+        total_weight=total_weight,
+        data_quality=data_quality,
+    )
     alignment_findings = _build_alignment_findings(
         profile=profile,
         top_positions=top_positions,
@@ -263,6 +267,8 @@ def build_portfolio_analysis(
             "gap_to_100_pct": _rounded_metric(gap_to_100),
             "gap_to_100_display": _format_gap(gap_to_100),
             "near_100": bool(total_weight is not None and 95.0 <= total_weight <= 105.0),
+            "unallocated_pct": _rounded_metric(max(gap_to_100 or 0.0, 0.0)),
+            "unallocated_display": _format_percent(max(gap_to_100 or 0.0, 0.0)),
         },
         "kpis": {
             "holdings_weight_total_pct": _rounded_metric(total_weight),
@@ -296,6 +302,7 @@ def build_portfolio_analysis(
             "last_holdings_update_local": metadata["last_holdings_update_local"],
             "last_preferences_update_local": metadata["last_preferences_update_local"],
         },
+        "confidence": confidence,
         "alignment_findings": alignment_findings,
         "briefing_influence": briefing_influence,
         "scenario_stress": scenario_stress,
@@ -776,6 +783,31 @@ def _build_data_quality(
         "unlabeled_buckets": unlabeled_buckets,
         "inferred_sector_gaps": inferred_sector_gaps,
         "total_weight_pct": _rounded_metric(total_weight),
+    }
+
+
+def _build_analyzer_confidence(
+    *,
+    total_weight: float | None,
+    data_quality: dict[str, Any],
+) -> dict[str, str]:
+    issue_count = len(data_quality.get("issues", []))
+    if total_weight is None or total_weight < 60.0:
+        return {
+            "status": "low",
+            "label": "Low confidence",
+            "message": "Weighted holdings are still too incomplete for full-confidence portfolio analysis.",
+        }
+    if issue_count >= 3 or not (95.0 <= total_weight <= 105.0):
+        return {
+            "status": "partial",
+            "label": "Partial confidence",
+            "message": "Core signals are usable, but data quality or normalization issues still affect precision.",
+        }
+    return {
+        "status": "high",
+        "label": "High confidence",
+        "message": "Holdings are well-formed enough for the analyzer to give a strong deterministic read.",
     }
 
 

@@ -50,7 +50,6 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     profile = _load_profile_defaults(settings, normalized_profile)
 
     overrides = get_preferences(normalized_profile)
-    holdings = [holding.model_dump(mode="json") for holding in profile.portfolio_holdings]
     catalogs = _build_followables_catalog(settings=settings, profile=profile)
     metadata = _build_profile_metadata(profile=profile, profile_name=normalized_profile)
     validations = _build_profile_validations(profile=profile)
@@ -60,6 +59,10 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
         metadata=metadata,
         validations=validations,
     )
+    holdings = _build_holdings_view(profile=profile, settings=settings)
+    metadata["holdings_snapshot_summary"] = _build_holdings_snapshot_summary(profile, analysis)
+    metadata["override_summaries"] = _build_override_summaries(overrides)
+    metadata["delivery_summary"] = _build_delivery_summary(profile)
 
     return {
         "profile": normalized_profile,
@@ -521,3 +524,80 @@ def _iso_or_none(value: datetime | None) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc).isoformat()
+
+
+def _build_holdings_view(*, profile: UserProfile, settings: Settings) -> list[dict[str, Any]]:
+    universe = load_sector_universe(settings)
+    ticker_to_sector: dict[str, str] = {}
+    sector_labels: dict[str, str] = {}
+    for sector in universe.sectors:
+        sector_labels[sector.key] = sector.display_name or _display_label(sector.key)
+        for ticker in sector.key_names:
+            ticker_to_sector[ticker.upper()] = sector.key
+
+    rows: list[dict[str, Any]] = []
+    for holding in profile.portfolio_holdings:
+        row = holding.model_dump(mode="json")
+        sector_key = holding.sector_override or ticker_to_sector.get(holding.symbol)
+        row["sector_label"] = sector_labels.get(sector_key, "Not provided")
+        row["bucket_label"] = _display_label(holding.bucket) if holding.bucket else "Not provided"
+        rows.append(row)
+    rows.sort(
+        key=lambda item: (
+            item.get("weight_pct") is None,
+            -(item.get("weight_pct") or 0.0),
+            item["symbol"],
+        )
+    )
+    return rows
+
+
+def _build_holdings_snapshot_summary(profile: UserProfile, analysis: dict[str, Any]) -> str:
+    totals = analysis.get("holdings_totals", {})
+    return (
+        f"Analyzed snapshot: {len(profile.portfolio_holdings)} holding(s), "
+        f"{totals.get('weighted_positions', 0)} weighted, {totals.get('total_weight_display', 'Not provided')} total."
+    )
+
+
+def _build_override_summaries(overrides: dict[str, Any]) -> list[str]:
+    label_map = {
+        "coverage.home_region": "Home region focus updated",
+        "coverage.weights": "Region weights updated",
+        "delivery.breaking_alerts": "Breaking alerts updated",
+        "delivery.breaking_channels": "Breaking routing updated",
+        "delivery.hourly_updates": "Intraday cadence updated",
+        "delivery.intraday_channels": "Intraday routing updated",
+        "delivery.intraday_global_risk_enabled": "Intraday global risk block updated",
+        "delivery.llm_email_morning": "Morning LLM email updated",
+        "delivery.llm_shadow_mode": "LLM shadow mode updated",
+        "delivery.morning_brief_time": "Morning brief time updated",
+        "delivery.morning_channels": "Morning routing updated",
+        "delivery.quiet_hours_end": "Quiet hours end updated",
+        "delivery.quiet_hours_start": "Quiet hours start updated",
+        "sections.global_news": "Global News section updated",
+        "sector.weights": "Sector coverage weights updated",
+        "watchlist.monitor": "Monitor watchlist updated",
+        "watchlist.primary": "Primary watchlist updated",
+        "watchlist.secondary": "Secondary watchlist updated",
+    }
+    return [label_map.get(key, f"{key} override saved") for key in sorted(overrides.keys())]
+
+
+def _build_delivery_summary(profile: UserProfile) -> dict[str, str]:
+    def _channel_text(channels: list[str]) -> str:
+        return " + ".join(item.capitalize() for item in channels) if channels else "Off"
+
+    return {
+        "headline": (
+            f"Morning: {_channel_text(profile.channels_for('morning'))} at {profile.morning_brief_time} · "
+            f"Intraday: {_channel_text(profile.channels_for('intraday'))} · "
+            f"Breaking: {_channel_text(profile.channels_for('breaking'))}"
+        ),
+        "quiet_hours": f"{profile.quiet_hours[0]}–{profile.quiet_hours[1]}",
+        "llm_mode": (
+            "Morning email stays deterministic while shadow mode prints an LLM preview."
+            if bool(profile.delivery.get('llm_shadow_mode', False))
+            else "Morning email uses the selected primary formatter."
+        ),
+    }

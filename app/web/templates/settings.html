@@ -343,6 +343,9 @@
         const tbody = document.getElementById("holdings-rows");
         const totalDisplay = document.getElementById("holdings-total-display");
         const normalizeBtn = document.getElementById("normalize-weights-btn");
+        const equalBtn = document.getElementById("equal-weights-btn");
+        const scaleCoreBtn = document.getElementById("scale-core-btn");
+        const clearWatchBtn = document.getElementById("clear-watch-weights-btn");
         const addBtn = document.getElementById("add-holding-btn");
         const catalog = parseStockCatalog();
 
@@ -361,16 +364,38 @@
           else totalDisplay.classList.add("total-off");
         }
 
+        function adjustWeight(input, delta) {
+          const current = parseFloat(input.value || "0") || 0;
+          const next = Math.max(0, Math.min(100, current + delta));
+          input.value = next.toFixed(2);
+          updateTotalDisplay();
+          markDirty();
+        }
+
         function bindRow(row) {
           const removeBtn = row.querySelector(".remove-holding");
           if (removeBtn && !removeBtn.dataset.rowBound) {
             removeBtn.dataset.rowBound = "true";
-            removeBtn.addEventListener("click", () => { row.remove(); updateTotalDisplay(); });
+            removeBtn.addEventListener("click", () => { row.remove(); updateTotalDisplay(); markDirty(); });
           }
           const wInp = row.querySelector(".holding-weight");
           if (wInp && !wInp.dataset.rowBound) {
             wInp.dataset.rowBound = "true";
-            wInp.addEventListener("input", updateTotalDisplay);
+            wInp.addEventListener("input", () => { updateTotalDisplay(); markDirty(); });
+          }
+          row.querySelectorAll("[data-step-weight]").forEach((btn) => {
+            if (btn.dataset.rowBound === "true" || !wInp) return;
+            btn.dataset.rowBound = "true";
+            btn.addEventListener("click", (event) => {
+              const base = parseFloat(btn.dataset.stepWeight || "0") || 0;
+              const delta = event.shiftKey ? base * 2 : base;
+              adjustWeight(wInp, delta);
+            });
+          });
+          const bucketSelect = row.querySelector(".holding-bucket-select");
+          if (bucketSelect && !bucketSelect.dataset.rowBound) {
+            bucketSelect.dataset.rowBound = "true";
+            bucketSelect.addEventListener("change", markDirty);
           }
         }
 
@@ -390,6 +415,52 @@
               });
             }
             updateTotalDisplay();
+            markDirty();
+          });
+        }
+
+        if (equalBtn) {
+          equalBtn.addEventListener("click", () => {
+            const inputs = getWeightInputs();
+            if (!inputs.length) return;
+            const eq = (100 / inputs.length).toFixed(2);
+            inputs.forEach(inp => { inp.value = eq; });
+            updateTotalDisplay();
+            markDirty();
+          });
+        }
+
+        if (scaleCoreBtn) {
+          scaleCoreBtn.addEventListener("click", () => {
+            const rows = Array.from(tbody.querySelectorAll(".holding-row"));
+            const coreRows = rows.filter((row) => row.querySelector(".holding-bucket-select")?.value === "core");
+            if (!coreRows.length) return;
+            const otherTotal = rows
+              .filter((row) => !coreRows.includes(row))
+              .reduce((sum, row) => sum + (parseFloat(row.querySelector(".holding-weight")?.value || "0") || 0), 0);
+            const coreInputs = coreRows.map((row) => row.querySelector(".holding-weight")).filter(Boolean);
+            const coreTotal = coreInputs.reduce((sum, inp) => sum + (parseFloat(inp.value || "0") || 0), 0);
+            if (coreTotal <= 0) return;
+            const target = Math.max(0, 100 - otherTotal);
+            coreInputs.forEach((inp) => {
+              const current = parseFloat(inp.value || "0") || 0;
+              inp.value = ((current / coreTotal) * target).toFixed(2);
+            });
+            updateTotalDisplay();
+            markDirty();
+          });
+        }
+
+        if (clearWatchBtn) {
+          clearWatchBtn.addEventListener("click", () => {
+            Array.from(tbody.querySelectorAll(".holding-row")).forEach((row) => {
+              if (row.querySelector(".holding-bucket-select")?.value === "watch") {
+                const input = row.querySelector(".holding-weight");
+                if (input) input.value = "0.00";
+              }
+            });
+            updateTotalDisplay();
+            markDirty();
           });
         }
 
@@ -427,13 +498,22 @@
           row.className = "holding-row";
           row.innerHTML = `
             <td>
-              <span class="ticker-chip">${symbol}</span>
-              <input type="hidden" name="holding_symbol" value="${symbol}">
+              <div class="holding-symbol-cell">
+                <span class="ticker-chip">${symbol}</span>
+                <input type="hidden" name="holding_symbol" value="${symbol}">
+              </div>
             </td>
             <td>
-              <input type="number" class="holding-weight" name="holding_weight"
-                value="${weight > 0 ? weight.toFixed(2) : ""}"
-                placeholder="—" min="0" max="100" step="0.5">
+              <span class="holding-sector-chip">Auto on save</span>
+            </td>
+            <td>
+              <div class="holding-weight-editor">
+                <button type="button" class="secondary small weight-stepper" data-step-weight="-0.5">−</button>
+                <input type="number" class="holding-weight" name="holding_weight"
+                  value="${weight > 0 ? weight.toFixed(2) : ""}"
+                  placeholder="—" min="0" max="100" step="0.5">
+                <button type="button" class="secondary small weight-stepper" data-step-weight="0.5">+</button>
+              </div>
             </td>
             <td>
               <select name="holding_bucket" class="holding-bucket-select">${bucketOptions}</select>
@@ -446,6 +526,7 @@
           tbody.appendChild(row);
           bindRow(row);
           updateTotalDisplay();
+          markDirty();
 
           symInp.value = "";
           if (wtInp) wtInp.value = "";
@@ -471,8 +552,9 @@
         briefing:  new Set(["section-delivery", "section-morning", "section-audit"]),
       };
 
-      function activateModule(module) {
+      function activateModule(module, options = {}) {
         if (!MODULE_SECTIONS[module]) module = "portfolio";
+        const { scroll = false } = options;
         localStorage.setItem("briefly-module", module);
 
         // Update pill active state
@@ -491,6 +573,12 @@
         document.querySelectorAll("#settings-root .section-nav a[data-module-nav]").forEach(a => {
           a.style.display = shown.has(a.dataset.moduleNav) ? "" : "none";
         });
+
+        if (scroll) {
+          const targetId = module === "briefing" ? "section-delivery" : "section-overview";
+          const target = document.getElementById(targetId);
+          if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
       }
 
       // ── Unsaved-changes guard ─────────────────────────────────────────────
@@ -522,7 +610,7 @@
 
         // Module tabs: bind pill click handlers once (pills are in outer shell)
         document.querySelectorAll(".module-pill[data-module]").forEach(pill => {
-          pill.addEventListener("click", () => activateModule(pill.dataset.module));
+          pill.addEventListener("click", () => activateModule(pill.dataset.module, { scroll: true }));
         });
         activateModule(localStorage.getItem("briefly-module") || "portfolio");
       });

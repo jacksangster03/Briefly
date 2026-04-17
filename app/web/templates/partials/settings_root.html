@@ -20,6 +20,9 @@
 {% set scenario_stress = analysis.scenario_stress %}
 {% set health_checks = analysis.health_checks %}
 {% set data_quality = analysis.data_quality %}
+{% set confidence = analysis.confidence %}
+{% set delivery_summary = metadata.delivery_summary %}
+{% set override_summaries = metadata.override_summaries %}
 
 <style>
   .grid {
@@ -116,6 +119,73 @@
     display: grid;
     gap: 10px;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .hero-chip-row,
+  .mini-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0 0;
+  }
+  .hero-chip,
+  .mini-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 5px 10px;
+    background: var(--bg-secondary);
+    color: var(--ink);
+    font-size: 0.76rem;
+    font-weight: 600;
+  }
+  .mini-chip {
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+  .snapshot-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 1.3fr 1fr;
+    margin-top: 10px;
+  }
+  .snapshot-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    padding: 12px;
+  }
+  .snapshot-card h3 {
+    margin: 0 0 8px;
+    font-size: 0.88rem;
+    color: var(--muted);
+  }
+  .snapshot-card p {
+    margin: 0;
+    font-size: 0.84rem;
+    color: var(--ink);
+  }
+  .confidence-pill {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .confidence-pill.high {
+    background: rgba(31, 170, 111, 0.14);
+    color: var(--success);
+  }
+  .confidence-pill.partial {
+    background: rgba(245, 159, 0, 0.14);
+    color: var(--accent-strong);
+  }
+  .confidence-pill.low {
+    background: rgba(234, 84, 85, 0.14);
+    color: var(--error);
   }
   .executive-strip {
     border: 1px solid var(--border);
@@ -649,6 +719,24 @@
     font-size: 0.86rem;
     color: var(--ink);
   }
+  .briefing-summary-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-secondary);
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .briefing-summary-card strong {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--ink);
+    font-size: 0.84rem;
+  }
+  .briefing-summary-card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
   @media (max-width: 760px) {
     .watch-builder-toolbar {
       flex-direction: column;
@@ -656,6 +744,9 @@
     }
     .section-nav {
       top: 6px;
+    }
+    .snapshot-grid {
+      grid-template-columns: 1fr;
     }
   }
 
@@ -672,11 +763,44 @@
     border: 1px solid var(--border);
   }
   .holding-weight {
-    width: 80px;
+    width: 74px;
+  }
+  .holding-symbol-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .holding-sector-chip {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 8px;
+    color: var(--muted);
+    font-size: 0.7rem;
+    background: rgba(255,255,255,0.03);
+  }
+  .holding-weight-editor {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .weight-stepper {
+    width: 28px;
+    min-width: 28px;
+    height: 28px;
+    padding: 0;
+    line-height: 1;
+    border-radius: 8px;
   }
   .holding-bucket-select {
     width: auto;
     min-width: 100px;
+  }
+  .bucket-help {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 0.74rem;
   }
   .holdings-total-row td {
     border-bottom: none;
@@ -700,6 +824,67 @@
   .holdings-total-value.total-ok  { color: var(--success); }
   .holdings-total-value.total-warn { color: var(--accent-strong); }
   .holdings-total-value.total-off { color: var(--error); }
+  .holdings-summary-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .holdings-summary-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    padding: 10px 12px;
+    min-width: 200px;
+    flex: 1 1 220px;
+  }
+  .holdings-summary-card strong {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 0.82rem;
+    color: var(--ink);
+  }
+  .holdings-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .holding-chip-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    font-size: 0.76rem;
+  }
+  .holding-chip-card strong {
+    color: var(--ink);
+  }
+  .holdings-actions-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 10px;
+  }
+  .alignment-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 180px) 1fr auto;
+    gap: 10px;
+    align-items: center;
+  }
+  .alignment-bars {
+    display: grid;
+    gap: 4px;
+  }
+  .alignment-delta {
+    font-size: 0.76rem;
+    color: var(--muted);
+    text-align: right;
+  }
   .add-holding-row {
     display: flex;
     gap: 10px;
@@ -810,6 +995,31 @@
     <div class="executive-strip">
       <strong>Executive Summary</strong>
       <p>{{ analysis.executive_summary }}</p>
+      <div class="hero-chip-row">
+        <span class="hero-chip">{{ overview.holdings_count }} holdings</span>
+        <span class="hero-chip">Top 5 = {{ kpis.top5_concentration_display }}</span>
+        <span class="hero-chip">Next brief: {{ analysis.timing.next_morning_send_local }}</span>
+      </div>
+    </div>
+
+    <div class="snapshot-grid">
+      <div class="snapshot-card">
+        <h3>Analyzer Snapshot</h3>
+        <p>{{ metadata.holdings_snapshot_summary }}</p>
+        <div class="mini-chip-row">
+          <span class="confidence-pill {{ confidence.status }}">{{ confidence.label }}</span>
+          <span class="mini-chip">Home region: {{ overview.home_region_label }}</span>
+          <span class="mini-chip">{{ overview.watchlist_total }} watchlist names</span>
+        </div>
+      </div>
+      <div class="snapshot-card">
+        <h3>Briefing Mode</h3>
+        <p>{{ metadata.delivery_summary.headline }}</p>
+        <div class="mini-chip-row">
+          <span class="mini-chip">Quiet hours {{ metadata.delivery_summary.quiet_hours }}</span>
+          <span class="mini-chip">{{ metadata.delivery_summary.llm_mode }}</span>
+        </div>
+      </div>
     </div>
 
     <div class="summary-grid">
@@ -865,6 +1075,13 @@
         </ul>
       </div>
     {% endif %}
+
+    <div class="preview-box" style="margin-bottom: 10px;">
+      <strong>{{ confidence.label }}.</strong> {{ confidence.message }}
+      {% if holdings_totals.unallocated_pct and holdings_totals.unallocated_pct > 0 %}
+        Unallocated / cash-like weight currently accounts for {{ holdings_totals.unallocated_display }} of the portfolio.
+      {% endif %}
+    </div>
 
     <div class="kpi-grid">
       <div class="kpi">
@@ -932,8 +1149,27 @@
           <ul class="insight-list">
             {% for item in alignment_findings %}
               <li class="insight-item">
-                <span class="severity-badge {{ item.severity }}">{{ item.severity | replace("_", " ") }}</span>
-                <strong>{{ item.title }}</strong>
+                <div class="alignment-row">
+                  <div>
+                    <span class="severity-badge {{ item.severity }}">{{ item.severity | replace("_", " ") }}</span>
+                    <strong>{{ item.title }}</strong>
+                  </div>
+                  <div class="alignment-bars">
+                    {% if item.code in ["undercovered_sector", "overcovered_sector"] and item.title %}
+                      {% set label = item.title.split(" is")[0] %}
+                      {% set bar_row = (sector_exposure.rows | selectattr("label", "equalto", label) | list | first) %}
+                      {% if bar_row %}
+                        <div class="bar-track"><div class="bar-fill" style="width: {{ bar_row.portfolio_bar_pct }}%;"></div></div>
+                        <div class="bar-track"><div class="bar-fill secondary" style="width: {{ bar_row.coverage_bar_pct }}%;"></div></div>
+                      {% endif %}
+                    {% endif %}
+                  </div>
+                  <div class="alignment-delta">
+                    {% if bar_row is defined and bar_row %}
+                      Δ {{ "%.1f"|format(bar_row.gap_pct) }} pp
+                    {% endif %}
+                  </div>
+                </div>
                 <p>{{ item.message }}</p>
               </li>
             {% endfor %}
@@ -946,7 +1182,7 @@
       <div class="chart-card wide">
         <p class="chart-title">What Will Drive Tomorrow&apos;s Brief</p>
         <div class="preview-box">
-          <strong>Summary:</strong> {{ briefing_influence.summary }}
+          <strong>Tomorrow&apos;s brief:</strong> {{ briefing_influence.summary }}
         </div>
         <div class="driver-grid">
           <div class="driver-card">
@@ -1210,6 +1446,30 @@
       Shares, average cost, and account data (if imported via file) are preserved when saving from this editor.
     </p>
 
+    <div class="holdings-summary-strip">
+      <div class="holdings-summary-card">
+        <strong>Portfolio Snapshot</strong>
+        <span>{{ metadata.holdings_snapshot_summary }}</span>
+      </div>
+      <div class="holdings-summary-card">
+        <strong>Editing Guide</strong>
+        <span>Core drives the brief hardest, Satellite is medium, Watch is light-touch context only.</span>
+      </div>
+    </div>
+
+    <div class="holdings-chip-row">
+      {% for holding in state.holdings[:12] %}
+        <span class="holding-chip-card">
+          <strong>{{ holding.symbol }}</strong>
+          <span>{{ "%.2f"|format(holding.weight_pct) if holding.weight_pct is not none else "—" }}%</span>
+          <span>{{ holding.sector_label }}</span>
+        </span>
+      {% endfor %}
+      {% if state.holdings | length > 12 %}
+        <span class="holding-chip-card">+{{ state.holdings | length - 12 }} more</span>
+      {% endif %}
+    </div>
+
     <form
       hx-post="/ui/profile/{{ state.profile }}/holdings/save"
       hx-target="#settings-root"
@@ -1223,6 +1483,7 @@
           <thead>
             <tr>
               <th>Symbol</th>
+              <th>Sector</th>
               <th>Weight %</th>
               <th>Bucket</th>
               <th></th>
@@ -1232,18 +1493,25 @@
             {% for holding in state.holdings %}
               <tr class="holding-row">
                 <td>
-                  <span class="ticker-chip">{{ holding.symbol }}</span>
-                  <input type="hidden" name="holding_symbol" value="{{ holding.symbol }}">
+                  <div class="holding-symbol-cell">
+                    <span class="ticker-chip">{{ holding.symbol }}</span>
+                    <input type="hidden" name="holding_symbol" value="{{ holding.symbol }}">
+                  </div>
                 </td>
+                <td><span class="holding-sector-chip">{{ holding.sector_label }}</span></td>
                 <td>
-                  <input
-                    type="number"
-                    class="holding-weight"
-                    name="holding_weight"
-                    value="{{ "%.2f"|format(holding.weight_pct) if holding.weight_pct is not none else "" }}"
-                    placeholder="—"
-                    min="0" max="100" step="0.5"
-                  >
+                  <div class="holding-weight-editor">
+                    <button type="button" class="secondary small weight-stepper" data-step-weight="-0.5">−</button>
+                    <input
+                      type="number"
+                      class="holding-weight"
+                      name="holding_weight"
+                      value="{{ "%.2f"|format(holding.weight_pct) if holding.weight_pct is not none else "" }}"
+                      placeholder="—"
+                      min="0" max="100" step="0.5"
+                    >
+                    <button type="button" class="secondary small weight-stepper" data-step-weight="0.5">+</button>
+                  </div>
                 </td>
                 <td>
                   <select name="holding_bucket" class="holding-bucket-select">
@@ -1262,17 +1530,22 @@
           </tbody>
           <tfoot>
             <tr class="holdings-total-row">
-              <td colspan="4">
+              <td colspan="5">
                 <div class="holdings-total-bar">
                   <span class="holdings-total-label">Total</span>
                   <strong id="holdings-total-display" class="holdings-total-value">—</strong>
                   <button type="button" class="secondary small" id="normalize-weights-btn">Normalize to 100%</button>
+                  <button type="button" class="secondary small" id="equal-weights-btn">Equal Weight</button>
+                  <button type="button" class="secondary small" id="scale-core-btn">Scale Core Only</button>
+                  <button type="button" class="secondary small" id="clear-watch-weights-btn">Clear Watch Weights</button>
                 </div>
               </td>
             </tr>
           </tfoot>
         </table>
       </div>
+
+      <p class="bucket-help">Tip: use + / − for quick rebalancing. Shift-click uses a larger 1.0% step.</p>
 
       <div class="add-holding-row">
         <div class="field">
@@ -1461,6 +1734,11 @@
       Changes affect the next generated run without restarting your profile data.
       LLM rendering currently applies to morning/weekend email only.
     </p>
+    <div class="briefing-summary-card">
+      <strong>Briefing Summary</strong>
+      <p>{{ metadata.delivery_summary.headline }}</p>
+      <p style="margin-top: 6px;">Quiet hours: {{ metadata.delivery_summary.quiet_hours }} · {{ metadata.delivery_summary.llm_mode }}</p>
+    </div>
     <form
       hx-post="/ui/profile/{{ state.profile }}/save/delivery"
       hx-target="#settings-root"
@@ -1597,8 +1875,8 @@
   </section>
 
   <section class="card" id="section-audit" data-module-section="section-audit">
-    <h2>Audit & Source of Truth</h2>
-    <p class="muted">Effective values = YAML defaults + active SQLite overrides for this profile.</p>
+    <h2>History & Advanced</h2>
+    <p class="muted">Friendly profile history first. Raw DB overrides stay tucked under Advanced Settings.</p>
     <div class="summary-grid">
       <dl class="summary">
         <dt>Last Holdings Update (Local)</dt>
@@ -1612,22 +1890,35 @@
         <dt>Active Overrides</dt>
         <dd>{{ state.overrides | length }} saved</dd>
       </dl>
+      <dl class="summary">
+        <dt>Saved Override Summary</dt>
+        {% if override_summaries %}
+          {% for item in override_summaries[:6] %}
+            <dd>{{ item }}</dd>
+          {% endfor %}
+          {% if override_summaries | length > 6 %}
+            <dd>+{{ override_summaries | length - 6 }} more override(s)</dd>
+          {% endif %}
+        {% else %}
+          <dd>No active DB overrides.</dd>
+        {% endif %}
+      </dl>
     </div>
     <details class="dev-overrides-details">
-      <summary>Show raw DB overrides ({{ state.overrides | length }} active)</summary>
+      <summary>Advanced Settings</summary>
       <pre class="mono" style="margin-top: 8px;">{{ state.overrides | tojson(indent=2) }}</pre>
+      <div class="actions">
+        <form
+          hx-post="/ui/profile/{{ state.profile }}/reset"
+          hx-target="#settings-root"
+          hx-swap="outerHTML"
+          method="post"
+        >
+          <button type="submit" class="danger" onclick="return confirm('Reset all DB overrides for this profile?');">
+            Reset Overrides
+          </button>
+        </form>
+      </div>
     </details>
-    <div class="actions">
-      <form
-        hx-post="/ui/profile/{{ state.profile }}/reset"
-        hx-target="#settings-root"
-        hx-swap="outerHTML"
-        method="post"
-      >
-        <button type="submit" class="danger" onclick="return confirm('Reset all DB overrides for this profile?');">
-          Reset Overrides
-        </button>
-      </form>
-    </div>
   </section>
 </div>
