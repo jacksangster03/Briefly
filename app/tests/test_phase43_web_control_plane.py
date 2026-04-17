@@ -484,3 +484,111 @@ def test_analysis_data_quality_flags_duplicates_missing_weights_and_sector_gaps(
     assert "sector_inference_gaps" in issue_codes
     assert quality["duplicate_symbols"][0]["symbol"] == "AAPL"
     assert "ZZZZ" in quality["inferred_sector_gaps"]
+
+
+# ── Holdings editor (inline save) ─────────────────────────────────────────────
+
+def test_ui_save_holdings_creates_positions_from_form(client):
+    """HTMX editor form saves holdings via the new /holdings/save route."""
+    response = client.post(
+        "/ui/profile/default_user/holdings/save",
+        data={
+            "holding_symbol": ["NVDA", "AAPL"],
+            "holding_weight": ["8.5", "6.5"],
+            "holding_bucket": ["core", "core"],
+        },
+    )
+    assert response.status_code == 200
+    assert "Saved 2 holding" in response.text
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    symbols = [h["symbol"] for h in state["holdings"]]
+    assert "NVDA" in symbols
+    assert "AAPL" in symbols
+    nvda = next(h for h in state["holdings"] if h["symbol"] == "NVDA")
+    assert nvda["weight_pct"] == pytest.approx(8.5)
+    assert nvda["bucket"] == "core"
+
+
+def test_ui_save_holdings_preserves_existing_metadata(client):
+    """Weight/bucket edits must not wipe shares and avg_cost from an earlier import."""
+    import io as _io
+
+    yaml_content = (
+        "profile: default_user\n"
+        "holdings:\n"
+        "  - symbol: NVDA\n"
+        "    weight_pct: 8.5\n"
+        "    shares: 10.0\n"
+        "    avg_cost: 750.00\n"
+    ).encode("utf-8")
+    client.post(
+        "/api/v1/profile/default_user/holdings/import",
+        files={"file": ("h.yaml", _io.BytesIO(yaml_content), "application/x-yaml")},
+    )
+
+    # Now update weight via the editor — shares/avg_cost should be preserved.
+    client.post(
+        "/ui/profile/default_user/holdings/save",
+        data={
+            "holding_symbol": ["NVDA"],
+            "holding_weight": ["9.0"],
+            "holding_bucket": ["core"],
+        },
+    )
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    nvda = next(h for h in state["holdings"] if h["symbol"] == "NVDA")
+    assert nvda["weight_pct"] == pytest.approx(9.0)
+    assert nvda["shares"] == pytest.approx(10.0)
+    assert nvda["avg_cost"] == pytest.approx(750.0)
+
+
+def test_ui_save_holdings_deduplicates_repeated_symbols(client):
+    """Duplicate symbols in the form payload should be silently collapsed."""
+    response = client.post(
+        "/ui/profile/default_user/holdings/save",
+        data={
+            "holding_symbol": ["AAPL", "AAPL", "MSFT"],
+            "holding_weight": ["5.0", "3.0", "7.0"],
+            "holding_bucket": ["core", "core", "core"],
+        },
+    )
+    assert response.status_code == 200
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    symbols = [h["symbol"] for h in state["holdings"]]
+    assert symbols.count("AAPL") == 1
+    assert "MSFT" in symbols
+
+
+def test_ui_save_holdings_accepts_empty_weight(client):
+    """A blank weight field should save as None, not raise an error."""
+    response = client.post(
+        "/ui/profile/default_user/holdings/save",
+        data={
+            "holding_symbol": ["TSLA"],
+            "holding_weight": [""],
+            "holding_bucket": ["satellite"],
+        },
+    )
+    assert response.status_code == 200
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    tsla = next((h for h in state["holdings"] if h["symbol"] == "TSLA"), None)
+    assert tsla is not None
+    assert tsla["weight_pct"] is None
+
+
+def test_ui_save_holdings_clears_when_no_rows_submitted(client):
+    """Submitting an empty form (no rows) replaces the snapshot with zero holdings."""
+    client.post(
+        "/ui/profile/default_user/holdings/save",
+        data={"holding_symbol": ["NVDA"], "holding_weight": ["8.5"], "holding_bucket": ["core"]},
+    )
+    assert len(client.get("/api/v1/profile/default_user/state").json()["holdings"]) == 1
+
+    response = client.post("/ui/profile/default_user/holdings/save", data={})
+    assert response.status_code == 200
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert state["holdings"] == []

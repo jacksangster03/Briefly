@@ -658,6 +658,122 @@
       top: 6px;
     }
   }
+
+  /* Holdings editor */
+  .ticker-chip {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    background: var(--chip-bg);
+    color: var(--chip-text);
+    border: 1px solid var(--border);
+  }
+  .holding-weight {
+    width: 80px;
+  }
+  .holding-bucket-select {
+    width: auto;
+    min-width: 100px;
+  }
+  .holdings-total-row td {
+    border-bottom: none;
+    padding-top: 10px;
+    padding-bottom: 4px;
+  }
+  .holdings-total-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .holdings-total-label {
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+  .holdings-total-value {
+    font-size: 0.92rem;
+    font-weight: 700;
+    transition: color 0.2s;
+  }
+  .holdings-total-value.total-ok  { color: var(--success); }
+  .holdings-total-value.total-warn { color: var(--accent-strong); }
+  .holdings-total-value.total-off { color: var(--error); }
+  .add-holding-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    margin-top: 12px;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .add-holding-row .field {
+    margin: 0;
+    flex: 1;
+    min-width: 90px;
+  }
+  .add-holding-weight-field {
+    max-width: 90px;
+  }
+  .add-holding-bucket-field {
+    max-width: 110px;
+  }
+  .add-holding-action-field {
+    flex: 0 0 auto !important;
+    min-width: unset !important;
+  }
+  .holding-row.flash-highlight td {
+    background: rgba(245, 159, 0, 0.12);
+    transition: background 0.6s;
+  }
+  .holdings-import-details {
+    margin-top: 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .holdings-import-details > summary {
+    padding: 10px 12px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 0.84rem;
+    background: var(--bg-secondary);
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .holdings-import-details > summary:hover { color: var(--ink); }
+  .holdings-import-details > summary::before { content: "▸"; font-size: 0.7rem; }
+  .holdings-import-details[open] > summary::before { content: "▾"; }
+  .holdings-import-body {
+    padding: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  /* Developer details disclosure (Audit section) */
+  .dev-overrides-details {
+    margin-top: 10px;
+  }
+  .dev-overrides-details > summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 0.78rem;
+    padding: 6px 0;
+    user-select: none;
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .dev-overrides-details > summary:hover { color: var(--ink); }
+  .dev-overrides-details > summary::before { content: "▸"; font-size: 0.65rem; }
+  .dev-overrides-details[open] > summary::before { content: "▾"; }
 </style>
 
 <script type="application/json" id="stock-catalog-json">{{ stocks | tojson }}</script>
@@ -677,17 +793,17 @@
 {% endif %}
 
 <nav class="section-nav" aria-label="Settings sections">
-  <a href="#section-overview">Overview</a>
-  <a href="#section-analyzer">Portfolio Analyzer</a>
-  <a href="#section-holdings">Holdings</a>
-  <a href="#section-coverage">Coverage</a>
-  <a href="#section-delivery">Delivery</a>
-  <a href="#section-morning">Morning Brief</a>
-  <a href="#section-audit">Audit</a>
+  <a href="#section-overview"  data-module-nav="section-overview">Overview</a>
+  <a href="#section-analyzer"  data-module-nav="section-analyzer">Portfolio Analyzer</a>
+  <a href="#section-holdings"  data-module-nav="section-holdings">Holdings</a>
+  <a href="#section-coverage"  data-module-nav="section-coverage">Coverage</a>
+  <a href="#section-delivery"  data-module-nav="section-delivery">Delivery</a>
+  <a href="#section-morning"   data-module-nav="section-morning">Morning Brief</a>
+  <a href="#section-audit"     data-module-nav="section-audit">Audit</a>
 </nav>
 
 <div class="grid">
-  <section class="card" id="section-overview">
+  <section class="card" id="section-overview" data-module-section="section-overview">
     <h2>Overview</h2>
     <p class="muted">Analyzer-first summary of exposure, editorial fit, and the next morning run for this profile.</p>
 
@@ -720,7 +836,7 @@
     </div>
   </section>
 
-  <section class="card" id="section-analyzer">
+  <section class="card" id="section-analyzer" data-module-section="section-analyzer">
     <h2>Portfolio Analyzer</h2>
     <p class="muted">Exposure, concentration, and briefing-impact analysis from the live holdings snapshot and saved preferences.</p>
 
@@ -1087,59 +1203,129 @@
     </div>
   </section>
 
-  <section class="card" id="section-holdings">
+  <section class="card" id="section-holdings" data-module-section="section-holdings">
     <h2>Holdings</h2>
     <p class="muted">
-      Upload a YAML/CSV snapshot to replace active holdings.
-      This directly affects portfolio-aware ranking and morning portfolio focus.
+      Edit positions, weights, and buckets directly. Weights should ideally sum to 100% for accurate portfolio analytics.
+      Shares, average cost, and account data (if imported via file) are preserved when saving from this editor.
     </p>
+
     <form
-      hx-post="/ui/profile/{{ state.profile }}/holdings/import"
+      hx-post="/ui/profile/{{ state.profile }}/holdings/save"
       hx-target="#settings-root"
       hx-swap="outerHTML"
-      hx-encoding="multipart/form-data"
-      enctype="multipart/form-data"
       method="post"
-      class="actions tracked-form"
+      id="holdings-editor-form"
+      class="tracked-form"
     >
-      <input type="file" name="file" accept=".yaml,.yml,.csv" required>
-      <button type="submit">Import Holdings Snapshot</button>
-    </form>
-    <div class="table-wrap" style="margin-top: 10px;">
-      <table>
-        <thead>
-          <tr>
-            <th>Symbol</th>
-            <th>Weight %</th>
-            <th>Shares</th>
-            <th>Avg Cost</th>
-            <th>Bucket</th>
-            <th>Account</th>
-            <th>As Of</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% if state.holdings %}
+      <div class="table-wrap">
+        <table id="holdings-table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Weight %</th>
+              <th>Bucket</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="holdings-rows">
             {% for holding in state.holdings %}
-              <tr>
-                <td>{{ holding.symbol }}</td>
-                <td>{{ "%.2f"|format(holding.weight_pct) if holding.weight_pct is not none else "Not provided" }}</td>
-                <td>{{ "%.2f"|format(holding.shares) if holding.shares is not none else "Not provided" }}</td>
-                <td>{{ "%.2f"|format(holding.avg_cost) if holding.avg_cost is not none else "Not provided" }}</td>
-                <td>{{ holding.bucket or "Not provided" }}</td>
-                <td>{{ holding.account or "Not provided" }}</td>
-                <td>{{ holding.as_of_date or "Not provided" }}</td>
+              <tr class="holding-row">
+                <td>
+                  <span class="ticker-chip">{{ holding.symbol }}</span>
+                  <input type="hidden" name="holding_symbol" value="{{ holding.symbol }}">
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    class="holding-weight"
+                    name="holding_weight"
+                    value="{{ "%.2f"|format(holding.weight_pct) if holding.weight_pct is not none else "" }}"
+                    placeholder="—"
+                    min="0" max="100" step="0.5"
+                  >
+                </td>
+                <td>
+                  <select name="holding_bucket" class="holding-bucket-select">
+                    <option value="core"      {% if holding.bucket == "core"      %}selected{% endif %}>Core</option>
+                    <option value="satellite" {% if holding.bucket == "satellite" %}selected{% endif %}>Satellite</option>
+                    <option value="watch"     {% if holding.bucket == "watch"     %}selected{% endif %}>Watch</option>
+                    <option value=""          {% if not holding.bucket            %}selected{% endif %}>—</option>
+                  </select>
+                </td>
+                <td style="width: 44px;">
+                  <button type="button" class="secondary small remove-holding"
+                    title="Remove {{ holding.symbol }}" aria-label="Remove {{ holding.symbol }}">×</button>
+                </td>
               </tr>
             {% endfor %}
-          {% else %}
-            <tr><td colspan="7" class="muted">No active holdings found for this profile.</td></tr>
-          {% endif %}
-        </tbody>
-      </table>
-    </div>
+          </tbody>
+          <tfoot>
+            <tr class="holdings-total-row">
+              <td colspan="4">
+                <div class="holdings-total-bar">
+                  <span class="holdings-total-label">Total</span>
+                  <strong id="holdings-total-display" class="holdings-total-value">—</strong>
+                  <button type="button" class="secondary small" id="normalize-weights-btn">Normalize to 100%</button>
+                </div>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="add-holding-row">
+        <div class="field">
+          <label>Add symbol</label>
+          <input type="search" id="new-holding-symbol" autocomplete="off"
+            list="stock-option-list" placeholder="e.g. NVDA or Apple">
+        </div>
+        <div class="field add-holding-weight-field">
+          <label>Weight %</label>
+          <input type="number" id="new-holding-weight" min="0" max="100" step="0.5" placeholder="0.00">
+        </div>
+        <div class="field add-holding-bucket-field">
+          <label>Bucket</label>
+          <select id="new-holding-bucket">
+            <option value="core">Core</option>
+            <option value="satellite">Satellite</option>
+            <option value="watch">Watch</option>
+          </select>
+        </div>
+        <div class="field add-holding-action-field">
+          <label>&nbsp;</label>
+          <button type="button" id="add-holding-btn">+ Add</button>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="submit">Save Holdings</button>
+      </div>
+    </form>
+
+    <details class="holdings-import-details">
+      <summary>Import from YAML / CSV file (replaces all holdings)</summary>
+      <div class="holdings-import-body">
+        <p class="muted" style="margin: 0 0 10px;">
+          Uploading a file completely replaces the current snapshot, including shares and cost data.
+        </p>
+        <form
+          hx-post="/ui/profile/{{ state.profile }}/holdings/import"
+          hx-target="#settings-root"
+          hx-swap="outerHTML"
+          hx-encoding="multipart/form-data"
+          enctype="multipart/form-data"
+          method="post"
+          class="actions"
+        >
+          <input type="file" name="file" accept=".yaml,.yml,.csv" required>
+          <button type="submit" class="secondary">Import Snapshot</button>
+        </form>
+      </div>
+    </details>
   </section>
 
-  <section class="card" id="section-coverage">
+  <section class="card" id="section-coverage" data-module-section="section-coverage">
     <h2>Coverage</h2>
     <p class="muted">
       Configure what gets editorial priority.
@@ -1268,7 +1454,7 @@
     </form>
   </section>
 
-  <section class="card" id="section-delivery">
+  <section class="card" id="section-delivery" data-module-section="section-delivery">
     <h2>Delivery</h2>
     <p class="muted">
       Choose channels and schedule controls for each briefing type.
@@ -1380,7 +1566,7 @@
     </form>
   </section>
 
-  <section class="card" id="section-morning">
+  <section class="card" id="section-morning" data-module-section="section-morning">
     <h2>Morning Brief Settings</h2>
     <p class="muted">Enable or disable sections that appear in the next generated morning briefing.</p>
     <form
@@ -1410,7 +1596,7 @@
     </form>
   </section>
 
-  <section class="card" id="section-audit">
+  <section class="card" id="section-audit" data-module-section="section-audit">
     <h2>Audit & Source of Truth</h2>
     <p class="muted">Effective values = YAML defaults + active SQLite overrides for this profile.</p>
     <div class="summary-grid">
@@ -1423,12 +1609,14 @@
         <dd title="UTC: {{ metadata.last_preferences_update or 'Not provided' }}">{{ metadata.last_preferences_update_local }}</dd>
         <dt>Last Preferences Update (UTC)</dt>
         <dd>{{ metadata.last_preferences_update or "Not provided" }}</dd>
+        <dt>Active Overrides</dt>
+        <dd>{{ state.overrides | length }} saved</dd>
       </dl>
-      <div class="summary">
-        <dt style="color: var(--muted); font-size: 0.78rem;">Active DB Overrides</dt>
-        <pre class="mono">{{ state.overrides | tojson(indent=2) }}</pre>
-      </div>
     </div>
+    <details class="dev-overrides-details">
+      <summary>Show raw DB overrides ({{ state.overrides | length }} active)</summary>
+      <pre class="mono" style="margin-top: 8px;">{{ state.overrides | tojson(indent=2) }}</pre>
+    </details>
     <div class="actions">
       <form
         hx-post="/ui/profile/{{ state.profile }}/reset"

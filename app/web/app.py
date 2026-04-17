@@ -21,6 +21,7 @@ from app.web.control_plane_service import (
     import_holdings_from_upload,
     remove_preference,
     reset_preferences,
+    save_holdings_from_form,
     search_followables,
 )
 
@@ -115,6 +116,39 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             updates=updates,
             success_message="Morning section visibility saved to DB overrides.",
         )
+
+    @app.post(
+        "/ui/profile/{profile}/holdings/save",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_holdings(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        try:
+            result = save_holdings_from_form(normalized_profile, form)
+            state = build_profile_state(_settings(request), normalized_profile)
+            timezone = state["effective"]["timezone"]
+            saved_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
+            message = (
+                f"Saved {result['count']} holding(s) for profile "
+                f"'{result['profile_name']}' at {saved_at}."
+            )
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=message,
+                message_kind="success",
+                state=state,
+            )
+        except (ValueError, Exception) as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Holdings save failed: {exc}",
+                message_kind="error",
+                status_code=400,
+            )
 
     @app.post(
         "/ui/profile/{profile}/holdings/import",

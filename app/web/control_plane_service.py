@@ -30,7 +30,7 @@ from app.personalization.user_profile import (
     _load_profile_overrides,
 )
 from app.portfolio.importer import load_holdings_file
-from app.portfolio.service import replace_holdings_snapshot
+from app.portfolio.service import load_active_holdings, replace_holdings_snapshot
 from app.settings import Settings
 from app.universe.sector_universe import load_sector_universe
 from app.universe.ticker_metadata import TICKER_DISPLAY_NAMES, format_company_ticker
@@ -176,6 +176,71 @@ def import_holdings_from_upload(
         "profile_name": snapshot.profile_name or normalized_profile,
         "as_of_date": snapshot.as_of_date.isoformat() if snapshot.as_of_date else None,
     }
+
+
+def save_holdings_from_form(
+    profile_name: str,
+    form: Any,
+) -> dict[str, Any]:
+    """Persist holdings submitted from the inline editor.
+
+    Reads parallel form arrays (holding_symbol, holding_weight, holding_bucket)
+    and calls replace_holdings_snapshot, merging weight/bucket edits with any
+    existing per-position metadata (shares, avg_cost, account) so those fields
+    are not lost when the user makes weight adjustments from the UI.
+    """
+    from datetime import date
+    from app.schemas.portfolio import PortfolioHolding
+
+    normalized_profile = normalize_profile_name(profile_name)
+    existing: dict[str, PortfolioHolding] = {
+        h.symbol: h for h in load_active_holdings(normalized_profile)
+    }
+
+    symbols = [str(s).strip().upper() for s in form.getlist("holding_symbol") if str(s).strip()]
+    weights = list(form.getlist("holding_weight"))
+    buckets = list(form.getlist("holding_bucket"))
+
+    # Pad to same length as symbols (defensive)
+    while len(weights) < len(symbols):
+        weights.append("")
+    while len(buckets) < len(symbols):
+        buckets.append("")
+
+    holdings: list[PortfolioHolding] = []
+    seen: set[str] = set()
+    for symbol, weight_raw, bucket_raw in zip(symbols, weights, buckets):
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+
+        weight_val: float | None = None
+        try:
+            w = float(str(weight_raw).strip())
+            weight_val = max(0.0, w) if w >= 0 else None
+        except (ValueError, TypeError):
+            pass
+
+        bucket_text = str(bucket_raw).strip().lower()
+        bucket_val: str | None = bucket_text if bucket_text and bucket_text != "—" else None
+
+        prev = existing.get(symbol)
+        holdings.append(
+            PortfolioHolding(
+                profile_name=normalized_profile,
+                symbol=symbol,
+                weight_pct=weight_val,
+                shares=prev.shares if prev else None,
+                avg_cost=prev.avg_cost if prev else None,
+                account=prev.account if prev else None,
+                sector_override=prev.sector_override if prev else None,
+                bucket=bucket_val,
+                as_of_date=date.today(),
+            )
+        )
+
+    count = replace_holdings_snapshot(normalized_profile, holdings)
+    return {"count": count, "profile_name": normalized_profile}
 
 
 def search_followables(

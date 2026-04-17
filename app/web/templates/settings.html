@@ -140,6 +140,19 @@
       background: rgba(245, 159, 0, 0.08);
     }
 
+    button.module-pill {
+      cursor: pointer;
+      font-family: inherit;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    button.module-pill:hover:not(.active) {
+      border-color: var(--muted);
+      color: var(--ink);
+      background: var(--card-hover);
+    }
+
     .theme-toggle {
       margin-top: 2px;
       border: 1px solid var(--border);
@@ -178,9 +191,9 @@
         <h1 class="title">Portfolio Analyzer</h1>
         <p class="subtitle">Analyzer-first control center for the Briefly platform: portfolio exposure, market briefing delivery, and local iteration without extra infrastructure.</p>
         <div class="module-strip" aria-label="Briefly modules">
-          <span class="module-pill">Market Briefing</span>
-          <span class="module-pill active">Portfolio Analyzer</span>
-          <span class="module-pill">Trading Lab (Planned)</span>
+          <button class="module-pill" data-module="briefing" type="button">Market Briefing</button>
+          <button class="module-pill active" data-module="portfolio" type="button">Portfolio Analyzer</button>
+          <span class="module-pill" title="Coming soon" style="opacity:0.5;cursor:default;">Trading Lab (Planned)</span>
         </div>
       </div>
       <button id="themeToggle" class="theme-toggle" type="button">Switch Theme</button>
@@ -191,6 +204,7 @@
   </div>
   <script>
     (() => {
+      // ── Theme ─────────────────────────────────────────────────────────────
       function getTheme() {
         return document.documentElement.getAttribute("data-theme") || "dark";
       }
@@ -212,14 +226,11 @@
         });
       }
 
+      // ── Stock catalog helpers (shared by watchlist + holdings editor) ──────
       function parseStockCatalog() {
         const node = document.getElementById("stock-catalog-json");
         if (!node) return [];
-        try {
-          return JSON.parse(node.textContent || "[]");
-        } catch {
-          return [];
-        }
+        try { return JSON.parse(node.textContent || "[]"); } catch { return []; }
       }
 
       function normalizeTickerInput(raw, catalog) {
@@ -237,6 +248,7 @@
         return "";
       }
 
+      // ── Watchlist builder ─────────────────────────────────────────────────
       function bindWatchlistBuilder(builder, catalog) {
         if (!builder || builder.dataset.bound === "true") return;
         builder.dataset.bound = "true";
@@ -260,10 +272,7 @@
             chip.className = "watch-chip";
             chip.title = "Remove";
             chip.textContent = symbol;
-            chip.addEventListener("click", () => {
-              selected.delete(symbol);
-              render();
-            });
+            chip.addEventListener("click", () => { selected.delete(symbol); render(); });
             chips.appendChild(chip);
 
             const fieldInput = document.createElement("input");
@@ -288,50 +297,32 @@
             const normalized = normalizeTickerInput(String(symbol), catalog);
             if (normalized) selected.add(normalized);
           });
-        } catch {
-          // Ignore invalid initialization payload.
-        }
+        } catch { /* ignore invalid init */ }
         render();
 
         addButton.addEventListener("click", addFromInput);
-        if (clearButton) {
-          clearButton.addEventListener("click", () => {
-            selected.clear();
-            render();
-          });
-        }
+        if (clearButton) clearButton.addEventListener("click", () => { selected.clear(); render(); });
         if (holdingsButton) {
           holdingsButton.addEventListener("click", () => {
             const holdingsNode = document.getElementById("holdings-symbols-json");
             if (!holdingsNode) return;
             try {
-              const symbols = JSON.parse(holdingsNode.textContent || "[]");
-              symbols.forEach((symbol) => {
+              JSON.parse(holdingsNode.textContent || "[]").forEach((symbol) => {
                 const normalized = normalizeTickerInput(String(symbol), catalog);
                 if (normalized) selected.add(normalized);
               });
               render();
-            } catch {
-              // Ignore malformed holdings payload.
-            }
+            } catch { /* ignore */ }
           });
         }
         input.addEventListener("keydown", (event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            addFromInput();
-          }
+          if (event.key === "Enter") { event.preventDefault(); addFromInput(); }
         });
-
         const parentForm = builder.closest("form");
         if (parentForm) {
           parentForm.addEventListener("submit", () => {
             const pending = normalizeTickerInput(input.value, catalog);
-            if (pending) {
-              selected.add(pending);
-              input.value = "";
-              render();
-            }
+            if (pending) { selected.add(pending); input.value = ""; render(); }
           });
         }
       }
@@ -343,15 +334,169 @@
         });
       }
 
+      // ── Holdings editor ───────────────────────────────────────────────────
+      function initHoldingsEditor() {
+        const form = document.getElementById("holdings-editor-form");
+        if (!form || form.dataset.holdingsBound === "true") return;
+        form.dataset.holdingsBound = "true";
+
+        const tbody = document.getElementById("holdings-rows");
+        const totalDisplay = document.getElementById("holdings-total-display");
+        const normalizeBtn = document.getElementById("normalize-weights-btn");
+        const addBtn = document.getElementById("add-holding-btn");
+        const catalog = parseStockCatalog();
+
+        function getWeightInputs() {
+          return Array.from(form.querySelectorAll(".holding-weight"));
+        }
+
+        function updateTotalDisplay() {
+          if (!totalDisplay) return;
+          const total = getWeightInputs().reduce((s, inp) => s + (parseFloat(inp.value) || 0), 0);
+          const rounded = Math.round(total * 100) / 100;
+          totalDisplay.textContent = rounded.toFixed(2) + "%";
+          totalDisplay.classList.remove("total-ok", "total-warn", "total-off");
+          if (rounded >= 95 && rounded <= 105) totalDisplay.classList.add("total-ok");
+          else if (rounded >= 60 && rounded <= 140) totalDisplay.classList.add("total-warn");
+          else totalDisplay.classList.add("total-off");
+        }
+
+        function bindRow(row) {
+          const removeBtn = row.querySelector(".remove-holding");
+          if (removeBtn && !removeBtn.dataset.rowBound) {
+            removeBtn.dataset.rowBound = "true";
+            removeBtn.addEventListener("click", () => { row.remove(); updateTotalDisplay(); });
+          }
+          const wInp = row.querySelector(".holding-weight");
+          if (wInp && !wInp.dataset.rowBound) {
+            wInp.dataset.rowBound = "true";
+            wInp.addEventListener("input", updateTotalDisplay);
+          }
+        }
+
+        tbody && tbody.querySelectorAll(".holding-row").forEach(bindRow);
+
+        if (normalizeBtn) {
+          normalizeBtn.addEventListener("click", () => {
+            const inputs = getWeightInputs();
+            if (!inputs.length) return;
+            const total = inputs.reduce((s, inp) => s + (parseFloat(inp.value) || 0), 0);
+            if (total === 0) {
+              const eq = (100 / inputs.length).toFixed(2);
+              inputs.forEach(inp => { inp.value = eq; });
+            } else {
+              inputs.forEach(inp => {
+                inp.value = (((parseFloat(inp.value) || 0) / total) * 100).toFixed(2);
+              });
+            }
+            updateTotalDisplay();
+          });
+        }
+
+        function addHolding() {
+          const symInp = document.getElementById("new-holding-symbol");
+          const wtInp = document.getElementById("new-holding-weight");
+          const bktInp = document.getElementById("new-holding-bucket");
+          if (!symInp || !tbody) return;
+
+          const symbol = normalizeTickerInput(symInp.value, catalog);
+          if (!symbol) { symInp.focus(); return; }
+
+          const weight = parseFloat(wtInp ? wtInp.value : "") || 0;
+          const bucket = bktInp ? bktInp.value : "core";
+
+          // Duplicate: flash existing row
+          const existing = Array.from(form.querySelectorAll("input[name='holding_symbol']"));
+          const dup = existing.find(i => i.value === symbol);
+          if (dup) {
+            const dupRow = dup.closest(".holding-row");
+            if (dupRow) {
+              dupRow.classList.add("flash-highlight");
+              dupRow.querySelector(".holding-weight")?.focus();
+              setTimeout(() => dupRow.classList.remove("flash-highlight"), 900);
+            }
+            symInp.value = "";
+            return;
+          }
+
+          const bucketOptions = [
+            ["core", "Core"], ["satellite", "Satellite"], ["watch", "Watch"], ["", "—"],
+          ].map(([v, l]) => `<option value="${v}"${bucket === v ? " selected" : ""}>${l}</option>`).join("");
+
+          const row = document.createElement("tr");
+          row.className = "holding-row";
+          row.innerHTML = `
+            <td>
+              <span class="ticker-chip">${symbol}</span>
+              <input type="hidden" name="holding_symbol" value="${symbol}">
+            </td>
+            <td>
+              <input type="number" class="holding-weight" name="holding_weight"
+                value="${weight > 0 ? weight.toFixed(2) : ""}"
+                placeholder="—" min="0" max="100" step="0.5">
+            </td>
+            <td>
+              <select name="holding_bucket" class="holding-bucket-select">${bucketOptions}</select>
+            </td>
+            <td>
+              <button type="button" class="secondary small remove-holding"
+                title="Remove ${symbol}" aria-label="Remove ${symbol}">×</button>
+            </td>`;
+
+          tbody.appendChild(row);
+          bindRow(row);
+          updateTotalDisplay();
+
+          symInp.value = "";
+          if (wtInp) wtInp.value = "";
+          symInp.focus();
+        }
+
+        if (addBtn) addBtn.addEventListener("click", addHolding);
+        const symField = document.getElementById("new-holding-symbol");
+        if (symField) {
+          symField.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") { e.preventDefault(); addHolding(); }
+          });
+        }
+
+        updateTotalDisplay();
+      }
+
+      // ── Module tab switching ───────────────────────────────────────────────
+      // "portfolio" shows: Overview, Analyzer, Holdings, Coverage.
+      // "briefing"  shows: Delivery, Morning Brief, Audit.
+      const MODULE_SECTIONS = {
+        portfolio: new Set(["section-overview", "section-analyzer", "section-holdings", "section-coverage"]),
+        briefing:  new Set(["section-delivery", "section-morning", "section-audit"]),
+      };
+
+      function activateModule(module) {
+        if (!MODULE_SECTIONS[module]) module = "portfolio";
+        localStorage.setItem("briefly-module", module);
+
+        // Update pill active state
+        document.querySelectorAll(".module-pill[data-module]").forEach(pill => {
+          pill.classList.toggle("active", pill.dataset.module === module);
+        });
+
+        const shown = MODULE_SECTIONS[module];
+
+        // Show/hide sections inside settings-root
+        document.querySelectorAll("#settings-root [data-module-section]").forEach(sec => {
+          sec.style.display = shown.has(sec.id) ? "" : "none";
+        });
+
+        // Show/hide section-nav links
+        document.querySelectorAll("#settings-root .section-nav a[data-module-nav]").forEach(a => {
+          a.style.display = shown.has(a.dataset.moduleNav) ? "" : "none";
+        });
+      }
+
+      // ── Unsaved-changes guard ─────────────────────────────────────────────
       let hasUnsavedChanges = false;
-
-      function markDirty() {
-        hasUnsavedChanges = true;
-      }
-
-      function clearDirty() {
-        hasUnsavedChanges = false;
-      }
+      function markDirty() { hasUnsavedChanges = true; }
+      function clearDirty() { hasUnsavedChanges = false; }
 
       function bindUnsavedChangesGuard(root = document) {
         root.querySelectorAll("form.tracked-form").forEach((form) => {
@@ -359,9 +504,7 @@
           form.dataset.dirtyBound = "true";
           form.addEventListener("input", markDirty);
           form.addEventListener("change", markDirty);
-          form.addEventListener("submit", () => {
-            clearDirty();
-          });
+          form.addEventListener("submit", () => { clearDirty(); });
         });
       }
 
@@ -371,16 +514,28 @@
         event.returnValue = "";
       });
 
+      // ── Bootstrap ─────────────────────────────────────────────────────────
       document.addEventListener("DOMContentLoaded", () => {
         initWatchlistBuilders(document);
         bindUnsavedChangesGuard(document);
+        initHoldingsEditor();
+
+        // Module tabs: bind pill click handlers once (pills are in outer shell)
+        document.querySelectorAll(".module-pill[data-module]").forEach(pill => {
+          pill.addEventListener("click", () => activateModule(pill.dataset.module));
+        });
+        activateModule(localStorage.getItem("briefly-module") || "portfolio");
       });
+
       document.body.addEventListener("htmx:afterSwap", (event) => {
         const target = event.detail && event.detail.target;
         if (target && target.id === "settings-root") {
           initWatchlistBuilders(target);
           bindUnsavedChangesGuard(target);
+          initHoldingsEditor();
           clearDirty();
+          // Re-apply module visibility to newly swapped sections
+          activateModule(localStorage.getItem("briefly-module") || "portfolio");
         }
       });
     })();
