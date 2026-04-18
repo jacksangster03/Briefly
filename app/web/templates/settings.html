@@ -123,6 +123,37 @@
       gap: 8px;
     }
 
+    .global-nav {
+      margin-top: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .global-link {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: var(--muted);
+      text-decoration: none;
+      background: var(--card);
+    }
+
+    .global-link.active {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: rgba(245, 159, 0, 0.08);
+    }
+
+    .global-link:hover:not(.active) {
+      border-color: var(--muted);
+      color: var(--ink);
+      background: var(--card-hover);
+    }
+
     .workspace-strip {
       margin-top: 10px;
       display: flex;
@@ -146,6 +177,12 @@
       color: var(--ink);
       border-color: var(--accent);
       background: var(--card-hover);
+    }
+
+    .workspace-link.active {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: rgba(245, 159, 0, 0.08);
     }
 
     .module-pill {
@@ -208,29 +245,74 @@
     }
   </style>
 </head>
-<body data-initial-module="{{ initial_module|default('briefing') }}" data-initial-section="{{ initial_section|default('') }}">
+<body
+  data-page-key="{{ page_key|default('briefing_home') }}"
+  data-workspace="{{ workspace|default('briefing') }}"
+  data-workspace-page="{{ workspace_page|default('home') }}"
+  data-builder-tab="{{ builder_tab|default('') }}"
+  data-initial-section="{{ initial_section|default('') }}"
+>
   <div class="shell">
     <header class="topbar">
       <div>
         <p class="eyebrow">Briefly</p>
-        <h1 class="title">Portfolio Workbench</h1>
-        <p class="subtitle">Workflow-first workspace for portfolio construction, diagnostics, risk, implementation, and a separate market briefing control surface.</p>
-        <div class="workspace-strip" aria-label="Workspace routes">
-          <a class="workspace-link" href="/ui?profile={{ state.profile }}">Home</a>
-          <a class="workspace-link" href="/ui/briefing?profile={{ state.profile }}">Briefing Home</a>
-          <a class="workspace-link" href="/ui/portfolio?profile={{ state.profile }}">Portfolio Home</a>
-          <a class="workspace-link" href="/ui/portfolio/builder?profile={{ state.profile }}">Builder</a>
-          <a class="workspace-link" href="/ui/portfolio/diagnostics?profile={{ state.profile }}">Diagnostics</a>
-          <a class="workspace-link" href="/ui/portfolio/risk?profile={{ state.profile }}">Risk</a>
-          <a class="workspace-link" href="/ui/portfolio/scenarios?profile={{ state.profile }}">Scenarios</a>
-          <a class="workspace-link" href="/ui/portfolio/implementation?profile={{ state.profile }}">Implementation</a>
-          <a class="workspace-link" href="/ui/portfolio/attribution?profile={{ state.profile }}">Attribution</a>
-          <a class="workspace-link" href="/ui/audit?profile={{ state.profile }}">Audit</a>
+        <h1 class="title">
+          {% if workspace == "portfolio" %}
+            Portfolio Workbench
+          {% elif workspace == "audit" %}
+            Audit
+          {% else %}
+            Market Briefing
+          {% endif %}
+        </h1>
+        <p class="subtitle">
+          {% if workspace == "portfolio" %}
+            Summary-first portfolio console. Open one focused route at a time for builder, diagnostics, risk, scenarios, implementation, and attribution.
+          {% elif workspace == "audit" %}
+            Advanced source-of-truth and low-level override inspection for local operations.
+          {% else %}
+            Configure watchlists, coverage priorities, delivery routing, and morning composition in a dedicated briefing workspace.
+          {% endif %}
+        </p>
+        <nav class="global-nav" aria-label="Global navigation">
+          <a class="global-link {% if global_nav == 'home' %}active{% endif %}" href="/ui?profile={{ state.profile }}">Home</a>
+          <a class="global-link {% if global_nav == 'briefing' %}active{% endif %}" href="/ui/briefing?profile={{ state.profile }}">Briefing</a>
+          <a class="global-link {% if global_nav == 'portfolio' %}active{% endif %}" href="/ui/portfolio?profile={{ state.profile }}">Portfolio</a>
+          <a class="global-link" href="#" aria-disabled="true">Trading (Planned)</a>
+          <a class="global-link {% if global_nav == 'audit' %}active{% endif %}" href="/ui/audit?profile={{ state.profile }}">Audit</a>
+        </nav>
+        {% if workspace == "portfolio" %}
+        <div class="workspace-strip" aria-label="Portfolio routes">
+          <a class="workspace-link {% if workspace_page == 'overview' %}active{% endif %}" href="/ui/portfolio?profile={{ state.profile }}">Overview</a>
+          <a class="workspace-link {% if workspace_page == 'builder' %}active{% endif %}" href="/ui/portfolio/builder?profile={{ state.profile }}">Builder</a>
+          <a class="workspace-link {% if workspace_page == 'diagnostics' %}active{% endif %}" href="/ui/portfolio/diagnostics?profile={{ state.profile }}">Diagnostics</a>
+          <a class="workspace-link {% if workspace_page == 'risk' %}active{% endif %}" href="/ui/portfolio/risk?profile={{ state.profile }}">Risk</a>
+          <a class="workspace-link {% if workspace_page == 'cma' %}active{% endif %}" href="/ui/portfolio/cma?profile={{ state.profile }}">CMA</a>
+          <a class="workspace-link {% if workspace_page == 'scenarios' %}active{% endif %}" href="/ui/portfolio/scenarios?profile={{ state.profile }}">Scenarios</a>
+          <a class="workspace-link {% if workspace_page == 'implementation' %}active{% endif %}" href="/ui/portfolio/implementation?profile={{ state.profile }}">Implementation</a>
+          <a class="workspace-link {% if workspace_page == 'attribution' %}active{% endif %}" href="/ui/portfolio/attribution?profile={{ state.profile }}">Attribution</a>
         </div>
-        <div class="module-strip" aria-label="Briefly modules">
-          <button class="module-pill active" data-module="briefing" type="button">Market Briefing</button>
-          <button class="module-pill" data-module="portfolio" type="button">Portfolio Workbench</button>
-          <button class="module-pill" data-module="audit" type="button">Audit</button>
+        {% if workspace_page == "builder" %}
+        <div class="workspace-strip" aria-label="Builder tabs">
+          <a class="workspace-link {% if builder_tab == 'holdings' %}active{% endif %}" href="/ui/portfolio/holdings?profile={{ state.profile }}">Holdings</a>
+          <a class="workspace-link {% if builder_tab == 'policy' %}active{% endif %}" href="/ui/portfolio/policy?profile={{ state.profile }}">Policy</a>
+          <a class="workspace-link {% if builder_tab == 'allocation' %}active{% endif %}" href="/ui/portfolio/allocation?profile={{ state.profile }}">Allocation</a>
+          <a class="workspace-link {% if builder_tab == 'benchmark' %}active{% endif %}" href="/ui/portfolio/benchmark?profile={{ state.profile }}">Benchmark</a>
+        </div>
+        {% endif %}
+        {% elif workspace == "briefing" %}
+        <div class="workspace-strip" aria-label="Briefing tabs">
+          <a class="workspace-link {% if workspace_page in ['home','watchlists'] %}active{% endif %}" href="/ui/briefing/watchlists?profile={{ state.profile }}">Watchlists</a>
+          <a class="workspace-link {% if workspace_page in ['home','watchlists'] %}active{% endif %}" href="/ui/briefing/watchlists?profile={{ state.profile }}">Coverage</a>
+          <a class="workspace-link {% if workspace_page == 'delivery' %}active{% endif %}" href="/ui/briefing/delivery?profile={{ state.profile }}">Delivery</a>
+          <a class="workspace-link {% if workspace_page == 'morning' %}active{% endif %}" href="/ui/briefing/morning?profile={{ state.profile }}">Morning Composition</a>
+        </div>
+        {% endif %}
+        <div class="workspace-strip" aria-label="Quick links">
+          <a class="workspace-link" href="/ui?profile={{ state.profile }}">Home</a>
+          <a class="workspace-link" href="/ui/briefing?profile={{ state.profile }}">Briefing</a>
+          <a class="workspace-link" href="/ui/portfolio?profile={{ state.profile }}">Portfolio</a>
+          <a class="workspace-link" href="/ui/audit?profile={{ state.profile }}">Audit</a>
         </div>
       </div>
       <button id="themeToggle" class="theme-toggle" type="button">Switch Theme</button>
@@ -581,47 +663,18 @@
         updateTotalDisplay();
       }
 
-      // ── Module tab switching ───────────────────────────────────────────────
-      // "briefing" shows: Watchlists, coverage priorities, delivery, morning composition.
-      // "portfolio" shows: Overview, diagnostics, builder, risk, scenarios, implementation.
-      // "audit" shows: audit + advanced controls only.
-      const MODULE_SECTIONS = {
-        briefing: new Set(["section-coverage", "section-delivery", "section-morning"]),
-        portfolio: new Set(["section-overview", "section-analyzer", "section-policy", "section-allocation", "section-risk", "section-cma", "section-scenarios", "section-rebalancing", "section-attribution", "section-benchmark", "section-holdings"]),
-        audit: new Set(["section-audit"]),
-      };
-
-      function activateModule(module, options = {}) {
-        if (!MODULE_SECTIONS[module]) module = "briefing";
-        const { scroll = false } = options;
-        localStorage.setItem("briefly-module", module);
-
-        // Update pill active state
-        document.querySelectorAll(".module-pill[data-module]").forEach(pill => {
-          pill.classList.toggle("active", pill.dataset.module === module);
+      function syncPageHiddenInputs(root = document) {
+        const pageKey = (document.body.dataset.pageKey || "").trim() || "briefing_home";
+        root.querySelectorAll("#settings-root form").forEach((form) => {
+          let input = form.querySelector("input[name='ui_page']");
+          if (!input) {
+            input = document.createElement("input");
+            input.type = "hidden";
+            input.name = "ui_page";
+            form.appendChild(input);
+          }
+          input.value = pageKey;
         });
-
-        const shown = MODULE_SECTIONS[module];
-
-        // Show/hide sections inside settings-root
-        document.querySelectorAll("#settings-root [data-module-section]").forEach(sec => {
-          sec.style.display = shown.has(sec.id) ? "" : "none";
-        });
-
-        // Show/hide section-nav links
-        document.querySelectorAll("#settings-root .section-nav a[data-module-nav]").forEach(a => {
-          a.style.display = shown.has(a.dataset.moduleNav) ? "" : "none";
-        });
-
-        if (scroll) {
-          const targetId = module === "briefing"
-            ? "section-coverage"
-            : module === "audit"
-              ? "section-audit"
-              : "section-overview";
-          const target = document.getElementById(targetId);
-          if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
       }
 
       // ── Unsaved-changes guard ─────────────────────────────────────────────
@@ -650,15 +703,8 @@
         initWatchlistBuilders(document);
         bindUnsavedChangesGuard(document);
         initHoldingsEditor();
-
-        // Module tabs: bind pill click handlers once (pills are in outer shell)
-        document.querySelectorAll(".module-pill[data-module]").forEach(pill => {
-          pill.addEventListener("click", () => activateModule(pill.dataset.module, { scroll: true }));
-        });
-        const explicitModule = (document.body.dataset.initialModule || "").trim();
         const explicitSection = (document.body.dataset.initialSection || "").trim();
-        const startModule = explicitModule || localStorage.getItem("briefly-module") || "briefing";
-        activateModule(startModule);
+        syncPageHiddenInputs(document);
         if (explicitSection) {
           const section = document.getElementById(explicitSection);
           if (section) section.scrollIntoView({ behavior: "auto", block: "start" });
@@ -671,9 +717,8 @@
           initWatchlistBuilders(target);
           bindUnsavedChangesGuard(target);
           initHoldingsEditor();
+          syncPageHiddenInputs(document);
           clearDirty();
-          // Re-apply module visibility to newly swapped sections
-          activateModule(localStorage.getItem("briefly-module") || "briefing");
         }
       });
     })();

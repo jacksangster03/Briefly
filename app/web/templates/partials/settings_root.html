@@ -40,6 +40,15 @@
 {% set override_summaries = metadata.override_summaries %}
 {% set policy_summary = metadata.policy_summary %}
 {% set allocation_summary = metadata.allocation_summary %}
+{% set visible_sections = visible_sections if visible_sections is defined else [
+  "section-overview","section-analyzer","section-policy","section-allocation","section-risk","section-cma","section-scenarios","section-rebalancing","section-attribution","section-benchmark","section-holdings","section-coverage","section-delivery","section-morning","section-audit"
+] %}
+{% set workspace = workspace if workspace is defined else "briefing" %}
+{% set workspace_page = workspace_page if workspace_page is defined else "home" %}
+{% set page_key = page_key if page_key is defined else "briefing_home" %}
+{% set builder_tab = builder_tab if builder_tab is defined else "" %}
+{% set ui_readiness = analysis.ui_readiness if analysis.ui_readiness is defined else {} %}
+{% set cma_asset_options = analysis.ui_cma_asset_options if analysis.ui_cma_asset_options is defined else [] %}
 
 <style>
   .grid {
@@ -1002,25 +1011,8 @@
   </div>
 {% endif %}
 
-<nav class="section-nav" aria-label="Settings sections">
-  <a href="#section-coverage"  data-module-nav="section-coverage">Watchlists & Coverage</a>
-  <a href="#section-delivery"  data-module-nav="section-delivery">Delivery</a>
-  <a href="#section-morning"   data-module-nav="section-morning">Morning Composition</a>
-  <a href="#section-overview"  data-module-nav="section-overview">Overview</a>
-  <a href="#section-holdings"  data-module-nav="section-holdings">Builder: Holdings</a>
-  <a href="#section-policy"    data-module-nav="section-policy">Builder: Policy</a>
-  <a href="#section-allocation" data-module-nav="section-allocation">Builder: Allocation</a>
-  <a href="#section-benchmark"    data-module-nav="section-benchmark">Builder: Benchmark</a>
-  <a href="#section-analyzer"  data-module-nav="section-analyzer">Diagnostics</a>
-  <a href="#section-risk"      data-module-nav="section-risk">Risk</a>
-  <a href="#section-cma"       data-module-nav="section-cma">CMA</a>
-  <a href="#section-scenarios" data-module-nav="section-scenarios">Scenarios</a>
-  <a href="#section-rebalancing"  data-module-nav="section-rebalancing">Implementation</a>
-  <a href="#section-attribution"  data-module-nav="section-attribution">Attribution</a>
-  <a href="#section-audit"     data-module-nav="section-audit">Audit</a>
-</nav>
-
 <div class="grid">
+  {% if "section-overview" in visible_sections %}
   <section class="card" id="section-overview" data-module-section="section-overview">
     <h2>Overview</h2>
     <p class="muted">Analyzer-first summary of exposure, editorial fit, and the next morning run for this profile.</p>
@@ -1062,7 +1054,14 @@
         <dt>Home Region</dt><dd>{{ overview.home_region_label }}</dd>
       </dl>
       <dl class="summary">
-        <dt>Policy Fit</dt><dd>{{ policy_fit.status | replace("_", " ") | title }}</dd>
+        <dt>Policy Fit</dt>
+        <dd>
+          {% if ui_readiness.policy and not ui_readiness.policy.configured %}
+            Unavailable
+          {% else %}
+            {{ policy_fit.status | replace("_", " ") | title }}
+          {% endif %}
+        </dd>
         <dt>Policy Breaches</dt><dd>{{ policy_fit.breaches | length }}</dd>
         <dt>Policy Summary</dt><dd>{{ policy_summary.headline }}</dd>
       </dl>
@@ -1072,7 +1071,14 @@
         <dt>Top 5 Concentration</dt><dd>{{ kpis.top5_concentration_display }}</dd>
       </dl>
       <dl class="summary">
-        <dt>Allocation Drift</dt><dd>{{ allocation_summary.headline }}</dd>
+        <dt>Allocation Drift</dt>
+        <dd>
+          {% if ui_readiness.allocation and not ui_readiness.allocation.configured %}
+            Partial configuration
+          {% else %}
+            {{ allocation_summary.headline }}
+          {% endif %}
+        </dd>
         <dt>Benchmark</dt><dd>{{ benchmark_summary.name }}</dd>
         <dt>Editorial Lead</dt><dd>{{ kpis.top_region_label }}</dd>
       </dl>
@@ -1146,8 +1152,48 @@
         {% endif %}
       </dl>
     </div>
-  </section>
 
+    {% if page_key == "portfolio_home" %}
+      <div class="executive-strip" style="margin-top: 12px;">
+        <strong>Top Actions</strong>
+        <p>Use Portfolio Home as a summary console, then open one focused task route at a time.</p>
+        <div class="hero-chip-row">
+          <a class="hero-chip" href="/ui/portfolio/holdings?profile={{ state.profile }}">Edit Holdings</a>
+          <a class="hero-chip" href="/ui/portfolio/diagnostics?profile={{ state.profile }}">Review Diagnostics</a>
+          <a class="hero-chip" href="/ui/portfolio/risk?profile={{ state.profile }}">Refresh Risk</a>
+          <a class="hero-chip" href="/ui/portfolio/cma?profile={{ state.profile }}">Configure CMA</a>
+          <a class="hero-chip" href="/ui/portfolio/implementation?profile={{ state.profile }}">Generate Rebalance</a>
+          <a class="hero-chip" href="/ui/portfolio/attribution?profile={{ state.profile }}">Open Attribution</a>
+        </div>
+      </div>
+      <div class="summary-grid">
+        <a class="summary" href="/ui/portfolio/builder?profile={{ state.profile }}" style="text-decoration:none;">
+          <div class="kpi-label">Builder</div><div>Holdings, policy, allocation, and benchmark</div>
+        </a>
+        <a class="summary" href="/ui/portfolio/diagnostics?profile={{ state.profile }}" style="text-decoration:none;">
+          <div class="kpi-label">Diagnostics</div><div>Exposure, fit, and briefing impact</div>
+        </a>
+        <a class="summary" href="/ui/portfolio/risk?profile={{ state.profile }}" style="text-decoration:none;">
+          <div class="kpi-label">Risk</div><div>Benchmark-relative risk and return</div>
+        </a>
+        <a class="summary" href="/ui/portfolio/cma?profile={{ state.profile }}" style="text-decoration:none;">
+          <div class="kpi-label">CMA</div><div>Forward assumptions and expected analytics</div>
+        </a>
+        <a class="summary" href="/ui/portfolio/scenarios?profile={{ state.profile }}" style="text-decoration:none;">
+          <div class="kpi-label">Scenarios</div><div>Static shock vulnerability scan</div>
+        </a>
+        <a class="summary" href="/ui/portfolio/implementation?profile={{ state.profile }}" style="text-decoration:none;">
+          <div class="kpi-label">Implementation</div><div>Rebalancing proposals and trade priorities</div>
+        </a>
+        <a class="summary" href="/ui/portfolio/attribution?profile={{ state.profile }}" style="text-decoration:none;">
+          <div class="kpi-label">Attribution</div><div>Allocation effect and active-return explanation</div>
+        </a>
+      </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if "section-analyzer" in visible_sections %}
   <section class="card" id="section-analyzer" data-module-section="section-analyzer">
     <h2>Portfolio Diagnostics</h2>
     <p class="muted">Exposure & structure, fit & drift, and briefing-impact diagnostics from the live portfolio snapshot.</p>
@@ -1485,7 +1531,9 @@
       <strong>Briefing Impact Preview:</strong> {{ analysis.briefing_impact_preview }}
     </div>
   </section>
+  {% endif %}
 
+  {% if "section-policy" in visible_sections %}
   <section class="card" id="section-policy" data-module-section="section-policy">
     <h2>Policy</h2>
     <p class="muted">Define the investor mandate above the holdings book so Briefly can judge fit, drift, and policy breaches deterministically.</p>
@@ -1495,7 +1543,14 @@
       <p>{{ policy_summary.detail }}</p>
       <div class="hero-chip-row">
         <span class="hero-chip">{{ policy_summary.headline }}</span>
-        <span class="hero-chip">Status: {{ policy_fit.status | replace("_", " ") }}</span>
+        <span class="hero-chip">
+          Status:
+          {% if ui_readiness.policy and not ui_readiness.policy.configured %}
+            unavailable
+          {% else %}
+            {{ policy_fit.status | replace("_", " ") }}
+          {% endif %}
+        </span>
         <span class="hero-chip">{{ policy_fit.breaches | length }} breach(es)</span>
       </div>
     </div>
@@ -1503,8 +1558,13 @@
     <div class="health-grid" style="margin-bottom:12px;">
       <div class="health-card">
         <div class="health-label">Policy Fit</div>
-        <span class="health-status {{ policy_fit.status }}">{{ policy_fit.status | replace("_", " ") }}</span>
-        <p class="health-message">{{ policy_fit.summary }}</p>
+        {% if ui_readiness.policy and not ui_readiness.policy.configured %}
+          <span class="health-status mixed">unavailable</span>
+          <p class="health-message">No IPS policy limits are configured yet. Add return/risk constraints before relying on policy-fit status.</p>
+        {% else %}
+          <span class="health-status {{ policy_fit.status }}">{{ policy_fit.status | replace("_", " ") }}</span>
+          <p class="health-message">{{ policy_fit.summary }}</p>
+        {% endif %}
       </div>
       <div class="health-card">
         <div class="health-label">Investor Profile</div>
@@ -1587,7 +1647,9 @@
       </div>
     </form>
   </section>
+  {% endif %}
 
+  {% if "section-allocation" in visible_sections %}
   <section class="card" id="section-allocation" data-module-section="section-allocation">
     <h2>Allocation</h2>
     <p class="muted">Set policy portfolio targets and allowed ranges, then compare the live holdings book to strategic asset-allocation bands.</p>
@@ -1661,6 +1723,7 @@
         </thead>
         <tbody>
           {% for row in allocation_drift.rows %}
+            {% set row_configured = row.target_pct is not none and row.min_pct is not none and row.max_pct is not none %}
             <tr>
               <td>{{ row.label }}</td>
               <td>{{ row.role }}</td>
@@ -1669,10 +1732,15 @@
               <td>{{ row.min_display }} → {{ row.max_display }}</td>
               <td>{{ row.drift_display }}</td>
               <td>
-                <span class="health-status {{ 'needs_attention' if row.status in ['above_band', 'below_band'] else 'strong' if row.status == 'within_band' else 'mixed' }}">
-                  {{ row.status | replace('_', ' ') }}
-                </span>
-                <div class="tiny">{{ row.rebalance_message }}</div>
+                {% if not row_configured %}
+                  <span class="health-status mixed">unavailable</span>
+                  <div class="tiny">Target/min/max band not fully configured.</div>
+                {% else %}
+                  <span class="health-status {{ 'needs_attention' if row.status in ['above_band', 'below_band'] else 'strong' if row.status == 'within_band' else 'mixed' }}">
+                    {{ row.status | replace('_', ' ') }}
+                  </span>
+                  <div class="tiny">{{ row.rebalance_message }}</div>
+                {% endif %}
               </td>
             </tr>
           {% endfor %}
@@ -1680,7 +1748,9 @@
       </table>
     </div>
   </section>
+  {% endif %}
 
+  {% if "section-risk" in visible_sections %}
   <section class="card" id="section-risk" data-module-section="section-risk">
     <h2>Risk &amp; Benchmark Analytics</h2>
     <p class="muted">Annualised risk-adjusted return metrics computed from historical price data. Requires a configured benchmark and weighted holdings.</p>
@@ -1889,7 +1959,9 @@
 
     {% endif %}
   </section>
+  {% endif %}
 
+  {% if "section-cma" in visible_sections %}
   <section class="card" id="section-cma" data-module-section="section-cma">
     <h2>Capital Market Assumptions (CMA)</h2>
     <p class="muted">Enter forward-looking expected return and volatility assumptions per asset class. These power expected portfolio analytics and policy gap checks.</p>
@@ -1915,7 +1987,11 @@
               {% for entry in cma_entries %}
               <tr>
                 <td style="padding:5px 8px;">
-                  <input type="text" name="cma_asset_class" value="{{ entry.asset_class }}" style="width:100%;min-width:120px;" required>
+                  <select name="cma_asset_class" style="width:100%;min-width:150px;" required>
+                    {% for item in cma_asset_options %}
+                      <option value="{{ item.key }}" {% if entry.asset_class == item.key %}selected{% endif %}>{{ item.label }}</option>
+                    {% endfor %}
+                  </select>
                 </td>
                 <td style="padding:5px 8px;">
                   <input type="number" name="cma_expected_return" value="{{ entry.expected_return_pct }}" step="0.1" style="width:80px;">
@@ -1930,43 +2006,71 @@
               {% endfor %}
             {% else %}
               <tr>
-                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="equities" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;">
+                  <select name="cma_asset_class" style="width:100%;min-width:150px;">
+                    {% for item in cma_asset_options %}<option value="{{ item.key }}" {% if item.key == "equities" %}selected{% endif %}>{{ item.label }}</option>{% endfor %}
+                  </select>
+                </td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="7.5" step="0.1" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="16.0" step="0.1" min="0" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
               </tr>
               <tr>
-                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="high_quality_bonds" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;">
+                  <select name="cma_asset_class" style="width:100%;min-width:150px;">
+                    {% for item in cma_asset_options %}<option value="{{ item.key }}" {% if item.key == "high_quality_bonds" %}selected{% endif %}>{{ item.label }}</option>{% endfor %}
+                  </select>
+                </td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="3.5" step="0.1" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="5.0" step="0.1" min="0" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
               </tr>
               <tr>
-                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="credit" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;">
+                  <select name="cma_asset_class" style="width:100%;min-width:150px;">
+                    {% for item in cma_asset_options %}<option value="{{ item.key }}" {% if item.key == "credit" %}selected{% endif %}>{{ item.label }}</option>{% endfor %}
+                  </select>
+                </td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="5.0" step="0.1" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="8.0" step="0.1" min="0" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
               </tr>
               <tr>
-                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="alternatives" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;">
+                  <select name="cma_asset_class" style="width:100%;min-width:150px;">
+                    {% for item in cma_asset_options %}<option value="{{ item.key }}" {% if item.key == "alternatives" %}selected{% endif %}>{{ item.label }}</option>{% endfor %}
+                  </select>
+                </td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="6.0" step="0.1" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="10.0" step="0.1" min="0" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
               </tr>
               <tr>
-                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="real_assets" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;">
+                  <select name="cma_asset_class" style="width:100%;min-width:150px;">
+                    {% for item in cma_asset_options %}<option value="{{ item.key }}" {% if item.key == "real_assets" %}selected{% endif %}>{{ item.label }}</option>{% endfor %}
+                  </select>
+                </td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="5.5" step="0.1" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="9.0" step="0.1" min="0" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
               </tr>
               <tr>
-                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="gold" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;">
+                  <select name="cma_asset_class" style="width:100%;min-width:150px;">
+                    {% for item in cma_asset_options %}<option value="{{ item.key }}" {% if item.key == "gold" %}selected{% endif %}>{{ item.label }}</option>{% endfor %}
+                  </select>
+                </td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="4.0" step="0.1" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="18.0" step="0.1" min="0" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
               </tr>
               <tr>
-                <td style="padding:5px 8px;"><input type="text" name="cma_asset_class" value="cash_liquidity" style="width:100%;min-width:120px;"></td>
+                <td style="padding:5px 8px;">
+                  <select name="cma_asset_class" style="width:100%;min-width:150px;">
+                    {% for item in cma_asset_options %}<option value="{{ item.key }}" {% if item.key == "cash_liquidity" %}selected{% endif %}>{{ item.label }}</option>{% endfor %}
+                  </select>
+                </td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_return" placeholder="4.5" step="0.1" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="number" name="cma_expected_vol" placeholder="0.5" step="0.1" min="0" style="width:80px;"></td>
                 <td style="padding:5px 8px;"><input type="text" name="cma_notes" placeholder="Optional" style="width:100%;"></td>
@@ -2096,7 +2200,9 @@
       </div>
     {% endif %}
   </section>
+  {% endif %}
 
+  {% if "section-scenarios" in visible_sections %}
   <section class="card" id="section-scenarios" data-module-section="section-scenarios">
     <h2>Scenarios</h2>
     <p class="muted">Static scenario lab for fast vulnerability checks. Use this section to see which holdings and sectors are most exposed under common market shocks.</p>
@@ -2153,8 +2259,10 @@
       {% endfor %}
     </div>
   </section>
+  {% endif %}
 
   <!-- ===== REBALANCING ===== -->
+  {% if "section-rebalancing" in visible_sections %}
   <section class="card" id="section-rebalancing" data-module-section="section-rebalancing">
     <h2>Rebalancing</h2>
     <p class="muted">Drift-triggered trade list, turnover calculation, and estimated implementation costs. Configure your rebalancing policy, then generate a proposal to see which asset classes need attention.</p>
@@ -2366,9 +2474,11 @@
     {% endif %}
 
   </section>
+  {% endif %}
   <!-- ===== /REBALANCING ===== -->
 
   <!-- ===== ATTRIBUTION ===== -->
+  {% if "section-attribution" in visible_sections %}
   <section class="card" id="section-attribution" data-module-section="section-attribution">
     <h2>Attribution</h2>
     <p class="muted">Brinson-Hood-Beebower performance attribution. Decomposes the gap between portfolio and benchmark expected return into allocation, selection, and interaction effects using CMA assumptions.</p>
@@ -2568,8 +2678,10 @@
     {% endif %}
 
   </section>
+  {% endif %}
   <!-- ===== /ATTRIBUTION ===== -->
 
+  {% if "section-benchmark" in visible_sections %}
   <section class="card" id="section-benchmark" data-module-section="section-benchmark">
     <h2>Benchmark</h2>
     <p class="muted">Store the benchmark policy now so later active-risk and attribution analytics have a stable reference point.</p>
@@ -2618,7 +2730,9 @@
       </div>
     </form>
   </section>
+  {% endif %}
 
+  {% if "section-holdings" in visible_sections %}
   <section class="card" id="section-holdings" data-module-section="section-holdings">
     <h2>Holdings</h2>
     <p class="muted">
@@ -2777,7 +2891,9 @@
       </div>
     </details>
   </section>
+  {% endif %}
 
+  {% if "section-coverage" in visible_sections %}
   <section class="card" id="section-coverage" data-module-section="section-coverage">
     <h2>Market Briefing · Watchlists & Coverage Priorities</h2>
     <p class="muted">
@@ -2906,7 +3022,9 @@
       </div>
     </form>
   </section>
+  {% endif %}
 
+  {% if "section-delivery" in visible_sections %}
   <section class="card" id="section-delivery" data-module-section="section-delivery">
     <h2>Market Briefing · Delivery</h2>
     <p class="muted">
@@ -3023,7 +3141,9 @@
       </div>
     </form>
   </section>
+  {% endif %}
 
+  {% if "section-morning" in visible_sections %}
   <section class="card" id="section-morning" data-module-section="section-morning">
     <h2>Market Briefing · Morning Composition</h2>
     <p class="muted">Enable or disable sections that appear in the next generated morning briefing.</p>
@@ -3053,7 +3173,9 @@
       </div>
     </form>
   </section>
+  {% endif %}
 
+  {% if "section-audit" in visible_sections %}
   <section class="card" id="section-audit" data-module-section="section-audit">
     <h2>History & Advanced</h2>
     <p class="muted">Friendly profile history first. Raw override payloads stay tucked under Advanced Settings.</p>
@@ -3101,4 +3223,5 @@
       </div>
     </details>
   </section>
+  {% endif %}
 </div>

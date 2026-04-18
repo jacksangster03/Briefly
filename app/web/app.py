@@ -50,6 +50,127 @@ _REBALANCING_POLICY_VALUES = {"threshold", "calendar", "hybrid"}
 _GOVERNANCE_FREQUENCY_VALUES = {"monthly", "quarterly", "semi_annual", "annual"}
 _ALLOCATION_ROLE_VALUES = {"growth", "income", "diversifier", "hedge", "liquidity", "tactical", "other"}
 
+_ALL_SECTIONS = [
+    "section-overview",
+    "section-analyzer",
+    "section-policy",
+    "section-allocation",
+    "section-risk",
+    "section-cma",
+    "section-scenarios",
+    "section-rebalancing",
+    "section-attribution",
+    "section-benchmark",
+    "section-holdings",
+    "section-coverage",
+    "section-delivery",
+    "section-morning",
+    "section-audit",
+]
+
+_PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
+    "briefing_home": {
+        "global_nav": "briefing",
+        "workspace": "briefing",
+        "workspace_page": "home",
+        "visible_sections": ["section-coverage"],
+    },
+    "briefing_watchlists": {
+        "global_nav": "briefing",
+        "workspace": "briefing",
+        "workspace_page": "watchlists",
+        "visible_sections": ["section-coverage"],
+    },
+    "briefing_delivery": {
+        "global_nav": "briefing",
+        "workspace": "briefing",
+        "workspace_page": "delivery",
+        "visible_sections": ["section-delivery"],
+    },
+    "briefing_morning": {
+        "global_nav": "briefing",
+        "workspace": "briefing",
+        "workspace_page": "morning",
+        "visible_sections": ["section-morning"],
+    },
+    "portfolio_home": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "overview",
+        "visible_sections": ["section-overview"],
+    },
+    "portfolio_builder_holdings": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "builder",
+        "builder_tab": "holdings",
+        "visible_sections": ["section-holdings"],
+    },
+    "portfolio_builder_policy": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "builder",
+        "builder_tab": "policy",
+        "visible_sections": ["section-policy"],
+    },
+    "portfolio_builder_allocation": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "builder",
+        "builder_tab": "allocation",
+        "visible_sections": ["section-allocation"],
+    },
+    "portfolio_builder_benchmark": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "builder",
+        "builder_tab": "benchmark",
+        "visible_sections": ["section-benchmark"],
+    },
+    "portfolio_diagnostics": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "diagnostics",
+        "visible_sections": ["section-analyzer"],
+    },
+    "portfolio_risk": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "risk",
+        "visible_sections": ["section-risk"],
+    },
+    "portfolio_cma": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "cma",
+        "visible_sections": ["section-cma"],
+    },
+    "portfolio_scenarios": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "scenarios",
+        "visible_sections": ["section-scenarios"],
+    },
+    "portfolio_implementation": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "implementation",
+        "visible_sections": ["section-rebalancing"],
+    },
+    "portfolio_attribution": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "attribution",
+        "visible_sections": ["section-attribution"],
+    },
+    "audit_home": {
+        "global_nav": "audit",
+        "workspace": "audit",
+        "workspace_page": "audit",
+        "visible_sections": ["section-audit"],
+    },
+}
+
 
 class PreferenceUpdateRequest(BaseModel):
     """Bulk preference payload for API updates."""
@@ -120,8 +241,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         return _render_settings_page(
             request,
             profile=normalized_profile,
-            initial_module="briefing",
-            initial_section="section-coverage",
+            page_key="briefing_home",
         )
 
     @app.get("/ui/briefing", response_class=HTMLResponse, include_in_schema=False)
@@ -133,8 +253,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         return _render_settings_page(
             request,
             profile=normalized_profile,
-            initial_module="briefing",
-            initial_section="section-coverage",
+            page_key="briefing_home",
         )
 
     @app.get("/ui/briefing/watchlists", response_class=HTMLResponse, include_in_schema=False)
@@ -146,8 +265,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         return _render_settings_page(
             request,
             profile=normalized_profile,
-            initial_module="briefing",
-            initial_section="section-coverage",
+            page_key="briefing_watchlists",
         )
 
     @app.get("/ui/briefing/delivery", response_class=HTMLResponse, include_in_schema=False)
@@ -159,8 +277,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         return _render_settings_page(
             request,
             profile=normalized_profile,
-            initial_module="briefing",
-            initial_section="section-delivery",
+            page_key="briefing_delivery",
         )
 
     @app.get("/ui/briefing/morning", response_class=HTMLResponse, include_in_schema=False)
@@ -172,8 +289,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         return _render_settings_page(
             request,
             profile=normalized_profile,
-            initial_module="briefing",
-            initial_section="section-morning",
+            page_key="briefing_morning",
         )
 
     @app.get("/ui/portfolio", response_class=HTMLResponse, include_in_schema=False)
@@ -185,8 +301,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         return _render_settings_page(
             request,
             profile=normalized_profile,
-            initial_module="portfolio",
-            initial_section="section-overview",
+            page_key="portfolio_home",
         )
 
     @app.get("/ui/portfolio/{view}", response_class=HTMLResponse, include_in_schema=False)
@@ -196,29 +311,28 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         profile: str = Query(default="default_user"),
     ):
         normalized_profile = _normalize_profile(profile)
-        view_to_section = {
-            "builder": "section-holdings",
-            "holdings": "section-holdings",
-            "policy": "section-policy",
-            "allocation": "section-allocation",
-            "benchmark": "section-benchmark",
-            "diagnostics": "section-analyzer",
-            "risk": "section-risk",
-            "cma": "section-cma",
-            "scenarios": "section-scenarios",
-            "implementation": "section-rebalancing",
-            "rebalancing": "section-rebalancing",
-            "attribution": "section-attribution",
-            "overview": "section-overview",
+        view_to_page = {
+            "builder": "portfolio_builder_holdings",
+            "holdings": "portfolio_builder_holdings",
+            "policy": "portfolio_builder_policy",
+            "allocation": "portfolio_builder_allocation",
+            "benchmark": "portfolio_builder_benchmark",
+            "diagnostics": "portfolio_diagnostics",
+            "risk": "portfolio_risk",
+            "cma": "portfolio_cma",
+            "scenarios": "portfolio_scenarios",
+            "implementation": "portfolio_implementation",
+            "rebalancing": "portfolio_implementation",
+            "attribution": "portfolio_attribution",
+            "overview": "portfolio_home",
         }
-        section = view_to_section.get((view or "").strip().lower())
-        if not section:
+        page_key = view_to_page.get((view or "").strip().lower())
+        if not page_key:
             return RedirectResponse(url=f"/ui/portfolio?profile={normalized_profile}", status_code=307)
         return _render_settings_page(
             request,
             profile=normalized_profile,
-            initial_module="portfolio",
-            initial_section=section,
+            page_key=page_key,
         )
 
     @app.get("/ui/audit", response_class=HTMLResponse, include_in_schema=False)
@@ -230,8 +344,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         return _render_settings_page(
             request,
             profile=normalized_profile,
-            initial_module="audit",
-            initial_section="section-audit",
+            page_key="audit_home",
         )
 
     @app.post(
@@ -243,11 +356,13 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         normalized_profile = _normalize_profile(profile)
         form = await request.form()
         updates = _coverage_updates_from_form(form)
+        page_key = _page_key_from_form(form, default="briefing_watchlists")
         return _render_ui_after_update(
             request,
             profile=normalized_profile,
             updates=updates,
             success_message="Coverage preferences saved.",
+            page_key=page_key,
         )
 
     @app.post(
@@ -259,11 +374,13 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         normalized_profile = _normalize_profile(profile)
         form = await request.form()
         updates = _delivery_updates_from_form(form)
+        page_key = _page_key_from_form(form, default="briefing_delivery")
         return _render_ui_after_update(
             request,
             profile=normalized_profile,
             updates=updates,
             success_message="Delivery preferences saved.",
+            page_key=page_key,
         )
 
     @app.post(
@@ -275,11 +392,13 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         normalized_profile = _normalize_profile(profile)
         form = await request.form()
         updates = _section_updates_from_form(form)
+        page_key = _page_key_from_form(form, default="briefing_morning")
         return _render_ui_after_update(
             request,
             profile=normalized_profile,
             updates=updates,
             success_message="Morning section visibility saved.",
+            page_key=page_key,
         )
 
     @app.post(
@@ -290,6 +409,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     async def ui_save_policy(request: Request, profile: str):
         normalized_profile = _normalize_profile(profile)
         form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_builder_policy")
         try:
             save_policy(normalized_profile, _policy_updates_from_form(form))
             state = build_profile_state(_settings(request), normalized_profile)
@@ -301,6 +421,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"Investor policy saved. Saved at {saved_at}.",
                 message_kind="success",
                 state=state,
+                page_key=page_key,
             )
         except ValueError as exc:
             return _render_settings_root(
@@ -309,6 +430,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"Policy save failed: {exc}",
                 message_kind="error",
                 status_code=400,
+                page_key=page_key,
             )
 
     @app.post(
@@ -319,6 +441,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     async def ui_save_allocation(request: Request, profile: str):
         normalized_profile = _normalize_profile(profile)
         form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_builder_allocation")
         try:
             save_allocation(normalized_profile, _allocation_updates_from_form(form))
             state = build_profile_state(_settings(request), normalized_profile)
@@ -330,6 +453,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"Strategic allocation targets saved. Saved at {saved_at}.",
                 message_kind="success",
                 state=state,
+                page_key=page_key,
             )
         except ValueError as exc:
             return _render_settings_root(
@@ -338,6 +462,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"Allocation save failed: {exc}",
                 message_kind="error",
                 status_code=400,
+                page_key=page_key,
             )
 
     @app.post(
@@ -348,6 +473,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     async def ui_save_benchmark(request: Request, profile: str):
         normalized_profile = _normalize_profile(profile)
         form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_builder_benchmark")
         try:
             save_benchmark(normalized_profile, _benchmark_updates_from_form(form))
             state = build_profile_state(_settings(request), normalized_profile)
@@ -359,6 +485,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"Benchmark configuration saved. Saved at {saved_at}.",
                 message_kind="success",
                 state=state,
+                page_key=page_key,
             )
         except ValueError as exc:
             return _render_settings_root(
@@ -367,6 +494,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"Benchmark save failed: {exc}",
                 message_kind="error",
                 status_code=400,
+                page_key=page_key,
             )
 
     @app.post(
@@ -377,6 +505,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     async def ui_save_holdings(request: Request, profile: str):
         normalized_profile = _normalize_profile(profile)
         form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_builder_holdings")
         try:
             result = save_holdings_from_form(normalized_profile, form)
             state = build_profile_state(_settings(request), normalized_profile)
@@ -392,6 +521,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=message,
                 message_kind="success",
                 state=state,
+                page_key=page_key,
             )
         except (ValueError, Exception) as exc:
             return _render_settings_root(
@@ -400,6 +530,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"Holdings save failed: {exc}",
                 message_kind="error",
                 status_code=400,
+                page_key=page_key,
             )
 
     @app.post(
@@ -411,8 +542,10 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         profile: str,
         file: UploadFile = File(...),
+        ui_page: str = Form(default="portfolio_builder_holdings"),
     ):
         normalized_profile = _normalize_profile(profile)
+        page_key = _normalize_page_key(ui_page, default="portfolio_builder_holdings")
         try:
             content = await file.read()
             result = import_holdings_from_upload(
@@ -433,6 +566,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=message,
                 message_kind="success",
                 state=state,
+                page_key=page_key,
             )
         except ValueError as exc:
             return _render_settings_root(
@@ -441,6 +575,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"Holdings import failed: {exc}",
                 message_kind="error",
                 status_code=400,
+                page_key=page_key,
             )
 
     @app.post(
@@ -450,6 +585,8 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     )
     async def ui_reset_profile_preferences(request: Request, profile: str):
         normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        page_key = _page_key_from_form(form, default="audit_home")
         result = reset_preferences(normalized_profile)
         state = build_profile_state(_settings(request), normalized_profile)
         timezone = state["effective"]["timezone"]
@@ -460,6 +597,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             message=f"Reset complete. Removed {result['removed_count']} override(s) at {saved_at}.",
             message_kind="success",
             state=state,
+            page_key=page_key,
         )
 
     @app.get("/api/v1/profile/{profile}/state")
@@ -544,6 +682,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     async def ui_save_risk_config(request: Request, profile: str):
         normalized_profile = _normalize_profile(profile)
         form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_risk")
         try:
             raw_lookback = str(form.get("risk_lookback_days", "252")).strip()
             raw_rfr = str(form.get("risk_free_rate_pct", "4.5")).strip()
@@ -559,6 +698,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"Risk configuration saved. Saved at {saved_at}.",
                 message_kind="success",
                 state=state,
+                page_key=page_key,
             )
         except (ValueError, TypeError) as exc:
             return _render_settings_root(
@@ -567,6 +707,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"Risk config save failed: {exc}",
                 message_kind="error",
                 status_code=400,
+                page_key=page_key,
             )
 
     @app.post(
@@ -576,6 +717,8 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     )
     async def ui_refresh_risk(request: Request, profile: str):
         normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_risk")
         refresh_risk_for_profile(normalized_profile)
         state = build_profile_state(_settings(request), normalized_profile)
         timezone = state["effective"]["timezone"]
@@ -586,6 +729,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             message=f"Risk metrics refreshed at {refreshed_at}.",
             message_kind="success",
             state=state,
+            page_key=page_key,
         )
 
     @app.get("/api/v1/profile/{profile}/risk")
@@ -614,6 +758,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     async def ui_save_cma(request: Request, profile: str):
         normalized_profile = _normalize_profile(profile)
         form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_cma")
         try:
             save_cma(normalized_profile, _cma_entries_from_form(form))
             state = build_profile_state(_settings(request), normalized_profile)
@@ -625,6 +770,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"CMA assumptions saved. Saved at {saved_at}.",
                 message_kind="success",
                 state=state,
+                page_key=page_key,
             )
         except (ValueError, TypeError) as exc:
             return _render_settings_root(
@@ -633,6 +779,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"CMA save failed: {exc}",
                 message_kind="error",
                 status_code=400,
+                page_key=page_key,
             )
 
     @app.post(
@@ -643,6 +790,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     async def ui_save_cma_correlations(request: Request, profile: str):
         normalized_profile = _normalize_profile(profile)
         form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_cma")
         try:
             save_cma_corr(normalized_profile, _cma_correlations_from_form(form))
             state = build_profile_state(_settings(request), normalized_profile)
@@ -654,6 +802,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"CMA correlations saved. Saved at {saved_at}.",
                 message_kind="success",
                 state=state,
+                page_key=page_key,
             )
         except (ValueError, TypeError) as exc:
             return _render_settings_root(
@@ -662,6 +811,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 message=f"CMA correlations save failed: {exc}",
                 message_kind="error",
                 status_code=400,
+                page_key=page_key,
             )
 
     @app.get("/api/v1/profile/{profile}/cma")
@@ -697,17 +847,32 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         normalized_profile = _normalize_profile(profile)
         try:
             form = await request.form()
+            page_key = _page_key_from_form(form, default="portfolio_implementation")
             payload = _rebalancing_config_from_form(form)
             save_rebalancing_config_for_profile(normalized_profile, payload)
-            return _render_settings_root(request, profile=normalized_profile, message="Rebalancing configuration saved.", message_kind="success")
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message="Rebalancing configuration saved.",
+                message_kind="success",
+                page_key=page_key,
+            )
         except Exception as exc:
             logger.error("save rebalancing config error: %s", exc)
-            return _render_settings_root(request, profile=normalized_profile, message=f"Error saving rebalancing config: {exc}", message_kind="error")
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Error saving rebalancing config: {exc}",
+                message_kind="error",
+                page_key="portfolio_implementation",
+            )
 
     @app.post("/ui/profile/{profile}/rebalance/generate")
     async def ui_generate_rebalance(request: Request, profile: str):
         from app.rebalancing.service import compute_rebalance_proposal, load_rebalancing_config
         normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_implementation")
         try:
             state = build_profile_state(_settings(request), normalized_profile)
             config = state.get("rebalancing_config") or load_rebalancing_config(normalized_profile)
@@ -715,10 +880,22 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             raw_holdings = state.get("holdings") or []
             holdings = [{"symbol": h["symbol"], "weight_pct": h.get("weight_pct")} for h in (raw_holdings if isinstance(raw_holdings, list) else raw_holdings.get("rows", []))]
             compute_rebalance_proposal(normalized_profile, drift_rows, holdings, config, trigger_type="manual", persist=True)
-            return _render_settings_root(request, profile=normalized_profile, message="Rebalance proposal generated.", message_kind="success")
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message="Rebalance proposal generated.",
+                message_kind="success",
+                page_key=page_key,
+            )
         except Exception as exc:
             logger.error("generate rebalance error: %s", exc)
-            return _render_settings_root(request, profile=normalized_profile, message=f"Error generating proposal: {exc}", message_kind="error")
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Error generating proposal: {exc}",
+                message_kind="error",
+                page_key=page_key,
+            )
 
     @app.get("/api/v1/profile/{profile}/rebalancing")
     def api_get_rebalancing(profile: str):
@@ -752,6 +929,8 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     async def ui_generate_attribution(request: Request, profile: str):
         from app.attribution.service import compute_attribution
         normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_attribution")
         try:
             state = build_profile_state(_settings(request), normalized_profile)
             cma_analytics = state.get("analysis", {}).get("cma_analytics", {})
@@ -772,6 +951,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 profile=normalized_profile,
                 message="Attribution analysis generated and saved.",
                 message_kind="success",
+                page_key=page_key,
             )
         except Exception as exc:
             logger.error("generate attribution error: %s", exc)
@@ -780,6 +960,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 profile=normalized_profile,
                 message=f"Error generating attribution: {exc}",
                 message_kind="error",
+                page_key=page_key,
             )
 
     @app.get("/api/v1/profile/{profile}/attribution")
@@ -823,6 +1004,7 @@ def _render_ui_after_update(
     profile: str,
     updates: dict[str, Any],
     success_message: str,
+    page_key: str,
 ) -> HTMLResponse:
     try:
         apply_preference_updates(profile, updates)
@@ -836,6 +1018,7 @@ def _render_ui_after_update(
             message=message,
             message_kind="success",
             state=state,
+            page_key=page_key,
         )
     except ValueError as exc:
         return _render_settings_root(
@@ -844,6 +1027,7 @@ def _render_ui_after_update(
             message=f"Save failed: {exc}",
             message_kind="error",
             status_code=400,
+            page_key=page_key,
         )
 
 
@@ -851,10 +1035,11 @@ def _render_settings_page(
     request: Request,
     *,
     profile: str,
-    initial_module: str,
-    initial_section: str = "",
+    page_key: str,
 ) -> HTMLResponse:
+    context = _resolve_page_context(page_key)
     state = build_profile_state(_settings(request), profile)
+    initial_section = context["visible_sections"][0] if context["visible_sections"] else ""
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -862,7 +1047,12 @@ def _render_settings_page(
             "state": state,
             "message": "",
             "message_kind": "info",
-            "initial_module": initial_module,
+            "page_key": page_key,
+            "global_nav": context["global_nav"],
+            "workspace": context["workspace"],
+            "workspace_page": context["workspace_page"],
+            "builder_tab": context.get("builder_tab", ""),
+            "visible_sections": context["visible_sections"],
             "initial_section": initial_section,
         },
     )
@@ -876,7 +1066,9 @@ def _render_settings_root(
     message_kind: str,
     status_code: int = 200,
     state: dict[str, Any] | None = None,
+    page_key: str = "briefing_home",
 ) -> HTMLResponse:
+    context = _resolve_page_context(page_key)
     state = state or build_profile_state(_settings(request), profile)
     return templates.TemplateResponse(
         request,
@@ -885,9 +1077,37 @@ def _render_settings_root(
             "state": state,
             "message": message,
             "message_kind": message_kind,
+            "page_key": page_key,
+            "workspace": context["workspace"],
+            "workspace_page": context["workspace_page"],
+            "builder_tab": context.get("builder_tab", ""),
+            "visible_sections": context["visible_sections"],
         },
         status_code=status_code,
     )
+
+
+def _resolve_page_context(page_key: str) -> dict[str, Any]:
+    key = (page_key or "").strip().lower()
+    context = _PAGE_CONTEXTS.get(key) or _PAGE_CONTEXTS["briefing_home"]
+    return {
+        "global_nav": context["global_nav"],
+        "workspace": context["workspace"],
+        "workspace_page": context["workspace_page"],
+        "builder_tab": context.get("builder_tab", ""),
+        "visible_sections": list(context["visible_sections"]),
+    }
+
+
+def _normalize_page_key(value: str | None, *, default: str) -> str:
+    raw = (value or "").strip().lower()
+    if raw in _PAGE_CONTEXTS:
+        return raw
+    return default
+
+
+def _page_key_from_form(form: Any, *, default: str) -> str:
+    return _normalize_page_key(str(form.get("ui_page", "")).strip(), default=default)
 
 
 def _coverage_updates_from_form(form) -> dict[str, Any]:

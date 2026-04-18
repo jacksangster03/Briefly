@@ -127,6 +127,13 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     metadata["policy_summary"] = _build_policy_summary(policy)
     metadata["allocation_summary"] = _build_allocation_summary(analysis.get("allocation_drift", {}))
     metadata["benchmark_summary"] = benchmark_view
+    analysis["ui_readiness"] = _build_ui_readiness(
+        policy=policy,
+        allocation_targets=allocation_targets,
+        benchmark=benchmark,
+        cma_entries=cma_entries,
+    )
+    analysis["ui_cma_asset_options"] = _cma_asset_options()
     analysis["ui_home"] = _build_ui_home_summary(
         profile=profile,
         metadata=metadata,
@@ -756,6 +763,68 @@ def _build_allocation_summary(allocation_drift: dict[str, Any]) -> dict[str, str
         "headline": "Allocation is within configured bands",
         "detail": allocation_drift.get("summary") or "Actual allocation is currently inside the configured policy ranges.",
     }
+
+
+def _policy_is_configured(policy: dict[str, Any]) -> bool:
+    return any(
+        policy.get(key) not in (None, "", [])
+        for key in (
+            "target_return_percent",
+            "max_volatility_percent",
+            "max_drawdown_percent",
+            "single_name_limit_percent",
+            "max_equity_percent",
+            "min_liquid_assets_percent",
+        )
+    )
+
+
+def _allocation_is_configured(allocation_targets: list[dict[str, Any]]) -> bool:
+    for row in allocation_targets or []:
+        if row.get("target_weight_pct") is not None and row.get("min_weight_pct") is not None and row.get("max_weight_pct") is not None:
+            return True
+    return False
+
+
+def _benchmark_is_configured(benchmark: dict[str, Any]) -> bool:
+    if not benchmark:
+        return False
+    if benchmark.get("base_symbol"):
+        return True
+    if benchmark.get("name"):
+        return True
+    return False
+
+
+def _build_ui_readiness(
+    *,
+    policy: dict[str, Any],
+    allocation_targets: list[dict[str, Any]],
+    benchmark: dict[str, Any],
+    cma_entries: list[dict[str, Any]],
+) -> dict[str, Any]:
+    policy_ready = _policy_is_configured(policy)
+    allocation_ready = _allocation_is_configured(allocation_targets)
+    benchmark_ready = _benchmark_is_configured(benchmark)
+    cma_ready = bool(cma_entries)
+    return {
+        "policy": {"configured": policy_ready, "status_label": "Configured" if policy_ready else "Unavailable"},
+        "allocation": {"configured": allocation_ready, "status_label": "Configured" if allocation_ready else "Partial"},
+        "benchmark": {"configured": benchmark_ready, "status_label": "Configured" if benchmark_ready else "Unavailable"},
+        "cma": {"configured": cma_ready, "status_label": "Configured" if cma_ready else "Unavailable"},
+    }
+
+
+def _cma_asset_options() -> list[dict[str, str]]:
+    return [
+        {"key": "equities", "label": "Equities"},
+        {"key": "high_quality_bonds", "label": "High-Quality Bonds"},
+        {"key": "credit", "label": "Credit"},
+        {"key": "alternatives", "label": "Alternatives"},
+        {"key": "real_assets", "label": "Real Assets"},
+        {"key": "gold", "label": "Gold"},
+        {"key": "cash_liquidity", "label": "Cash / Liquidity"},
+    ]
 
 
 def _build_ui_home_summary(

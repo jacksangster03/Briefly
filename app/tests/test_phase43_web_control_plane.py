@@ -94,32 +94,19 @@ def test_ui_settings_page_renders(client):
     response = client.get("/ui/settings?profile=default_user")
     assert response.status_code == 200
     assert "Briefly" in response.text
-    assert "Portfolio Workbench" in response.text
     assert "Market Briefing" in response.text
-    assert "Policy" in response.text
-    assert "Allocation" in response.text
-    assert "Benchmark" in response.text
+    assert "Watchlists" in response.text
+    assert "Coverage" in response.text
+    assert "Delivery" in response.text
+    assert "Morning Composition" in response.text
+    assert "Portfolio Workbench" in response.text
+    assert "Audit" in response.text
     assert "Saved settings override your default profile values" in response.text
-    assert "Executive Summary" in response.text
-    assert "Coverage Alignment" in response.text
-    assert "What Will Drive Tomorrow" in response.text
-    assert "Scenarios" in response.text
-    assert "Briefing Summary" in response.text
-    assert "History & Advanced" in response.text
-    assert "Policy Summary" in response.text
-    assert "Save Policy" in response.text
-    assert "Save Allocation" in response.text
-    assert "Save Benchmark" in response.text
-    assert "Equal Weight" in response.text
-    assert "Scale Core Only" in response.text
-    assert "Holdings Data Quality" in response.text
-    assert "Top Holdings Concentration" in response.text
-    assert "Sector Exposure vs Coverage Weight" in response.text
-    assert "Analyzer Warnings" in response.text
-    assert "Portfolio Exposure" in response.text
-    assert "Editorial Coverage Weight" in response.text
+    assert "<h2>Market Briefing · Watchlists & Coverage Priorities</h2>" in response.text
+    assert "<h2>Policy</h2>" not in response.text
+    assert "<h2>Holdings</h2>" not in response.text
+    assert "<h2>Risk &amp; Benchmark Analytics</h2>" not in response.text
     assert "Home Region Focus" in response.text
-    assert "Briefing Impact Preview" in response.text
     assert "Region Weight — US" in response.text
     assert "Region Weight — LATAM" in response.text
 
@@ -142,23 +129,63 @@ def test_ui_home_renders_workspace_cards(client):
 def test_ui_workspace_routes_set_initial_module_and_section(client):
     briefing = client.get("/ui/briefing?profile=default_user")
     assert briefing.status_code == 200
-    assert 'data-initial-module="briefing"' in briefing.text
+    assert 'data-page-key="briefing_home"' in briefing.text
     assert 'data-initial-section="section-coverage"' in briefing.text
 
     portfolio = client.get("/ui/portfolio?profile=default_user")
     assert portfolio.status_code == 200
-    assert 'data-initial-module="portfolio"' in portfolio.text
+    assert 'data-page-key="portfolio_home"' in portfolio.text
     assert 'data-initial-section="section-overview"' in portfolio.text
 
     risk = client.get("/ui/portfolio/risk?profile=default_user")
     assert risk.status_code == 200
-    assert 'data-initial-module="portfolio"' in risk.text
+    assert 'data-page-key="portfolio_risk"' in risk.text
     assert 'data-initial-section="section-risk"' in risk.text
 
     audit = client.get("/ui/audit?profile=default_user")
     assert audit.status_code == 200
-    assert 'data-initial-module="audit"' in audit.text
+    assert 'data-page-key="audit_home"' in audit.text
     assert 'data-initial-section="section-audit"' in audit.text
+
+
+def test_portfolio_root_is_summary_only(client):
+    response = client.get("/ui/portfolio?profile=default_user")
+    assert response.status_code == 200
+    assert "<h2>Overview</h2>" in response.text
+    assert "Top Actions" in response.text
+    assert "<h2>Holdings</h2>" not in response.text
+    assert "<h2>Policy</h2>" not in response.text
+    assert "<h2>Allocation</h2>" not in response.text
+    assert "<h2>Risk &amp; Benchmark Analytics</h2>" not in response.text
+
+
+def test_builder_tabs_only_show_in_builder_routes(client):
+    builder = client.get("/ui/portfolio/builder?profile=default_user")
+    assert builder.status_code == 200
+    assert "Builder tabs" in builder.text
+    assert "<h2>Holdings</h2>" in builder.text
+    assert "<h2>Policy</h2>" not in builder.text
+
+    diagnostics = client.get("/ui/portfolio/diagnostics?profile=default_user")
+    assert diagnostics.status_code == 200
+    assert "Builder tabs" not in diagnostics.text
+
+
+def test_policy_and_allocation_incomplete_state_labels(client):
+    policy = client.get("/ui/portfolio/policy?profile=default_user")
+    assert policy.status_code == 200
+    assert "unavailable" in policy.text.lower()
+
+    allocation = client.get("/ui/portfolio/allocation?profile=default_user")
+    assert allocation.status_code == 200
+    assert "Target/min/max band not fully configured." in allocation.text
+
+
+def test_cma_uses_canonical_asset_dropdowns(client):
+    cma = client.get("/ui/portfolio/cma?profile=default_user")
+    assert cma.status_code == 200
+    assert '<select name="cma_asset_class"' in cma.text
+    assert 'type="text" name="cma_asset_class"' not in cma.text
 
 
 def test_ui_root_redirects_to_home(client):
