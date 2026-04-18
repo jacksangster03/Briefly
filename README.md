@@ -112,6 +112,13 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - Settings shell accepts route-provided initial module/section so each deep link opens directly in the intended workspace area
 - Workspace links are persistent in the shell for quick context switching without returning to one mixed scroll flow
 
+**Personal Workspace Home (Phase 5.6C)**
+- Home page now leads with personalized context instead of neutral routing copy
+- Deterministic home state (`analysis.ui_home`) summarizes what matters now, next action bias, and status chips
+- Action-forward hero includes primary CTAs: Open Portfolio, Edit Briefing, Review Risk
+- Portfolio Workbench is intentionally dominant, Market Briefing remains secondary, and Audit is visually demoted to advanced controls
+- Insight row now emphasizes momentum and continuation (recommended workspace and delivery health) over raw metadata
+
 ### Intelligence pipeline
 
 - Finnhub + NewsAPI event processing with credibility scoring, personal relevance, and clustering
@@ -483,7 +490,7 @@ python -m app.cli web --host 127.0.0.1 --port 8080
 ```
 
 Top-level modules: Market Briefing, Portfolio Workbench, Audit.
-Phase 5.6B adds route-based workspace entry and deep links, so users can open focused portfolio and briefing areas directly.
+Phases 5.6B/5.6C add route-based workspace entry, deep links, and a personalized action-first home surface.
 
 ### Run the live scheduler
 
@@ -529,6 +536,7 @@ The attribution block is also auto-computed (without persistence) on every page 
 | 5.5 | Complete | Attribution: Brinson-Hood-Beebower model, CMA-based allocation effect, waterfall decomposition |
 | 5.6A | Complete | Workflow architecture split: Market Briefing vs Portfolio Workbench vs Audit, with separated workbench areas and constrained semantic inputs |
 | 5.6B | Complete | Visual productization pass: workspace home route, route-based module entry points, and focused portfolio/briefing deep links |
+| 5.6C | Complete | Personalized home workspace: what-matters-now hero, deterministic home summaries, prioritized workflow actions, and secondary audit treatment |
 | 5.7 | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---

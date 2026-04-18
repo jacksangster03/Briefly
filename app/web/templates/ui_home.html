@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Briefly Workspace</title>
+  <title>Briefly Home</title>
   <style>
     :root {
       --bg: #0b0d12;
@@ -15,6 +15,8 @@
       --accent: #f59f00;
       --shadow: 0 14px 38px rgba(0, 0, 0, 0.28);
       --radius: 12px;
+      --accent-soft: rgba(245, 159, 0, 0.14);
+      --success: #1faa6f;
     }
     * { box-sizing: border-box; }
     body {
@@ -29,7 +31,7 @@
       padding: 22px 14px 40px;
     }
     .shell {
-      max-width: 1100px;
+      max-width: 1140px;
       margin: 0 auto;
     }
     .eyebrow {
@@ -42,20 +44,87 @@
     }
     h1 {
       margin: 8px 0;
-      font-size: clamp(1.6rem, 3vw, 2.2rem);
+      font-size: clamp(1.7rem, 3vw, 2.3rem);
     }
     .subtitle {
-      margin: 0 0 18px;
+      margin: 0 0 14px;
       color: var(--muted);
-      max-width: 760px;
+      max-width: 920px;
     }
-    .grid {
+    .chips {
       display: grid;
-      gap: 12px;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      margin-bottom: 12px;
+    }
+    .chip {
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--muted);
+      padding: 8px 12px;
+      font-size: 0.82rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .chip strong {
+      color: var(--ink);
+      margin-right: 4px;
+    }
+    .hero {
+      display: block;
+      padding: 18px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--card);
+      box-shadow: var(--shadow);
       margin-bottom: 14px;
     }
-    .card {
+    .hero h2 {
+      margin: 0 0 8px;
+      font-size: 1.08rem;
+    }
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+    }
+    .hero .summary {
+      margin-top: 6px;
+      color: var(--ink);
+      font-weight: 560;
+    }
+    .action-row {
+      margin-top: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .btn {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 8px 14px;
+      text-decoration: none;
+      color: var(--ink);
+      font-size: 0.84rem;
+      font-weight: 600;
+      background: transparent;
+    }
+    .btn:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .btn.primary {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .workspace-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 1.5fr 1fr;
+      margin-bottom: 10px;
+    }
+    .workspace-card {
       display: block;
       padding: 16px;
       border-radius: var(--radius);
@@ -65,20 +134,68 @@
       text-decoration: none;
       color: inherit;
     }
-    .card:hover {
+    .workspace-card:hover {
       border-color: var(--accent);
       transform: translateY(-1px);
     }
-    .card h2 {
+    .workspace-card h3 {
       margin: 0 0 4px;
       font-size: 1.05rem;
     }
-    .card p {
+    .workspace-card p {
       margin: 0;
       color: var(--muted);
       font-size: 0.92rem;
     }
-    .status-grid {
+    .workspace-card .kicker {
+      margin: 0 0 6px;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-family: "IBM Plex Mono", "SF Mono", "Menlo", "Consolas", monospace;
+    }
+    .workspace-card.briefing {
+      background: linear-gradient(180deg, rgba(28, 38, 56, 0.82), var(--card));
+    }
+    .workspace-card.portfolio {
+      background: linear-gradient(180deg, rgba(40, 30, 11, 0.9), var(--card));
+    }
+    .workspace-card .meta {
+      margin-top: 10px;
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.76rem;
+      color: var(--muted);
+    }
+    .advanced {
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      background: rgba(255, 255, 255, 0.01);
+    }
+    .advanced a {
+      color: var(--ink);
+      text-decoration: none;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.8rem;
+    }
+    .advanced a:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .insights-grid {
       display: grid;
       gap: 10px;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -100,49 +217,84 @@
       font-size: 0.95rem;
       font-weight: 600;
     }
+    .insight-good {
+      color: var(--success);
+    }
+    @media (max-width: 860px) {
+      .workspace-grid {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
+  {% set home = state.analysis.ui_home %}
   <div class="shell">
     <p class="eyebrow">Briefly</p>
-    <h1>Workspace Home</h1>
-    <p class="subtitle">Choose a workspace to continue: briefing configuration, portfolio workbench, or advanced audit controls.</p>
+    <h1>{{ home.title }}</h1>
+    <p class="subtitle">{{ home.subtitle }}</p>
 
-    <div class="grid">
-      <a class="card" href="/ui/briefing?profile={{ state.profile }}">
-        <h2>Market Briefing</h2>
-        <p>Watchlists, coverage priorities, delivery routing, and morning composition.</p>
-      </a>
-      <a class="card" href="/ui/portfolio?profile={{ state.profile }}">
-        <h2>Portfolio Workbench</h2>
-        <p>Builder, diagnostics, risk, CMA, scenarios, implementation, and attribution.</p>
-      </a>
-      <a class="card" href="/ui/audit?profile={{ state.profile }}">
-        <h2>Audit</h2>
-        <p>Advanced source-of-truth details, raw payloads, and override maintenance.</p>
-      </a>
+    <div class="chips">
+      {% for chip in home.status_chips %}
+        <div class="chip"><strong>{{ chip.label }}:</strong> {{ chip.value }}</div>
+      {% endfor %}
     </div>
 
-    <div class="status-grid">
+    <section class="hero" aria-label="What matters now">
+      <h2>What Matters Now</h2>
+      <p>{{ home.what_matters_now }}</p>
+      <p class="summary">{{ home.profile_snapshot }}</p>
+      <div class="action-row">
+        {% for action in home.primary_ctas %}
+          <a class="btn {% if action.emphasis == 'primary' %}primary{% endif %}" href="{{ action.href }}?profile={{ state.profile }}">{{ action.label }}</a>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="workspace-grid" aria-label="Primary workspaces">
+      <a class="workspace-card portfolio" href="/ui/portfolio?profile={{ state.profile }}">
+        <p class="kicker">Primary Workspace</p>
+        <h3>Portfolio Workbench</h3>
+        <p>Build, diagnose, and implement portfolio decisions with policy, allocation, risk, scenarios, and attribution.</p>
+        <span class="meta">Continue in {{ home.last_active_workspace }}</span>
+      </a>
+      <a class="workspace-card briefing" href="/ui/briefing?profile={{ state.profile }}">
+        <p class="kicker">Briefing Workflow</p>
+        <h3>Market Briefing</h3>
+        <p>Tune watchlists, coverage priorities, delivery routing, and morning composition for tomorrow’s brief.</p>
+        <span class="meta">Open coverage and delivery settings</span>
+      </a>
+    </section>
+
+    <div class="advanced">
+      <span>Audit & advanced controls are available when you need deep source-of-truth inspection.</span>
+      <a href="/ui/audit?profile={{ state.profile }}">Open Audit</a>
+    </div>
+
+    <div class="insights-grid">
+      <div class="status">
+        <div class="label">Continue</div>
+        <div class="value">
+          {% if home.recommended_workspace == "portfolio_risk" %}
+            <a class="btn" href="/ui/portfolio/risk?profile={{ state.profile }}">Open Risk</a>
+          {% elif home.recommended_workspace == "briefing" %}
+            <a class="btn" href="/ui/briefing?profile={{ state.profile }}">Open Briefing</a>
+          {% else %}
+            <a class="btn" href="/ui/portfolio?profile={{ state.profile }}">Open Portfolio</a>
+          {% endif %}
+        </div>
+      </div>
       <div class="status">
         <div class="label">Profile</div>
-        <div class="value">{{ state.profile }}</div>
+        <div class="value">{{ state.profile }} · {{ state.effective.timezone }}</div>
       </div>
       <div class="status">
-        <div class="label">Next Brief</div>
-        <div class="value">{{ state.analysis.timing.next_morning_send_local }}</div>
+        <div class="label">Morning Delivery</div>
+        <div class="value">{{ state.metadata.delivery_summary.headline }}</div>
       </div>
       <div class="status">
-        <div class="label">Policy Fit</div>
-        <div class="value">{{ state.analysis.policy_fit.status|replace("_", " ")|title }}</div>
-      </div>
-      <div class="status">
-        <div class="label">Risk Snapshot</div>
-        <div class="value">{{ state.analysis.risk_analytics.risk_status|replace("_", " ")|title }}</div>
-      </div>
-      <div class="status">
-        <div class="label">Rebalance Status</div>
-        <div class="value">{{ state.analysis.rebalance_proposal.status_label }}</div>
+        <div class="label">Health</div>
+        <div class="value insight-good">Policy {{ state.analysis.policy_fit.status|replace("_", " ")|title }} · Rebalance {{ state.analysis.rebalance_proposal.status_label }}</div>
       </div>
     </div>
   </div>

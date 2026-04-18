@@ -127,10 +127,13 @@ def test_ui_settings_page_renders(client):
 def test_ui_home_renders_workspace_cards(client):
     response = client.get("/ui?profile=default_user")
     assert response.status_code == 200
-    assert "Workspace Home" in response.text
+    assert "Briefly Home" in response.text
+    assert "What Matters Now" in response.text
+    assert "Open Portfolio" in response.text
+    assert "Review Risk" in response.text
     assert "Market Briefing" in response.text
     assert "Portfolio Workbench" in response.text
-    assert "Audit" in response.text
+    assert "Audit & advanced controls" in response.text
     assert "/ui/briefing?profile=default_user" in response.text
     assert "/ui/portfolio?profile=default_user" in response.text
     assert "/ui/audit?profile=default_user" in response.text
@@ -222,6 +225,9 @@ def test_api_put_preferences_and_state_roundtrip(client):
     assert "benchmark_summary" in state["analysis"]
     assert "health_checks" in state["analysis"]
     assert "data_quality" in state["analysis"]
+    assert "ui_home" in state["analysis"]
+    assert "what_matters_now" in state["analysis"]["ui_home"]
+    assert "status_chips" in state["analysis"]["ui_home"]
 
 
 def test_api_put_preferences_rejects_invalid_values(client):

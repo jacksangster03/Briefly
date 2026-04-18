@@ -127,6 +127,11 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     metadata["policy_summary"] = _build_policy_summary(policy)
     metadata["allocation_summary"] = _build_allocation_summary(analysis.get("allocation_drift", {}))
     metadata["benchmark_summary"] = benchmark_view
+    analysis["ui_home"] = _build_ui_home_summary(
+        profile=profile,
+        metadata=metadata,
+        analysis=analysis,
+    )
 
     return {
         "profile": normalized_profile,
@@ -750,6 +755,106 @@ def _build_allocation_summary(allocation_drift: dict[str, Any]) -> dict[str, str
     return {
         "headline": "Allocation is within configured bands",
         "detail": allocation_drift.get("summary") or "Actual allocation is currently inside the configured policy ranges.",
+    }
+
+
+def _build_ui_home_summary(
+    *,
+    profile: UserProfile,
+    metadata: dict[str, Any],
+    analysis: dict[str, Any],
+) -> dict[str, Any]:
+    """Build deterministic, personalized home-screen context."""
+
+    def _status_label(raw: str, fallback: str = "Not provided") -> str:
+        text = (raw or "").strip()
+        if not text:
+            return fallback
+        return _display_label(text).title()
+
+    def _pick_most_recent_local() -> str:
+        h = str(metadata.get("last_holdings_update_local") or "Not provided")
+        p = str(metadata.get("last_preferences_update_local") or "Not provided")
+        h_iso = metadata.get("last_holdings_update")
+        p_iso = metadata.get("last_preferences_update")
+
+        def _to_dt(value: Any) -> datetime | None:
+            if not value:
+                return None
+            try:
+                return datetime.fromisoformat(str(value))
+            except ValueError:
+                return None
+
+        h_dt = _to_dt(h_iso)
+        p_dt = _to_dt(p_iso)
+        if h_dt and p_dt:
+            return h if h_dt >= p_dt else p
+        return h if h != "Not provided" else p
+
+    timing = analysis.get("timing", {}) if isinstance(analysis, dict) else {}
+    policy_fit = analysis.get("policy_fit", {}) if isinstance(analysis, dict) else {}
+    risk = analysis.get("risk_analytics", {}) if isinstance(analysis, dict) else {}
+    rebalance = analysis.get("rebalance_proposal", {}) if isinstance(analysis, dict) else {}
+    holdings_totals = analysis.get("holdings_totals", {}) if isinstance(analysis, dict) else {}
+
+    policy_status = str(policy_fit.get("status") or "unavailable")
+    risk_status = str(risk.get("risk_status") or "unavailable")
+    rebalance_status = str(rebalance.get("status") or "unavailable")
+
+    if policy_status in {"needs_attention", "breach"}:
+        summary = "Policy fit needs attention. Review allocation drift and risk guardrails before the next session."
+        recommended_workspace = "portfolio"
+    elif rebalance_status in {"rebalance_recommended", "breach", "action_needed"}:
+        summary = "Rebalancing action is recommended based on current drift. Generate and review the latest proposal."
+        recommended_workspace = "portfolio"
+    elif risk_status in {"needs_attention", "elevated"}:
+        summary = "Risk snapshot is elevated versus current settings. Review benchmark-relative metrics and drawdown profile."
+        recommended_workspace = "portfolio_risk"
+    else:
+        next_brief = timing.get("next_morning_send_local") or metadata.get("next_morning_send_local") or "Not provided"
+        summary = f"Portfolio is stable and delivery is ready. Next morning brief is scheduled for {next_brief}."
+        recommended_workspace = "briefing"
+
+    holdings_count = len(profile.portfolio_holdings)
+    weighted_positions = int(holdings_totals.get("weighted_positions") or 0)
+    total_weight_display = str(holdings_totals.get("total_weight_display") or "Not provided")
+
+    last_active_workspace = "Portfolio Workbench"
+    h_iso = metadata.get("last_holdings_update")
+    p_iso = metadata.get("last_preferences_update")
+    if h_iso and p_iso:
+        try:
+            if datetime.fromisoformat(str(p_iso)) > datetime.fromisoformat(str(h_iso)):
+                last_active_workspace = "Market Briefing"
+        except ValueError:
+            pass
+
+    return {
+        "title": "Briefly Home",
+        "subtitle": (
+            f"{profile.name} · {profile.timezone} · "
+            f"{_display_label(profile.home_region)} focus · "
+            f"Last update {_pick_most_recent_local()}"
+        ),
+        "what_matters_now": summary,
+        "profile_snapshot": (
+            f"{holdings_count} holding(s), {weighted_positions} weighted, "
+            f"{total_weight_display} total weight."
+        ),
+        "recommended_workspace": recommended_workspace,
+        "last_active_workspace": last_active_workspace,
+        "primary_ctas": [
+            {"label": "Open Portfolio", "href": "/ui/portfolio", "emphasis": "primary"},
+            {"label": "Edit Briefing", "href": "/ui/briefing", "emphasis": "secondary"},
+            {"label": "Review Risk", "href": "/ui/portfolio/risk", "emphasis": "secondary"},
+        ],
+        "status_chips": [
+            {"label": "Next Brief", "value": str(timing.get("next_morning_send_local") or "Not provided")},
+            {"label": "Policy Fit", "value": _status_label(policy_status)},
+            {"label": "Risk Snapshot", "value": _status_label(str(risk.get("risk_status") or ""))},
+            {"label": "Rebalance", "value": str(rebalance.get("status_label") or "Not provided")},
+        ],
     }
 
 
