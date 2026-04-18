@@ -2764,6 +2764,32 @@
       {% endif %}
     </div>
 
+    {% if metadata.validation_presets %}
+      <details class="holdings-import-details" style="margin-bottom: 12px;">
+        <summary>Load Test Preset (Phase 5.7A)</summary>
+        <div class="holdings-import-body">
+          <p class="muted" style="margin: 0 0 10px;">
+            Presets replace holdings and aligned policy/allocation/benchmark/CMA assumptions for fast validation loops.
+          </p>
+          <form
+            hx-post="/ui/profile/{{ state.profile }}/holdings/load-preset"
+            hx-target="#settings-root"
+            hx-swap="outerHTML"
+            method="post"
+            class="actions"
+          >
+            <select name="preset_name" required style="min-width: 280px;">
+              <option value="">Select a preset…</option>
+              {% for item in metadata.validation_presets %}
+                <option value="{{ item.name }}">{{ item.title }} — {{ item.description }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="secondary">Load Preset</button>
+          </form>
+        </div>
+      </details>
+    {% endif %}
+
     <form
       hx-post="/ui/profile/{{ state.profile }}/holdings/save"
       hx-target="#settings-root"

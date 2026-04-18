@@ -33,7 +33,7 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 - Static PNG chart cards: Market Snapshot, Macro Risk Strip, Top Holdings Performance, Sector Exposure vs Performance, Event-Linked Trend
 - HTML email with inline charts
 
-### Portfolio workbench (Phases 4.7–5.6B)
+### Portfolio workbench (Phases 4.7–5.7A)
 
 The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full portfolio workbench:
 
@@ -127,6 +127,14 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - CMA assumptions now use canonical asset-class dropdowns in the default UI (no free-text asset-class key entry)
 - UX readiness language now distinguishes configured vs partial/unavailable for policy/allocation presentation states
 
+**Simulation & Validation Harness (Phase 5.7A)**
+- Canonical test preset library for deterministic portfolio scenarios:
+  concentrated AI growth, balanced 60/40, global multi-asset, healthcare concentration, Europe tilt, cash-heavy tactical, allocation drift, single-name breach, policy-incomplete, benchmark mismatch
+- Validation runner (`python -m app.cli validation run --preset ...`) applies a preset, rebuilds state, and produces pass/fail checks across holdings, policy, allocation, CMA, rebalancing, and attribution readiness
+- Parameter sweep runner (`validation sweep`) supports directional monotonic checks for top-holding concentration, cash-weight changes, and equity CMA expected-return sensitivity
+- Randomized fuzz harness (`validation fuzz`) generates constrained random portfolios and checks state invariants for robustness
+- Builder UI includes a **Load Test Preset** action for rapid scenario iteration from `/ui/portfolio/holdings`
+
 ### Intelligence pipeline
 
 - Finnhub + NewsAPI event processing with credibility scoring, personal relevance, and clustering
@@ -197,6 +205,12 @@ python -m app.cli prefs-reset --profile default_user
 # Data inspection
 python -m app.cli quote NVDA
 python -m app.cli news
+
+# Phase 5.7A validation harness
+python -m app.cli validation presets
+python -m app.cli validation run --preset allocation_drift_case --profile default_user
+python -m app.cli validation sweep --preset balanced_60_40 --dimension top_holding_pct --values 10,15,22,30
+python -m app.cli validation fuzz --profile default_user --cases 25 --seed 42
 ```
 
 ### Dry-run and output inspection
@@ -452,6 +466,9 @@ python -m pytest app/tests/test_phase52_risk_analytics.py -q
 python -m pytest app/tests/test_phase53_cma_analytics.py -q
 python -m pytest app/tests/test_phase54_rebalancing.py -q
 python -m pytest app/tests/test_phase55_attribution.py -q
+python -m pytest app/tests/test_phase57_validation_runner.py -q
+python -m pytest app/tests/test_phase57_sweeps.py -q
+python -m pytest app/tests/test_phase57_fuzz.py -q
 python -m pytest app/tests/test_portfolio_phase3.py -q
 python -m pytest app/tests/test_market_data.py -q
 python -m pytest app/tests/test_circuit_breaker.py -q
@@ -470,6 +487,7 @@ Test coverage includes:
 - CMA service: expected return/vol/Sharpe computation, correlation matrix, policy gap, SAA gap
 - Rebalancing engine: drift detection, trade list generation, turnover, cost estimation, proposal persistence
 - Attribution: Brinson-Hood-Beebower allocation effect, selection/interaction effect (zero in v1), waterfall, persistence
+- Validation harness: canonical presets, golden checks, parameter sweeps, and randomized invariant testing
 - LLM email render guardrails, shadow mode, and fallback behaviour
 - Provider circuit breaker and quote fallback
 
@@ -528,6 +546,25 @@ curl -X POST "http://127.0.0.1:8080/api/v1/profile/default_user/attribution/gene
 
 The attribution block is also auto-computed (without persistence) on every page load alongside the rebalance proposal.
 
+### Run 5.7A validation workflows
+
+```bash
+# List canonical test cases
+python -m app.cli validation presets
+
+# Run a deterministic golden-case validation
+python -m app.cli validation run --preset single_name_breach_case --profile default_user
+
+# Run a parameter sensitivity sweep
+python -m app.cli validation sweep \
+  --preset balanced_60_40 \
+  --dimension top_holding_pct \
+  --values 10,15,22,30
+
+# Run constrained randomized robustness checks
+python -m app.cli validation fuzz --profile default_user --cases 50 --seed 7
+```
+
 ---
 
 ## Roadmap
@@ -546,7 +583,8 @@ The attribution block is also auto-computed (without persistence) on every page 
 | 5.6B | Complete | Visual productization pass: workspace home route, route-based module entry points, and focused portfolio/briefing deep links |
 | 5.6C | Complete | Personalized home workspace: what-matters-now hero, deterministic home summaries, prioritized workflow actions, and secondary audit treatment |
 | 5.6D | Complete | Navigation discipline and page focus: portfolio root as dashboard-only, builder isolation, route-level section gating, and canonical CMA asset-class UI controls |
-| 5.7 | Planned | Historical selection and interaction effects using holding-level daily return series |
+| 5.7A | Complete | Portfolio simulation and validation harness: canonical presets, golden checks, parameter sweeps, fuzz tests, and Builder preset loading |
+| 5.7B | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---
 

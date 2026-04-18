@@ -57,6 +57,7 @@ from app.portfolio.service import load_active_holdings, replace_holdings_snapsho
 from app.settings import Settings
 from app.universe.sector_universe import load_sector_universe
 from app.universe.ticker_metadata import TICKER_DISPLAY_NAMES, format_company_ticker
+from app.validation.presets import list_preset_summaries
 
 
 POLICY_INVESTOR_TYPES = [
@@ -127,6 +128,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     metadata["policy_summary"] = _build_policy_summary(policy)
     metadata["allocation_summary"] = _build_allocation_summary(analysis.get("allocation_drift", {}))
     metadata["benchmark_summary"] = benchmark_view
+    metadata["validation_presets"] = list_preset_summaries()
     analysis["ui_readiness"] = _build_ui_readiness(
         policy=policy,
         allocation_targets=allocation_targets,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import click
@@ -253,6 +254,133 @@ def prefs_reset(profile_name: str):
     init_db()
     count = clear_preferences(profile_name)
     click.echo(f"Cleared {count} preference override(s) for profile '{profile_name}'")
+
+
+@cli.group("validation")
+def validation():
+    """Phase 5.7A portfolio validation and simulation harness."""
+
+
+@validation.command("presets")
+def validation_presets():
+    """List available canonical validation presets."""
+    from app.validation.presets import list_preset_summaries
+
+    for item in list_preset_summaries():
+        click.echo(f"- {item['name']}: {item['description']}")
+
+
+@validation.command("run")
+@click.option("--preset", "preset_name", required=True, help="Preset name to apply and validate.")
+@click.option("--profile", "profile_name", default="default_user", show_default=True, help="Profile to validate.")
+@click.option("--refresh-risk/--no-refresh-risk", default=False, help="Refresh risk cache before validation summary.")
+@click.option("--json-output/--text-output", default=False, help="Render report as JSON instead of plain text.")
+@click.pass_context
+def validation_run(ctx, preset_name: str, profile_name: str, refresh_risk: bool, json_output: bool):
+    """Apply one preset and run full validation checks."""
+    from app.validation.report import report_to_json, report_to_text
+    from app.validation.runner import run_preset_validation
+
+    init_db()
+    settings = ctx.obj["settings"]
+    report = run_preset_validation(
+        settings=settings,
+        preset_name=preset_name,
+        profile_name=profile_name,
+        include_risk_refresh=refresh_risk,
+    )
+    click.echo(report_to_json(report) if json_output else report_to_text(report))
+    if report.get("status") != "pass":
+        raise click.ClickException("Validation run failed. See failed checks above.")
+
+
+@validation.command("sweep")
+@click.option("--preset", "preset_name", required=True, help="Base preset to sweep.")
+@click.option(
+    "--dimension",
+    required=True,
+    type=click.Choice(["top_holding_pct", "cash_weight_pct", "equity_expected_return_pct"]),
+    help="Sweep dimension.",
+)
+@click.option(
+    "--values",
+    required=True,
+    help="Comma-separated numeric values, e.g. 10,15,20,25",
+)
+@click.option("--profile", "profile_name", default="default_user", show_default=True, help="Profile to use.")
+@click.option("--json-output/--text-output", default=False, help="Render report as JSON instead of compact text.")
+@click.pass_context
+def validation_sweep(
+    ctx,
+    preset_name: str,
+    dimension: str,
+    values: str,
+    profile_name: str,
+    json_output: bool,
+):
+    """Run deterministic parameter sweeps and monotonic checks."""
+    from app.validation.sweeps import run_parameter_sweep
+
+    init_db()
+    try:
+        parsed_values = [float(item.strip()) for item in str(values).split(",") if item.strip()]
+    except ValueError as exc:
+        raise click.ClickException(f"Invalid numeric values: {values}") from exc
+    if not parsed_values:
+        raise click.ClickException("Provide at least one numeric value for --values.")
+
+    report = run_parameter_sweep(
+        settings=ctx.obj["settings"],
+        profile_name=profile_name,
+        preset_name=preset_name,
+        dimension=dimension,
+        values=parsed_values,
+    )
+    if json_output:
+        click.echo(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))
+    else:
+        click.echo(
+            f"Sweep {preset_name} · {dimension} · status={report['status']} · "
+            f"monotonic={report['monotonic_check'].get('passed')}"
+        )
+        for case in report["cases"]:
+            click.echo(
+                f"  value={case['value']}: largest={case['largest_position_pct']:.2f} "
+                f"cash={case['cash_liquidity_actual_pct']:.2f} "
+                f"exp_ret={case['expected_return_pct']:.2f}"
+            )
+    if report.get("status") != "pass":
+        raise click.ClickException("Sweep monotonicity check failed.")
+
+
+@validation.command("fuzz")
+@click.option("--profile", "profile_name", default="default_user", show_default=True, help="Profile to use.")
+@click.option("--cases", default=25, show_default=True, type=int, help="Number of randomized fuzz cases.")
+@click.option("--seed", default=42, show_default=True, type=int, help="Random seed for reproducibility.")
+@click.option("--json-output/--text-output", default=False, help="Render report as JSON instead of compact text.")
+@click.pass_context
+def validation_fuzz(ctx, profile_name: str, cases: int, seed: int, json_output: bool):
+    """Run randomized fuzz validation across constrained portfolio inputs."""
+    from app.validation.fuzz import run_fuzz_validation
+
+    init_db()
+    report = run_fuzz_validation(
+        settings=ctx.obj["settings"],
+        profile_name=profile_name,
+        cases=cases,
+        seed=seed,
+    )
+    if json_output:
+        click.echo(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))
+    else:
+        summary = report["summary"]
+        click.echo(
+            f"Fuzz validation · status={report['status']} · cases={summary['total_cases']} · "
+            f"passed={summary['passed_cases']} · failed={summary['failed_cases']} "
+            f"({summary['pass_rate_pct']}%)"
+        )
+    if report.get("status") != "pass":
+        raise click.ClickException("Fuzz validation found failing cases.")
 
 
 @cli.command("init-db")

@@ -579,6 +579,58 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             )
 
     @app.post(
+        "/ui/profile/{profile}/holdings/load-preset",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_load_holdings_preset(request: Request, profile: str):
+        from app.validation.runner import apply_preset
+
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        preset_name = str(form.get("preset_name", "")).strip()
+        page_key = _page_key_from_form(form, default="portfolio_builder_holdings")
+        if not preset_name:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message="Select a preset before loading.",
+                message_kind="error",
+                status_code=400,
+                page_key=page_key,
+            )
+        try:
+            result = apply_preset(
+                profile_name=normalized_profile,
+                preset_name=preset_name,
+                include_risk_refresh=False,
+            )
+            state = build_profile_state(_settings(request), normalized_profile)
+            timezone = state["effective"]["timezone"]
+            saved_at = datetime.now(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
+            message = (
+                f"Loaded preset '{result['preset']}' into profile '{result['profile']}' "
+                f"({result['holdings_imported']} holdings) at {saved_at}."
+            )
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=message,
+                message_kind="success",
+                state=state,
+                page_key=page_key,
+            )
+        except ValueError as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Preset load failed: {exc}",
+                message_kind="error",
+                status_code=400,
+                page_key=page_key,
+            )
+
+    @app.post(
         "/ui/profile/{profile}/reset",
         response_class=HTMLResponse,
         include_in_schema=False,

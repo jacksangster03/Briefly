@@ -171,6 +171,28 @@ def test_builder_tabs_only_show_in_builder_routes(client):
     assert "Builder tabs" not in diagnostics.text
 
 
+def test_builder_holdings_can_load_validation_preset(client):
+    builder = client.get("/ui/portfolio/holdings?profile=default_user")
+    assert builder.status_code == 200
+    assert "Load Test Preset" in builder.text
+    assert "allocation_drift_case" in builder.text
+
+    response = client.post(
+        "/ui/profile/default_user/holdings/load-preset",
+        data={
+            "preset_name": "allocation_drift_case",
+            "ui_page": "portfolio_builder_holdings",
+        },
+    )
+    assert response.status_code == 200
+    assert "Loaded preset &#39;allocation_drift_case&#39;" in response.text
+    assert "NVDA" in response.text
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert len(state["holdings"]) >= 5
+    assert state["analysis"]["rebalance_proposal"]["available"] is True
+
+
 def test_policy_and_allocation_incomplete_state_labels(client):
     policy = client.get("/ui/portfolio/policy?profile=default_user")
     assert policy.status_code == 200
