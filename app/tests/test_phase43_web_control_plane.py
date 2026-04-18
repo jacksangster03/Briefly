@@ -94,15 +94,16 @@ def test_ui_settings_page_renders(client):
     response = client.get("/ui/settings?profile=default_user")
     assert response.status_code == 200
     assert "Briefly" in response.text
-    assert "Portfolio Analyzer" in response.text
+    assert "Portfolio Workbench" in response.text
+    assert "Market Briefing" in response.text
     assert "Policy" in response.text
     assert "Allocation" in response.text
     assert "Benchmark" in response.text
-    assert "Saved values are persisted in SQLite as" in response.text
+    assert "Saved settings override your default profile values" in response.text
     assert "Executive Summary" in response.text
     assert "Coverage Alignment" in response.text
     assert "What Will Drive Tomorrow" in response.text
-    assert "Scenario Stress Tests" in response.text
+    assert "Scenarios" in response.text
     assert "Briefing Summary" in response.text
     assert "History & Advanced" in response.text
     assert "Policy Summary" in response.text
@@ -294,7 +295,7 @@ def test_ui_htmx_save_sections_persists_and_returns_partial(client):
         headers={"HX-Request": "true"},
     )
     assert response.status_code == 200
-    assert "Morning section visibility saved to DB overrides." in response.text
+    assert "Morning section visibility saved." in response.text
     assert "Saved at" in response.text
 
     state = client.get("/api/v1/profile/default_user/state").json()
@@ -318,7 +319,7 @@ def test_ui_htmx_save_coverage_persists_watchlist_and_region_focus(client):
         headers={"HX-Request": "true"},
     )
     assert response.status_code == 200
-    assert "Coverage preferences saved to DB overrides." in response.text
+    assert "Coverage preferences saved." in response.text
     assert "Saved at" in response.text
 
     state = client.get("/api/v1/profile/default_user/state").json()
@@ -347,7 +348,7 @@ def test_ui_htmx_save_delivery_persists_channel_mix_and_llm_toggles(client):
         headers={"HX-Request": "true"},
     )
     assert response.status_code == 200
-    assert "Delivery preferences saved to DB overrides." in response.text
+    assert "Delivery preferences saved." in response.text
     assert "Saved at" in response.text
 
     state = client.get("/api/v1/profile/default_user/state").json()

@@ -1,6 +1,7 @@
 {% set stocks = state.catalogs.stocks %}
 {% set sectors = state.catalogs.sectors %}
 {% set regions = state.catalogs.regions %}
+{% set enum_options = state.catalogs.enum_options %}
 {% set delivery = state.effective.delivery %}
 {% set sections = state.effective.sections %}
 {% set watchlist = state.effective.watchlist %}
@@ -997,24 +998,25 @@
   <div class="status {{ message_kind }}">{{ message }}</div>
 {% else %}
   <div class="status">
-    Saved values are persisted in SQLite as <b>DB overrides</b>. Effective values below merge YAML defaults + DB overrides.
+    Saved settings override your default profile values for this workspace.
   </div>
 {% endif %}
 
 <nav class="section-nav" aria-label="Settings sections">
-  <a href="#section-overview"  data-module-nav="section-overview">Overview</a>
-  <a href="#section-analyzer"  data-module-nav="section-analyzer">Portfolio Analyzer</a>
-  <a href="#section-policy"    data-module-nav="section-policy">Policy</a>
-  <a href="#section-allocation" data-module-nav="section-allocation">Allocation</a>
-  <a href="#section-risk"      data-module-nav="section-risk">Risk</a>
-  <a href="#section-cma"          data-module-nav="section-cma">CMA</a>
-  <a href="#section-rebalancing"  data-module-nav="section-rebalancing">Rebalancing</a>
-  <a href="#section-attribution"  data-module-nav="section-attribution">Attribution</a>
-  <a href="#section-benchmark"    data-module-nav="section-benchmark">Benchmark</a>
-  <a href="#section-holdings"  data-module-nav="section-holdings">Holdings</a>
-  <a href="#section-coverage"  data-module-nav="section-coverage">Coverage</a>
+  <a href="#section-coverage"  data-module-nav="section-coverage">Watchlists & Coverage</a>
   <a href="#section-delivery"  data-module-nav="section-delivery">Delivery</a>
-  <a href="#section-morning"   data-module-nav="section-morning">Morning Brief</a>
+  <a href="#section-morning"   data-module-nav="section-morning">Morning Composition</a>
+  <a href="#section-overview"  data-module-nav="section-overview">Overview</a>
+  <a href="#section-holdings"  data-module-nav="section-holdings">Builder: Holdings</a>
+  <a href="#section-policy"    data-module-nav="section-policy">Builder: Policy</a>
+  <a href="#section-allocation" data-module-nav="section-allocation">Builder: Allocation</a>
+  <a href="#section-benchmark"    data-module-nav="section-benchmark">Builder: Benchmark</a>
+  <a href="#section-analyzer"  data-module-nav="section-analyzer">Diagnostics</a>
+  <a href="#section-risk"      data-module-nav="section-risk">Risk</a>
+  <a href="#section-cma"       data-module-nav="section-cma">CMA</a>
+  <a href="#section-scenarios" data-module-nav="section-scenarios">Scenarios</a>
+  <a href="#section-rebalancing"  data-module-nav="section-rebalancing">Implementation</a>
+  <a href="#section-attribution"  data-module-nav="section-attribution">Attribution</a>
   <a href="#section-audit"     data-module-nav="section-audit">Audit</a>
 </nav>
 
@@ -1147,8 +1149,8 @@
   </section>
 
   <section class="card" id="section-analyzer" data-module-section="section-analyzer">
-    <h2>Portfolio Analyzer</h2>
-    <p class="muted">Exposure, concentration, and briefing-impact analysis from the live holdings snapshot and saved preferences.</p>
+    <h2>Portfolio Diagnostics</h2>
+    <p class="muted">Exposure & structure, fit & drift, and briefing-impact diagnostics from the live portfolio snapshot.</p>
 
     <div class="definition-grid">
       <div class="definition-card">
@@ -1326,61 +1328,6 @@
               <li>{{ briefing_influence.section_drivers.global_news }}</li>
             </ul>
           </div>
-        </div>
-      </div>
-
-      <div class="chart-card wide">
-        <p class="chart-title">Scenario Stress Tests</p>
-        <div class="preview-box">
-          <strong>Method:</strong> {{ scenario_stress.methodology }}
-          <br />
-          <strong>Current read:</strong> {{ scenario_stress.summary }}
-        </div>
-        <div class="scenario-grid">
-          {% for item in scenario_stress.scenarios %}
-            <div class="scenario-card">
-              <div class="scenario-head">
-                <div>
-                  <h3>{{ item.label }}</h3>
-                  <p>{{ item.description }}</p>
-                </div>
-                <span class="scenario-impact {{ item.impact_class }}">{{ item.estimated_portfolio_impact_display }}</span>
-              </div>
-              <p class="scenario-summary">{{ item.summary }}</p>
-              <div class="scenario-block">
-                <strong>Top Holdings</strong>
-                {% if item.top_holdings %}
-                  <ul>
-                    {% for holding in item.top_holdings %}
-                      <li>
-                        {{ holding.symbol }} · {{ holding.contribution_display }}
-                        {% if holding.weight_display %}
-                          · {{ holding.weight_display }}
-                        {% endif %}
-                      </li>
-                    {% endfor %}
-                  </ul>
-                {% else %}
-                  <p class="tiny">No mapped holdings carry material sensitivity here.</p>
-                {% endif %}
-              </div>
-              <div class="scenario-block">
-                <strong>Top Sectors</strong>
-                {% if item.top_sectors %}
-                  <ul>
-                    {% for sector in item.top_sectors %}
-                      <li>
-                        {{ sector.label }} · {{ sector.estimated_contribution_display }}
-                        · Shock {{ sector.shock_display }}
-                      </li>
-                    {% endfor %}
-                  </ul>
-                {% else %}
-                  <p class="tiny">Current sector mix is not materially exposed in this stress test.</p>
-                {% endif %}
-              </div>
-            </div>
-          {% endfor %}
         </div>
       </div>
 
@@ -1588,8 +1535,22 @@
       class="tracked-form"
     >
       <div class="inline-grid">
-        <div class="field"><label for="policy_investor_type">Investor Type</label><input id="policy_investor_type" type="text" name="policy_investor_type" value="{{ policy.investor_type or '' }}"></div>
-        <div class="field"><label for="policy_base_currency">Base Currency</label><input id="policy_base_currency" type="text" name="policy_base_currency" value="{{ policy.base_currency or '' }}"></div>
+        <div class="field">
+          <label for="policy_investor_type">Investor Type</label>
+          <select id="policy_investor_type" name="policy_investor_type">
+            {% for option in enum_options.investor_type %}
+              <option value="{{ option }}" {% if (policy.investor_type or '') == option %}selected{% endif %}>{{ option | replace('_', ' ') | title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="policy_base_currency">Base Currency</label>
+          <select id="policy_base_currency" name="policy_base_currency">
+            {% for option in enum_options.base_currency %}
+              <option value="{{ option }}" {% if (policy.base_currency or '') == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </div>
         <div class="field"><label for="policy_investment_horizon_years">Investment Horizon (years)</label><input id="policy_investment_horizon_years" type="number" step="0.5" name="policy_investment_horizon_years" value="{{ policy.investment_horizon_years if policy.investment_horizon_years is not none else '' }}"></div>
         <div class="field"><label for="policy_target_return_percent">Target Return %</label><input id="policy_target_return_percent" type="number" step="0.1" name="policy_target_return_percent" value="{{ policy.target_return_percent if policy.target_return_percent is not none else '' }}"></div>
         <div class="field"><label for="policy_max_volatility_percent">Max Volatility %</label><input id="policy_max_volatility_percent" type="number" step="0.1" name="policy_max_volatility_percent" value="{{ policy.max_volatility_percent if policy.max_volatility_percent is not none else '' }}"></div>
@@ -1599,8 +1560,22 @@
         <div class="field"><label for="policy_max_equity_percent">Max Equity %</label><input id="policy_max_equity_percent" type="number" step="0.1" name="policy_max_equity_percent" value="{{ policy.max_equity_percent if policy.max_equity_percent is not none else '' }}"></div>
         <div class="field"><label for="policy_min_liquid_assets_percent">Min Liquid Assets %</label><input id="policy_min_liquid_assets_percent" type="number" step="0.1" name="policy_min_liquid_assets_percent" value="{{ policy.min_liquid_assets_percent if policy.min_liquid_assets_percent is not none else '' }}"></div>
         <div class="field"><label for="policy_benchmark_policy">Benchmark Policy</label><input id="policy_benchmark_policy" type="text" name="policy_benchmark_policy" value="{{ policy.benchmark_policy or '' }}"></div>
-        <div class="field"><label for="policy_rebalancing_policy">Rebalancing Policy</label><input id="policy_rebalancing_policy" type="text" name="policy_rebalancing_policy" value="{{ policy.rebalancing_policy or '' }}"></div>
-        <div class="field"><label for="policy_governance_review_frequency">Governance Review Frequency</label><input id="policy_governance_review_frequency" type="text" name="policy_governance_review_frequency" value="{{ policy.governance_review_frequency or '' }}"></div>
+        <div class="field">
+          <label for="policy_rebalancing_policy">Rebalancing Policy</label>
+          <select id="policy_rebalancing_policy" name="policy_rebalancing_policy">
+            {% for option in enum_options.rebalancing_policy %}
+              <option value="{{ option }}" {% if (policy.rebalancing_policy or '') == option %}selected{% endif %}>{{ option | replace('_', ' ') | title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="policy_governance_review_frequency">Governance Review Frequency</label>
+          <select id="policy_governance_review_frequency" name="policy_governance_review_frequency">
+            {% for option in enum_options.governance_frequency %}
+              <option value="{{ option }}" {% if (policy.governance_review_frequency or '') == option %}selected{% endif %}>{{ option | replace('_', ' ') | title }}</option>
+            {% endfor %}
+          </select>
+        </div>
         <div class="field"><label for="policy_prohibited_assets">Prohibited Assets</label><input id="policy_prohibited_assets" type="text" name="policy_prohibited_assets" value="{{ policy.prohibited_assets | join(', ') }}"></div>
       </div>
       <div class="field">
@@ -1651,7 +1626,13 @@
                   {{ row.label }}
                   <input type="hidden" name="allocation_asset_class" value="{{ row.asset_class }}">
                 </td>
-                <td><input type="text" name="allocation_role" value="{{ row.role or '' }}"></td>
+                <td>
+                  <select name="allocation_role">
+                    {% for option in enum_options.allocation_role %}
+                      <option value="{{ option }}" {% if (row.role or '') == option %}selected{% endif %}>{{ option | replace('_', ' ') | title }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
                 <td><input type="number" step="0.1" name="allocation_target" value="{{ row.target_weight_pct if row.target_weight_pct is not none else '' }}"></td>
                 <td><input type="number" step="0.1" name="allocation_min" value="{{ row.min_weight_pct if row.min_weight_pct is not none else '' }}"></td>
                 <td><input type="number" step="0.1" name="allocation_max" value="{{ row.max_weight_pct if row.max_weight_pct is not none else '' }}"></td>
@@ -2116,6 +2097,63 @@
     {% endif %}
   </section>
 
+  <section class="card" id="section-scenarios" data-module-section="section-scenarios">
+    <h2>Scenarios</h2>
+    <p class="muted">Static scenario lab for fast vulnerability checks. Use this section to see which holdings and sectors are most exposed under common market shocks.</p>
+
+    <div class="preview-box">
+      <strong>Method:</strong> {{ scenario_stress.methodology }}
+      <br />
+      <strong>Current read:</strong> {{ scenario_stress.summary }}
+    </div>
+    <div class="scenario-grid">
+      {% for item in scenario_stress.scenarios %}
+        <div class="scenario-card">
+          <div class="scenario-head">
+            <div>
+              <h3>{{ item.label }}</h3>
+              <p>{{ item.description }}</p>
+            </div>
+            <span class="scenario-impact {{ item.impact_class }}">{{ item.estimated_portfolio_impact_display }}</span>
+          </div>
+          <p class="scenario-summary">{{ item.summary }}</p>
+          <div class="scenario-block">
+            <strong>Top Holdings</strong>
+            {% if item.top_holdings %}
+              <ul>
+                {% for holding in item.top_holdings %}
+                  <li>
+                    {{ holding.symbol }} · {{ holding.contribution_display }}
+                    {% if holding.weight_display %}
+                      · {{ holding.weight_display }}
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p class="tiny">No mapped holdings carry material sensitivity here.</p>
+            {% endif %}
+          </div>
+          <div class="scenario-block">
+            <strong>Top Sectors</strong>
+            {% if item.top_sectors %}
+              <ul>
+                {% for sector in item.top_sectors %}
+                  <li>
+                    {{ sector.label }} · {{ sector.estimated_contribution_display }}
+                    · Shock {{ sector.shock_display }}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p class="tiny">Current sector mix is not materially exposed in this stress test.</p>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
   <!-- ===== REBALANCING ===== -->
   <section class="card" id="section-rebalancing" data-module-section="section-rebalancing">
     <h2>Rebalancing</h2>
@@ -2564,10 +2602,13 @@
         <div class="field"><label for="benchmark_name">Benchmark Name</label><input id="benchmark_name" type="text" name="benchmark_name" value="{{ benchmark.name or '' }}"></div>
         <div class="field"><label for="benchmark_base_symbol">Base Symbol</label><input id="benchmark_base_symbol" type="text" name="benchmark_base_symbol" value="{{ benchmark.base_symbol or '' }}"></div>
       </div>
-      <div class="field">
-        <label for="benchmark_components">Components (JSON or shorthand)</label>
-        <textarea id="benchmark_components" name="benchmark_components">{{ benchmark.components | tojson }}</textarea>
-      </div>
+      <details class="dev-overrides-details">
+        <summary>Advanced Benchmark Components</summary>
+        <div class="field" style="margin-top:8px;">
+          <label for="benchmark_components">Custom Blend Components (JSON)</label>
+          <textarea id="benchmark_components" name="benchmark_components">{{ benchmark.components | tojson }}</textarea>
+        </div>
+      </details>
       <div class="field">
         <label for="benchmark_notes">Notes</label>
         <textarea id="benchmark_notes" name="benchmark_notes">{{ benchmark.notes or '' }}</textarea>
@@ -2738,7 +2779,7 @@
   </section>
 
   <section class="card" id="section-coverage" data-module-section="section-coverage">
-    <h2>Coverage</h2>
+    <h2>Market Briefing · Watchlists & Coverage Priorities</h2>
     <p class="muted">
       Configure what gets editorial priority.
       Primary watchlist drives strongest relevance, secondary is medium, monitor is low-priority.
@@ -2867,7 +2908,7 @@
   </section>
 
   <section class="card" id="section-delivery" data-module-section="section-delivery">
-    <h2>Delivery</h2>
+    <h2>Market Briefing · Delivery</h2>
     <p class="muted">
       Choose channels and schedule controls for each briefing type.
       Changes affect the next generated run without restarting your profile data.
@@ -2984,7 +3025,7 @@
   </section>
 
   <section class="card" id="section-morning" data-module-section="section-morning">
-    <h2>Morning Brief Settings</h2>
+    <h2>Market Briefing · Morning Composition</h2>
     <p class="muted">Enable or disable sections that appear in the next generated morning briefing.</p>
     <form
       hx-post="/ui/profile/{{ state.profile }}/save/sections"
@@ -3015,7 +3056,7 @@
 
   <section class="card" id="section-audit" data-module-section="section-audit">
     <h2>History & Advanced</h2>
-    <p class="muted">Friendly profile history first. Raw DB overrides stay tucked under Advanced Settings.</p>
+    <p class="muted">Friendly profile history first. Raw override payloads stay tucked under Advanced Settings.</p>
     <div class="summary-grid">
       <dl class="summary">
         <dt>Last Holdings Update (Local)</dt>
@@ -3039,7 +3080,7 @@
             <dd>+{{ override_summaries | length - 6 }} more override(s)</dd>
           {% endif %}
         {% else %}
-          <dd>No active DB overrides.</dd>
+          <dd>No active overrides.</dd>
         {% endif %}
       </dl>
     </div>
@@ -3053,7 +3094,7 @@
           hx-swap="outerHTML"
           method="post"
         >
-          <button type="submit" class="danger" onclick="return confirm('Reset all DB overrides for this profile?');">
+          <button type="submit" class="danger" onclick="return confirm('Reset all saved overrides for this profile?');">
             Reset Overrides
           </button>
         </form>

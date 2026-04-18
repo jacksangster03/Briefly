@@ -44,6 +44,12 @@ logger = get_logger("web")
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+_INVESTOR_TYPE_VALUES = {"individual", "family_office", "advisor", "institutional", "model_portfolio", "other"}
+_BASE_CURRENCY_VALUES = {"EUR", "USD", "GBP", "CHF", "JPY", "OTHER"}
+_REBALANCING_POLICY_VALUES = {"threshold", "calendar", "hybrid"}
+_GOVERNANCE_FREQUENCY_VALUES = {"monthly", "quarterly", "semi_annual", "annual"}
+_ALLOCATION_ROLE_VALUES = {"growth", "income", "diversifier", "hedge", "liquidity", "tactical", "other"}
+
 
 class PreferenceUpdateRequest(BaseModel):
     """Bulk preference payload for API updates."""
@@ -120,7 +126,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             request,
             profile=normalized_profile,
             updates=updates,
-            success_message="Coverage preferences saved to DB overrides.",
+            success_message="Coverage preferences saved.",
         )
 
     @app.post(
@@ -136,7 +142,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             request,
             profile=normalized_profile,
             updates=updates,
-            success_message="Delivery preferences saved to DB overrides.",
+            success_message="Delivery preferences saved.",
         )
 
     @app.post(
@@ -152,7 +158,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             request,
             profile=normalized_profile,
             updates=updates,
-            success_message="Morning section visibility saved to DB overrides.",
+            success_message="Morning section visibility saved.",
         )
 
     @app.post(
@@ -821,9 +827,25 @@ def _policy_updates_from_form(form) -> dict[str, Any]:
         for item in str(form.get("policy_prohibited_assets", "")).split(",")
         if item.strip()
     ]
+    investor_type = str(form.get("policy_investor_type", "")).strip().lower()
+    if investor_type and investor_type not in _INVESTOR_TYPE_VALUES:
+        investor_type = "other"
+
+    base_currency = str(form.get("policy_base_currency", "")).strip().upper()
+    if base_currency and base_currency not in _BASE_CURRENCY_VALUES:
+        base_currency = "OTHER"
+
+    rebalancing_policy = str(form.get("policy_rebalancing_policy", "")).strip().lower()
+    if rebalancing_policy and rebalancing_policy not in _REBALANCING_POLICY_VALUES:
+        rebalancing_policy = "threshold"
+
+    governance_frequency = str(form.get("policy_governance_review_frequency", "")).strip().lower()
+    if governance_frequency and governance_frequency not in _GOVERNANCE_FREQUENCY_VALUES:
+        governance_frequency = "quarterly"
+
     return {
-        "investor_type": str(form.get("policy_investor_type", "")).strip(),
-        "base_currency": str(form.get("policy_base_currency", "")).strip().upper(),
+        "investor_type": investor_type,
+        "base_currency": base_currency,
         "investment_horizon_years": str(form.get("policy_investment_horizon_years", "")).strip(),
         "liquidity_need_percent": str(form.get("policy_liquidity_need_percent", "")).strip(),
         "target_return_percent": str(form.get("policy_target_return_percent", "")).strip(),
@@ -833,9 +855,9 @@ def _policy_updates_from_form(form) -> dict[str, Any]:
         "max_equity_percent": str(form.get("policy_max_equity_percent", "")).strip(),
         "min_liquid_assets_percent": str(form.get("policy_min_liquid_assets_percent", "")).strip(),
         "benchmark_policy": str(form.get("policy_benchmark_policy", "")).strip(),
-        "rebalancing_policy": str(form.get("policy_rebalancing_policy", "")).strip(),
+        "rebalancing_policy": rebalancing_policy,
         "prohibited_assets": prohibited_assets,
-        "governance_review_frequency": str(form.get("policy_governance_review_frequency", "")).strip(),
+        "governance_review_frequency": governance_frequency,
         "notes": str(form.get("policy_notes", "")).strip(),
     }
 
@@ -854,7 +876,11 @@ def _allocation_updates_from_form(form) -> list[dict[str, Any]]:
         rows.append(
             {
                 "asset_class": asset_text,
-                "role": str(roles[index] if index < len(roles) else "").strip().lower(),
+                "role": (
+                    str(roles[index] if index < len(roles) else "").strip().lower()
+                    if str(roles[index] if index < len(roles) else "").strip().lower() in _ALLOCATION_ROLE_VALUES
+                    else "other"
+                ),
                 "target_weight_pct": str(targets[index] if index < len(targets) else "").strip(),
                 "min_weight_pct": str(minimums[index] if index < len(minimums) else "").strip(),
                 "max_weight_pct": str(maximums[index] if index < len(maximums) else "").strip(),

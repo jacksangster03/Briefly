@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Briefly Portfolio Analyzer</title>
+  <title>Briefly Portfolio Workbench</title>
   <script>
     (() => {
       const stored = window.localStorage.getItem("briefly-ui-theme");
@@ -188,12 +188,12 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">Briefly</p>
-        <h1 class="title">Portfolio Analyzer</h1>
-        <p class="subtitle">Analyzer-first control center for the Briefly platform: portfolio exposure, market briefing delivery, and local iteration without extra infrastructure.</p>
+        <h1 class="title">Portfolio Workbench</h1>
+        <p class="subtitle">Workflow-first workspace for portfolio construction, diagnostics, risk, implementation, and a separate market briefing control surface.</p>
         <div class="module-strip" aria-label="Briefly modules">
-          <button class="module-pill" data-module="briefing" type="button">Market Briefing</button>
-          <button class="module-pill active" data-module="portfolio" type="button">Portfolio Analyzer</button>
-          <span class="module-pill" title="Coming soon" style="opacity:0.5;cursor:default;">Trading Lab (Planned)</span>
+          <button class="module-pill active" data-module="briefing" type="button">Market Briefing</button>
+          <button class="module-pill" data-module="portfolio" type="button">Portfolio Workbench</button>
+          <button class="module-pill" data-module="audit" type="button">Audit</button>
         </div>
       </div>
       <button id="themeToggle" class="theme-toggle" type="button">Switch Theme</button>
@@ -545,15 +545,17 @@
       }
 
       // ── Module tab switching ───────────────────────────────────────────────
-      // "portfolio" shows: Overview, Analyzer, Policy, Allocation, Benchmark, Holdings, Coverage.
-      // "briefing"  shows: Delivery, Morning Brief, Audit.
+      // "briefing" shows: Watchlists, coverage priorities, delivery, morning composition.
+      // "portfolio" shows: Overview, diagnostics, builder, risk, scenarios, implementation.
+      // "audit" shows: audit + advanced controls only.
       const MODULE_SECTIONS = {
-        portfolio: new Set(["section-overview", "section-analyzer", "section-policy", "section-allocation", "section-risk", "section-cma", "section-rebalancing", "section-attribution", "section-benchmark", "section-holdings", "section-coverage"]),
-        briefing:  new Set(["section-delivery", "section-morning", "section-audit"]),
+        briefing: new Set(["section-coverage", "section-delivery", "section-morning"]),
+        portfolio: new Set(["section-overview", "section-analyzer", "section-policy", "section-allocation", "section-risk", "section-cma", "section-scenarios", "section-rebalancing", "section-attribution", "section-benchmark", "section-holdings"]),
+        audit: new Set(["section-audit"]),
       };
 
       function activateModule(module, options = {}) {
-        if (!MODULE_SECTIONS[module]) module = "portfolio";
+        if (!MODULE_SECTIONS[module]) module = "briefing";
         const { scroll = false } = options;
         localStorage.setItem("briefly-module", module);
 
@@ -575,7 +577,11 @@
         });
 
         if (scroll) {
-          const targetId = module === "briefing" ? "section-delivery" : "section-overview";
+          const targetId = module === "briefing"
+            ? "section-coverage"
+            : module === "audit"
+              ? "section-audit"
+              : "section-overview";
           const target = document.getElementById(targetId);
           if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
         }
@@ -612,7 +618,7 @@
         document.querySelectorAll(".module-pill[data-module]").forEach(pill => {
           pill.addEventListener("click", () => activateModule(pill.dataset.module, { scroll: true }));
         });
-        activateModule(localStorage.getItem("briefly-module") || "portfolio");
+        activateModule(localStorage.getItem("briefly-module") || "briefing");
       });
 
       document.body.addEventListener("htmx:afterSwap", (event) => {
@@ -623,7 +629,7 @@
           initHoldingsEditor();
           clearDirty();
           // Re-apply module visibility to newly swapped sections
-          activateModule(localStorage.getItem("briefly-module") || "portfolio");
+          activateModule(localStorage.getItem("briefly-module") || "briefing");
         }
       });
     })();

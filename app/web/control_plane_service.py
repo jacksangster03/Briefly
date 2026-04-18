@@ -58,6 +58,21 @@ from app.settings import Settings
 from app.universe.sector_universe import load_sector_universe
 from app.universe.ticker_metadata import TICKER_DISPLAY_NAMES, format_company_ticker
 
+
+POLICY_INVESTOR_TYPES = [
+    "individual",
+    "family_office",
+    "advisor",
+    "institutional",
+    "model_portfolio",
+    "other",
+]
+BASE_CURRENCY_OPTIONS = ["EUR", "USD", "GBP", "CHF", "JPY", "OTHER"]
+REBALANCING_POLICY_OPTIONS = ["threshold", "calendar", "hybrid"]
+GOVERNANCE_FREQUENCY_OPTIONS = ["monthly", "quarterly", "semi_annual", "annual"]
+ALLOCATION_ROLE_OPTIONS = ["growth", "income", "diversifier", "hedge", "liquidity", "tactical", "other"]
+
+
 def _display_label(value: str) -> str:
     """Render human labels while preserving finance acronyms in uppercase."""
     return analyzer_display_label(value)
@@ -471,6 +486,13 @@ def _build_followables_catalog(
         "indices": indices,
         "macro": macro,
         "regions": regions,
+        "enum_options": {
+            "investor_type": POLICY_INVESTOR_TYPES,
+            "base_currency": BASE_CURRENCY_OPTIONS,
+            "rebalancing_policy": REBALANCING_POLICY_OPTIONS,
+            "governance_frequency": GOVERNANCE_FREQUENCY_OPTIONS,
+            "allocation_role": ALLOCATION_ROLE_OPTIONS,
+        },
     }
 
 
