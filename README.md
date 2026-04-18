@@ -33,7 +33,7 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 - Static PNG chart cards: Market Snapshot, Macro Risk Strip, Top Holdings Performance, Sector Exposure vs Performance, Event-Linked Trend
 - HTML email with inline charts
 
-### Portfolio workbench (Phases 4.7–5.5)
+### Portfolio workbench (Phases 4.7–5.6B)
 
 The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full portfolio workbench:
 
@@ -41,7 +41,7 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - Import from YAML or CSV, persist in SQLite, edit inline with +/- steppers and rebalance helpers
 - Holdings-aware relevance scoring and briefing influence
 
-**Portfolio Analyzer**
+**Portfolio Diagnostics**
 - Coverage alignment findings, briefing influence map, health checks
 - Holdings data quality diagnostics, snapshot confidence rating
 - Deterministic stress scenarios: semis down 10%, rates +50 bps, oil shock, dollar spike, small-cap risk-off
@@ -104,6 +104,13 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - Portfolio workbench presented as separated areas: overview, builder (holdings/policy/allocation/benchmark), diagnostics, risk, scenarios, implementation, and attribution
 - User-facing copy removes primary-screen implementation plumbing language (advanced/raw details remain in Audit)
 - Key semantic controls now use constrained dropdowns: investor type, base currency, rebalancing policy, governance frequency, and allocation role
+
+**Visual Productization (Phase 5.6B)**
+- New workspace gateway route at `/ui` with module entry cards for Market Briefing, Portfolio Workbench, and Audit
+- Route-based workflow entry points: `/ui/briefing`, `/ui/portfolio`, `/ui/audit`
+- Portfolio task routes for focused work screens: builder, diagnostics, risk, CMA, scenarios, implementation, attribution, policy, allocation, benchmark
+- Settings shell accepts route-provided initial module/section so each deep link opens directly in the intended workspace area
+- Workspace links are persistent in the shell for quick context switching without returning to one mixed scroll flow
 
 ### Intelligence pipeline
 
@@ -217,14 +224,27 @@ Start:
 python -m app.cli web --host 127.0.0.1 --port 8080
 ```
 
-Open: `http://127.0.0.1:8080/ui/settings?profile=default_user`
+Open home: `http://127.0.0.1:8080/ui?profile=default_user`
+
+Direct workspaces:
+- `http://127.0.0.1:8080/ui/briefing?profile=default_user`
+- `http://127.0.0.1:8080/ui/portfolio?profile=default_user`
+- `http://127.0.0.1:8080/ui/audit?profile=default_user`
 
 API docs: `http://127.0.0.1:8080/api/docs`
 
 ### API surface
 
 ```
+GET    /ui
 GET    /ui/settings
+GET    /ui/briefing
+GET    /ui/briefing/watchlists
+GET    /ui/briefing/delivery
+GET    /ui/briefing/morning
+GET    /ui/portfolio
+GET    /ui/portfolio/{view}
+GET    /ui/audit
 GET    /api/v1/profile/{profile}/state
 PUT    /api/v1/profile/{profile}/preferences
 DELETE /api/v1/profile/{profile}/preferences/{pref_key}
@@ -357,7 +377,7 @@ python -m app.cli --show-output --email-only morning
 
 ```
 Briefly
-  Market Briefing | Portfolio Workbench | Trading Lab (planned)
+  Home | Market Briefing | Portfolio Workbench | Trading Lab (planned) | Audit
 
 Providers
   Finnhub | NewsAPI | FRED | SEC EDGAR | yfinance
@@ -459,11 +479,11 @@ python -m app.cli --show-output --dry-run morning
 
 ```bash
 python -m app.cli web --host 127.0.0.1 --port 8080
-# then open http://127.0.0.1:8080/ui/settings?profile=default_user
+# then open http://127.0.0.1:8080/ui?profile=default_user
 ```
 
 Top-level modules: Market Briefing, Portfolio Workbench, Audit.
-Workbench and briefing controls are separated into dedicated areas instead of one mixed settings flow.
+Phase 5.6B adds route-based workspace entry and deep links, so users can open focused portfolio and briefing areas directly.
 
 ### Run the live scheduler
 
@@ -508,6 +528,7 @@ The attribution block is also auto-computed (without persistence) on every page 
 | 5.4 | Complete | Rebalancing and implementation engine |
 | 5.5 | Complete | Attribution: Brinson-Hood-Beebower model, CMA-based allocation effect, waterfall decomposition |
 | 5.6A | Complete | Workflow architecture split: Market Briefing vs Portfolio Workbench vs Audit, with separated workbench areas and constrained semantic inputs |
+| 5.6B | Complete | Visual productization pass: workspace home route, route-based module entry points, and focused portfolio/briefing deep links |
 | 5.7 | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---

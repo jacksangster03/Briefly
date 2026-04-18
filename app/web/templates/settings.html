@@ -123,6 +123,31 @@
       gap: 8px;
     }
 
+    .workspace-strip {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .workspace-link {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 11px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      color: var(--muted);
+      text-decoration: none;
+      background: var(--card);
+    }
+
+    .workspace-link:hover {
+      color: var(--ink);
+      border-color: var(--accent);
+      background: var(--card-hover);
+    }
+
     .module-pill {
       border: 1px solid var(--border);
       border-radius: 999px;
@@ -183,13 +208,25 @@
     }
   </style>
 </head>
-<body>
+<body data-initial-module="{{ initial_module|default('briefing') }}" data-initial-section="{{ initial_section|default('') }}">
   <div class="shell">
     <header class="topbar">
       <div>
         <p class="eyebrow">Briefly</p>
         <h1 class="title">Portfolio Workbench</h1>
         <p class="subtitle">Workflow-first workspace for portfolio construction, diagnostics, risk, implementation, and a separate market briefing control surface.</p>
+        <div class="workspace-strip" aria-label="Workspace routes">
+          <a class="workspace-link" href="/ui?profile={{ state.profile }}">Home</a>
+          <a class="workspace-link" href="/ui/briefing?profile={{ state.profile }}">Briefing Home</a>
+          <a class="workspace-link" href="/ui/portfolio?profile={{ state.profile }}">Portfolio Home</a>
+          <a class="workspace-link" href="/ui/portfolio/builder?profile={{ state.profile }}">Builder</a>
+          <a class="workspace-link" href="/ui/portfolio/diagnostics?profile={{ state.profile }}">Diagnostics</a>
+          <a class="workspace-link" href="/ui/portfolio/risk?profile={{ state.profile }}">Risk</a>
+          <a class="workspace-link" href="/ui/portfolio/scenarios?profile={{ state.profile }}">Scenarios</a>
+          <a class="workspace-link" href="/ui/portfolio/implementation?profile={{ state.profile }}">Implementation</a>
+          <a class="workspace-link" href="/ui/portfolio/attribution?profile={{ state.profile }}">Attribution</a>
+          <a class="workspace-link" href="/ui/audit?profile={{ state.profile }}">Audit</a>
+        </div>
         <div class="module-strip" aria-label="Briefly modules">
           <button class="module-pill active" data-module="briefing" type="button">Market Briefing</button>
           <button class="module-pill" data-module="portfolio" type="button">Portfolio Workbench</button>
@@ -618,7 +655,14 @@
         document.querySelectorAll(".module-pill[data-module]").forEach(pill => {
           pill.addEventListener("click", () => activateModule(pill.dataset.module, { scroll: true }));
         });
-        activateModule(localStorage.getItem("briefly-module") || "briefing");
+        const explicitModule = (document.body.dataset.initialModule || "").trim();
+        const explicitSection = (document.body.dataset.initialSection || "").trim();
+        const startModule = explicitModule || localStorage.getItem("briefly-module") || "briefing";
+        activateModule(startModule);
+        if (explicitSection) {
+          const section = document.getElementById(explicitSection);
+          if (section) section.scrollIntoView({ behavior: "auto", block: "start" });
+        }
       });
 
       document.body.addEventListener("htmx:afterSwap", (event) => {

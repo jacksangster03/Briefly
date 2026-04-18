@@ -94,10 +94,10 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     def root_redirect() -> RedirectResponse:
-        return RedirectResponse(url="/ui/settings", status_code=307)
+        return RedirectResponse(url="/ui", status_code=307)
 
-    @app.get("/ui/settings", response_class=HTMLResponse, include_in_schema=False)
-    def ui_settings(
+    @app.get("/ui", response_class=HTMLResponse, include_in_schema=False)
+    def ui_home(
         request: Request,
         profile: str = Query(default="default_user"),
     ):
@@ -105,12 +105,133 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         state = build_profile_state(_settings(request), normalized_profile)
         return templates.TemplateResponse(
             request,
-            "settings.html",
+            "ui_home.html",
             {
                 "state": state,
-                "message": "",
-                "message_kind": "info",
             },
+        )
+
+    @app.get("/ui/settings", response_class=HTMLResponse, include_in_schema=False)
+    def ui_settings(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            initial_module="briefing",
+            initial_section="section-coverage",
+        )
+
+    @app.get("/ui/briefing", response_class=HTMLResponse, include_in_schema=False)
+    def ui_briefing_home(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            initial_module="briefing",
+            initial_section="section-coverage",
+        )
+
+    @app.get("/ui/briefing/watchlists", response_class=HTMLResponse, include_in_schema=False)
+    def ui_briefing_watchlists(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            initial_module="briefing",
+            initial_section="section-coverage",
+        )
+
+    @app.get("/ui/briefing/delivery", response_class=HTMLResponse, include_in_schema=False)
+    def ui_briefing_delivery(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            initial_module="briefing",
+            initial_section="section-delivery",
+        )
+
+    @app.get("/ui/briefing/morning", response_class=HTMLResponse, include_in_schema=False)
+    def ui_briefing_morning(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            initial_module="briefing",
+            initial_section="section-morning",
+        )
+
+    @app.get("/ui/portfolio", response_class=HTMLResponse, include_in_schema=False)
+    def ui_portfolio_home(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            initial_module="portfolio",
+            initial_section="section-overview",
+        )
+
+    @app.get("/ui/portfolio/{view}", response_class=HTMLResponse, include_in_schema=False)
+    def ui_portfolio_view(
+        request: Request,
+        view: str,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        view_to_section = {
+            "builder": "section-holdings",
+            "holdings": "section-holdings",
+            "policy": "section-policy",
+            "allocation": "section-allocation",
+            "benchmark": "section-benchmark",
+            "diagnostics": "section-analyzer",
+            "risk": "section-risk",
+            "cma": "section-cma",
+            "scenarios": "section-scenarios",
+            "implementation": "section-rebalancing",
+            "rebalancing": "section-rebalancing",
+            "attribution": "section-attribution",
+            "overview": "section-overview",
+        }
+        section = view_to_section.get((view or "").strip().lower())
+        if not section:
+            return RedirectResponse(url=f"/ui/portfolio?profile={normalized_profile}", status_code=307)
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            initial_module="portfolio",
+            initial_section=section,
+        )
+
+    @app.get("/ui/audit", response_class=HTMLResponse, include_in_schema=False)
+    def ui_audit(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            initial_module="audit",
+            initial_section="section-audit",
         )
 
     @app.post(
@@ -724,6 +845,27 @@ def _render_ui_after_update(
             message_kind="error",
             status_code=400,
         )
+
+
+def _render_settings_page(
+    request: Request,
+    *,
+    profile: str,
+    initial_module: str,
+    initial_section: str = "",
+) -> HTMLResponse:
+    state = build_profile_state(_settings(request), profile)
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            "state": state,
+            "message": "",
+            "message_kind": "info",
+            "initial_module": initial_module,
+            "initial_section": initial_section,
+        },
+    )
 
 
 def _render_settings_root(

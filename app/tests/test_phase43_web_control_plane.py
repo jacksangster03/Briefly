@@ -124,6 +124,46 @@ def test_ui_settings_page_renders(client):
     assert "Region Weight — LATAM" in response.text
 
 
+def test_ui_home_renders_workspace_cards(client):
+    response = client.get("/ui?profile=default_user")
+    assert response.status_code == 200
+    assert "Workspace Home" in response.text
+    assert "Market Briefing" in response.text
+    assert "Portfolio Workbench" in response.text
+    assert "Audit" in response.text
+    assert "/ui/briefing?profile=default_user" in response.text
+    assert "/ui/portfolio?profile=default_user" in response.text
+    assert "/ui/audit?profile=default_user" in response.text
+
+
+def test_ui_workspace_routes_set_initial_module_and_section(client):
+    briefing = client.get("/ui/briefing?profile=default_user")
+    assert briefing.status_code == 200
+    assert 'data-initial-module="briefing"' in briefing.text
+    assert 'data-initial-section="section-coverage"' in briefing.text
+
+    portfolio = client.get("/ui/portfolio?profile=default_user")
+    assert portfolio.status_code == 200
+    assert 'data-initial-module="portfolio"' in portfolio.text
+    assert 'data-initial-section="section-overview"' in portfolio.text
+
+    risk = client.get("/ui/portfolio/risk?profile=default_user")
+    assert risk.status_code == 200
+    assert 'data-initial-module="portfolio"' in risk.text
+    assert 'data-initial-section="section-risk"' in risk.text
+
+    audit = client.get("/ui/audit?profile=default_user")
+    assert audit.status_code == 200
+    assert 'data-initial-module="audit"' in audit.text
+    assert 'data-initial-section="section-audit"' in audit.text
+
+
+def test_ui_root_redirects_to_home(client):
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code in {302, 307}
+    assert response.headers["location"] == "/ui"
+
+
 def test_display_label_formats_acronyms():
     assert _display_label("us") == "US"
     assert _display_label("latam") == "LATAM"
