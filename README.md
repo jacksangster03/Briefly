@@ -8,7 +8,7 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 
 **Market Briefing** — generates and delivers structured morning briefings, intraday updates, and breaking alerts via Telegram and email.
 
-**Portfolio Workbench** — a local web control center for managing holdings, defining investor policy, setting strategic asset allocation, configuring benchmarks, computing live risk analytics, and building forward-looking capital market assumptions.
+**Portfolio Workbench** — a local web control center for managing holdings, defining investor policy, setting strategic asset allocation, configuring benchmarks, computing live risk analytics, building forward-looking capital market assumptions, and decomposing active return with Brinson-Hood-Beebower attribution.
 
 **Trading Lab** — planned. Future execution and sentiment workflow layer on top of the existing deterministic intelligence core.
 
@@ -33,7 +33,7 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 - Static PNG chart cards: Market Snapshot, Macro Risk Strip, Top Holdings Performance, Sector Exposure vs Performance, Event-Linked Trend
 - HTML email with inline charts
 
-### Portfolio workbench (Phases 4.7–5.3)
+### Portfolio workbench (Phases 4.7–5.5)
 
 The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full portfolio workbench:
 
@@ -67,6 +67,15 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - DB-cached return series and metric snapshots (BenchmarkPriceCache, PortfolioReturnSeries, RiskMetricsSnapshot): repeated page loads skip re-fetching
 - Volatility and drawdown policy breach integration
 
+**CMA Builder (Phase 5.3)**
+- Per-asset-class capital market assumptions: expected return and volatility, stored in SQLite
+- NxN correlation matrix configuration for asset-class pairs
+- Expected portfolio return, volatility, and Sharpe computed from actual weights and CMA inputs
+- SAA expected metrics computed from target weights for side-by-side comparison
+- Policy gap: expected return vs policy target, expected volatility vs policy limit
+- SAA gap: actual expected metrics vs SAA expected metrics, return shortfall, vol difference, Sharpe difference
+- Expected return below policy target added as a policy-fit breach
+
 **Rebalancing Engine (Phase 5.4)**
 - Rebalancing configuration: drift-threshold, calendar, and hybrid trigger methods
 - Drift-triggered trade list: per-asset-class buy/sell/hold direction with magnitude in percentage points, trimmed to the nearest band edge
@@ -78,14 +87,16 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - Generate Proposal button for on-demand persistence; auto-computed fresh on every page load
 - Tax-aware flag (v1: informational only, does not change trade mathematics)
 
-**CMA Builder (Phase 5.3)**
-- Per-asset-class capital market assumptions: expected return and volatility, stored in SQLite
-- NxN correlation matrix configuration for asset-class pairs
-- Expected portfolio return, volatility, and Sharpe computed from actual weights and CMA inputs
-- SAA expected metrics computed from target weights for side-by-side comparison
-- Policy gap: expected return vs policy target, expected volatility vs policy limit
-- SAA gap: actual expected metrics vs SAA expected metrics, return shortfall, vol difference, Sharpe difference
-- Expected return below policy target added as a policy-fit breach
+**Attribution (Phase 5.5)**
+- Brinson-Hood-Beebower attribution model using CMA expected returns as the return proxy
+- Per-asset-class decomposition into allocation effect, selection effect (v1: zero, requires historical returns), and interaction effect (v1: zero)
+- Allocation effect measures whether the portfolio was over/underweight in the right asset classes relative to the SAA benchmark
+- Waterfall decomposition: Benchmark Return, Allocation Effect, Selection Effect, Interaction Effect, Portfolio Return
+- Top contributor and top detractor identification by allocation effect magnitude
+- Attribution history log: append-only record of active return and allocation effect per snapshot
+- Qualitative summary identifying the main drivers of active return
+- Explicit CMA-based method labelling and Phase 5.6 roadmap note for historical selection and interaction effects
+- AttributionSnapshot model persists results in SQLite for trend analysis
 
 ### Intelligence pipeline
 
@@ -227,6 +238,10 @@ PUT    /api/v1/profile/{profile}/cma/correlations
 GET    /api/v1/profile/{profile}/rebalancing
 POST   /api/v1/profile/{profile}/rebalancing/generate
 GET    /api/v1/profile/{profile}/rebalancing/history
+
+GET    /api/v1/profile/{profile}/attribution
+POST   /api/v1/profile/{profile}/attribution/generate
+GET    /api/v1/profile/{profile}/attribution/history
 ```
 
 ### Preferences reference
@@ -358,12 +373,13 @@ Portfolio workbench layers
   Holdings -> Policy -> Allocation -> Benchmark
   -> Risk Analytics (Phase 5.2)
   -> CMA Builder (Phase 5.3)
-  -> [Rebalancing Engine, Attribution — planned]
+  -> Rebalancing Engine (Phase 5.4)
+  -> Attribution (Phase 5.5)
 
 Portfolio analyzer
   build_portfolio_analysis()
     policy_fit | allocation_drift | benchmark_summary
-    risk_analytics | cma_analytics
+    risk_analytics | cma_analytics | rebalance_proposal | attribution
     scenario_stress | briefing_influence | health_checks
 
 Persistence (SQLite)
@@ -371,6 +387,7 @@ Persistence (SQLite)
   UserPreferences | InvestorPolicy | StrategicAllocationTarget
   BenchmarkConfig | PortfolioReturnSeries | BenchmarkPriceCache
   RiskMetricsSnapshot | CMAEntry | CMACorrelation
+  RebalancingConfig | RebalanceProposal | AttributionSnapshot
 ```
 
 ---
@@ -383,7 +400,7 @@ make test
 python -m pytest app/tests -q
 ```
 
-Current count: **264 tests, 0 failures.**
+Current count: **283 tests, 0 failures.**
 
 Focused test runs:
 
@@ -391,6 +408,8 @@ Focused test runs:
 python -m pytest app/tests/test_phase43_web_control_plane.py -q
 python -m pytest app/tests/test_phase52_risk_analytics.py -q
 python -m pytest app/tests/test_phase53_cma_analytics.py -q
+python -m pytest app/tests/test_phase54_rebalancing.py -q
+python -m pytest app/tests/test_phase55_attribution.py -q
 python -m pytest app/tests/test_portfolio_phase3.py -q
 python -m pytest app/tests/test_market_data.py -q
 python -m pytest app/tests/test_circuit_breaker.py -q
@@ -405,9 +424,11 @@ Test coverage includes:
 - Profile control-plane overrides
 - Web control center and API endpoints
 - Policy, allocation, and benchmark persistence and breach logic
-- Risk analytics: Sharpe, Sortino, max drawdown, tracking error, information ratio, cache behavior
+- Risk analytics: Sharpe, Sortino, max drawdown, tracking error, information ratio, cache behaviour
 - CMA service: expected return/vol/Sharpe computation, correlation matrix, policy gap, SAA gap
-- LLM email render guardrails, shadow mode, and fallback behavior
+- Rebalancing engine: drift detection, trade list generation, turnover, cost estimation, proposal persistence
+- Attribution: Brinson-Hood-Beebower allocation effect, selection/interaction effect (zero in v1), waterfall, persistence
+- LLM email render guardrails, shadow mode, and fallback behaviour
 - Provider circuit breaker and quote fallback
 
 ---
@@ -434,7 +455,7 @@ python -m app.cli web --host 127.0.0.1 --port 8080
 # then open http://127.0.0.1:8080/ui/settings?profile=default_user
 ```
 
-Tabs available: Overview, Portfolio Analyzer, Policy, Allocation, Risk, CMA, Benchmark, Holdings, Coverage, Delivery, Morning Brief, History & Advanced.
+Tabs available: Overview, Portfolio Analyzer, Policy, Allocation, Risk, CMA, Rebalancing, Attribution, Benchmark, Holdings, Coverage, Delivery, Morning Brief, History & Advanced.
 
 ### Run the live scheduler
 
@@ -454,6 +475,16 @@ curl -X POST "http://127.0.0.1:8080/api/v1/profile/default_user/risk/refresh"
 
 In the CMA tab, enter expected return and volatility for each asset class, configure the correlation matrix, then save. The Expected Portfolio Analytics section updates immediately.
 
+### Run attribution analysis
+
+In the Attribution tab, click Generate and Save Attribution Snapshot. Or via API:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/api/v1/profile/default_user/attribution/generate"
+```
+
+The attribution block is also auto-computed (without persistence) on every page load alongside the rebalance proposal.
+
 ---
 
 ## Roadmap
@@ -467,7 +498,8 @@ In the CMA tab, enter expected return and volatility for each asset class, confi
 | 5.2 | Complete | Risk and benchmark analytics |
 | 5.3 | Complete | CMA builder and expected portfolio analytics |
 | 5.4 | Complete | Rebalancing and implementation engine |
-| 5.5 | Planned | Attribution: allocation effect, selection effect, Brinson model |
+| 5.5 | Complete | Attribution: Brinson-Hood-Beebower model, CMA-based allocation effect, waterfall decomposition |
+| 5.6 | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---
 

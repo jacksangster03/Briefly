@@ -266,6 +266,13 @@ def build_portfolio_analysis(
         holdings_data=holdings_data,
         rebalancing_config=rebalancing_config,
     )
+    attribution = _build_attribution(
+        profile_name=profile.name,
+        actual_allocation=actual_allocation or [],
+        target_allocation=allocation_targets or [],
+        cma_analytics=cma_analytics,
+        policy=policy,
+    )
 
     delivery_enabled = {
         "morning": bool(profile.channels_for("morning")),
@@ -365,6 +372,7 @@ def build_portfolio_analysis(
         "risk_analytics": risk_analytics,
         "cma_analytics": cma_analytics,
         "rebalance_proposal": rebalance_proposal,
+        "attribution": attribution,
         "health_checks": health_checks,
         "data_quality": data_quality,
         "charts": {
@@ -1439,6 +1447,26 @@ def _build_cma_analytics(
         actual_allocation=actual_allocation,
         target_allocation=target_allocation,
         policy=policy,
+    )
+
+
+def _build_attribution(
+    *,
+    profile_name: str,
+    actual_allocation: list[dict[str, Any]],
+    target_allocation: list[dict[str, Any]],
+    cma_analytics: dict[str, Any],
+    policy: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the attribution block. Lazy-imports from app.attribution.service."""
+    from app.attribution.service import compute_attribution
+    return compute_attribution(
+        profile_name=profile_name,
+        actual_allocation=actual_allocation,
+        target_allocation=target_allocation,
+        cma_analytics=cma_analytics,
+        policy=policy,
+        persist=False,
     )
 
 

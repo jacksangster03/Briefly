@@ -15,6 +15,12 @@ from pydantic import BaseModel, Field
 from app.db.session import init_db
 from app.logger import get_logger
 from app.settings import Settings, get_settings
+from app.allocation.service import (
+    build_actual_allocation,
+    default_allocation_targets,
+    load_allocation_targets,
+    merge_targets_with_catalog,
+)
 from app.web.control_plane_service import (
     apply_preference_updates,
     build_profile_state,
@@ -610,6 +616,76 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         from app.rebalancing.service import load_proposal_history
         normalized_profile = _normalize_profile(profile)
         return {"history": load_proposal_history(normalized_profile, limit=limit)}
+
+    @app.post(
+        "/ui/profile/{profile}/attribution/generate",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_generate_attribution(request: Request, profile: str):
+        from app.attribution.service import compute_attribution
+        normalized_profile = _normalize_profile(profile)
+        try:
+            state = build_profile_state(_settings(request), normalized_profile)
+            cma_analytics = state.get("analysis", {}).get("cma_analytics", {})
+            actual_allocation = state.get("allocation", {}).get("actual", [])
+            raw_targets = load_allocation_targets(normalized_profile)
+            allocation_targets = merge_targets_with_catalog(raw_targets) if raw_targets else default_allocation_targets()
+            policy = state.get("policy")
+            compute_attribution(
+                profile_name=normalized_profile,
+                actual_allocation=actual_allocation,
+                target_allocation=allocation_targets,
+                cma_analytics=cma_analytics,
+                policy=policy,
+                persist=True,
+            )
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message="Attribution analysis generated and saved.",
+                message_kind="success",
+            )
+        except Exception as exc:
+            logger.error("generate attribution error: %s", exc)
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Error generating attribution: {exc}",
+                message_kind="error",
+            )
+
+    @app.get("/api/v1/profile/{profile}/attribution")
+    def api_get_attribution(profile: str):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings_from_app(app), normalized_profile)
+        return state.get("analysis", {}).get("attribution", {})
+
+    @app.post("/api/v1/profile/{profile}/attribution/generate")
+    def api_generate_attribution(profile: str):
+        from app.attribution.service import compute_attribution
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings_from_app(app), normalized_profile)
+        cma_analytics = state.get("analysis", {}).get("cma_analytics", {})
+        actual_allocation = state.get("allocation", {}).get("actual", [])
+        raw_targets = load_allocation_targets(normalized_profile)
+        allocation_targets = merge_targets_with_catalog(raw_targets) if raw_targets else default_allocation_targets()
+        policy = state.get("policy")
+        result = compute_attribution(
+            profile_name=normalized_profile,
+            actual_allocation=actual_allocation,
+            target_allocation=allocation_targets,
+            cma_analytics=cma_analytics,
+            policy=policy,
+            persist=True,
+        )
+        return result
+
+    @app.get("/api/v1/profile/{profile}/attribution/history")
+    def api_attribution_history(profile: str, limit: int = Query(default=20, le=100)):
+        from app.attribution.service import load_attribution_history
+        normalized_profile = _normalize_profile(profile)
+        return {"history": load_attribution_history(normalized_profile, limit=limit)}
 
     return app
 

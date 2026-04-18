@@ -366,6 +366,27 @@ class RebalanceProposal(Base):
     created_at = Column(DateTime, default=_utcnow)
 
 
+class AttributionSnapshot(Base):
+    """Persisted Brinson-Hood-Beebower attribution result per profile."""
+
+    __tablename__ = "attribution_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    computed_at = Column(DateTime, nullable=False)
+    method = Column(String(40), nullable=False, default="brinson_cma")
+    benchmark_return_pct = Column(Float, nullable=True)
+    portfolio_return_pct = Column(Float, nullable=True)
+    active_return_pct = Column(Float, nullable=True)
+    allocation_effect_pct = Column(Float, nullable=True)
+    selection_effect_pct = Column(Float, nullable=True)
+    interaction_effect_pct = Column(Float, nullable=True)
+    sector_attribution_json = Column(Text, nullable=True)
+    asset_class_attribution_json = Column(Text, nullable=True)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
 class BreakingStoryState(Base):
     """State machine for breaking storyline lifecycle and follow-up control."""
 

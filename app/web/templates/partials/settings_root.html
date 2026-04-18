@@ -33,6 +33,7 @@
 {% set cma_entries = state.cma_entries %}
 {% set cma_correlations = state.cma_correlations %}
 {% set rebalancing_config = state.rebalancing_config %}
+{% set attribution = analysis.attribution %}
 {% set profile = state.profile %}
 {% set delivery_summary = metadata.delivery_summary %}
 {% set override_summaries = metadata.override_summaries %}
@@ -1008,6 +1009,7 @@
   <a href="#section-risk"      data-module-nav="section-risk">Risk</a>
   <a href="#section-cma"          data-module-nav="section-cma">CMA</a>
   <a href="#section-rebalancing"  data-module-nav="section-rebalancing">Rebalancing</a>
+  <a href="#section-attribution"  data-module-nav="section-attribution">Attribution</a>
   <a href="#section-benchmark"    data-module-nav="section-benchmark">Benchmark</a>
   <a href="#section-holdings"  data-module-nav="section-holdings">Holdings</a>
   <a href="#section-coverage"  data-module-nav="section-coverage">Coverage</a>
@@ -1124,6 +1126,21 @@
           <dd style="color: var(--muted);">Cost: {{ rp.cost.estimated_cost_display }}</dd>
         {% else %}
           <dd style="color: var(--muted);">{{ rp.error if rp else 'Configure allocation targets to generate a proposal.' }}</dd>
+        {% endif %}
+      </dl>
+      <dl class="summary">
+        <dt>Attribution</dt>
+        {% if attribution and attribution.available %}
+          <dd>
+            Active Return: <strong style="color:{{ 'var(--success)' if attribution.active_return_pct >= 0 else 'var(--error)' }};">{{ attribution.active_return_display }}</strong>
+          </dd>
+          <dd>Allocation Effect: <strong>{{ attribution.allocation_effect_display }}</strong></dd>
+          {% if attribution.top_contributor %}
+            <dd>Top contributor: {{ attribution.top_contributor | replace("_", " ") | title }}</dd>
+          {% endif %}
+          <dd style="color:var(--muted);font-size:0.76rem;">CMA-based</dd>
+        {% else %}
+          <dd style="color: var(--muted);">Configure CMA and allocation targets to enable attribution.</dd>
         {% endif %}
       </dl>
     </div>
@@ -2312,6 +2329,208 @@
 
   </section>
   <!-- ===== /REBALANCING ===== -->
+
+  <!-- ===== ATTRIBUTION ===== -->
+  <section class="card" id="section-attribution" data-module-section="section-attribution">
+    <h2>Attribution</h2>
+    <p class="muted">Brinson-Hood-Beebower performance attribution. Decomposes the gap between portfolio and benchmark expected return into allocation, selection, and interaction effects using CMA assumptions.</p>
+
+    <!-- Method note -->
+    <div class="status" style="margin-bottom:1rem;">
+      <strong>{{ attribution.method_label if attribution else "Brinson Attribution (CMA-based)" }}</strong>
+      <p style="margin:0.25rem 0 0;">{{ attribution.method_note if attribution else "" }}</p>
+    </div>
+
+    <!-- Generate button -->
+    <form hx-post="/ui/profile/{{ profile }}/attribution/generate"
+          hx-target="#settings-root" hx-swap="outerHTML" style="margin-bottom:1rem;">
+      <button type="submit" class="btn-secondary">Generate and Save Attribution Snapshot</button>
+    </form>
+
+    {% if attribution and attribution.available %}
+
+      <!-- Return Decomposition -->
+      <h3 style="margin-top:1.5rem;">Return Decomposition</h3>
+      <div class="kpi-grid" style="margin-top:0.75rem;">
+        <div class="kpi-card">
+          <span class="kpi-label">Portfolio Expected Return</span>
+          <span class="kpi-value">{{ attribution.portfolio_return_display }}</span>
+          <span class="tiny">actual weights x CMA</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Benchmark Expected Return</span>
+          <span class="kpi-value">{{ attribution.benchmark_return_display }}</span>
+          <span class="tiny">target weights x CMA</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Active Return</span>
+          <span class="kpi-value" style="color:{{ 'var(--success)' if attribution.active_return_pct >= 0 else 'var(--error)' }};">
+            {{ attribution.active_return_display }}
+          </span>
+          <span class="tiny">portfolio minus benchmark</span>
+        </div>
+      </div>
+
+      <!-- Effect Breakdown -->
+      <h3 style="margin-top:2rem;">Effect Breakdown</h3>
+      <div class="kpi-grid" style="margin-top:0.75rem;">
+        <div class="kpi-card">
+          <span class="kpi-label">Allocation Effect</span>
+          <span class="kpi-value" style="color:{{ 'var(--success)' if attribution.allocation_effect_pct >= 0 else 'var(--error)' }};">
+            {{ attribution.allocation_effect_display }}
+          </span>
+          <span class="tiny">over/underweight in right sectors</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Selection Effect</span>
+          <span class="kpi-value" style="color:var(--muted);">{{ attribution.selection_effect_display }}</span>
+          <span class="tiny">zero in v1: requires historical returns</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Interaction Effect</span>
+          <span class="kpi-value" style="color:var(--muted);">{{ attribution.interaction_effect_display }}</span>
+          <span class="tiny">zero in v1: requires historical returns</span>
+        </div>
+      </div>
+
+      <!-- Waterfall table -->
+      <h3 style="margin-top:2rem;">Return Waterfall</h3>
+      <table style="width:100%;border-collapse:collapse;margin-top:0.75rem;font-size:0.875rem;">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);text-align:left;">
+            <th style="padding:0.5rem 0.75rem;">Component</th>
+            <th style="padding:0.5rem 0.75rem;text-align:right;">Value</th>
+            <th style="padding:0.5rem 0.75rem;text-align:right;">Cumulative</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for step in attribution.waterfall %}
+          <tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:0.5rem 0.75rem;font-weight:{{ '600' if step.type in ('base', 'total') else '400' }};">
+              {{ step.label }}
+            </td>
+            <td style="padding:0.5rem 0.75rem;text-align:right;font-weight:600;
+                color:{% if step.type == 'positive' %}var(--success){% elif step.type == 'negative' %}var(--error){% elif step.type == 'total' %}var(--ink){% else %}var(--muted){% endif %};">
+              {% if step.type == 'base' %}{{ "%.2f"|format(step.value_pct) }}%
+              {% elif step.value_pct >= 0 %}+{{ "%.4f"|format(step.value_pct) }}%
+              {% else %}{{ "%.4f"|format(step.value_pct) }}%{% endif %}
+            </td>
+            <td style="padding:0.5rem 0.75rem;text-align:right;color:var(--muted);">
+              {{ "%.2f"|format(step.cumulative_pct) }}%
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <!-- Per-asset-class attribution table -->
+      {% if attribution.rows %}
+        <h3 style="margin-top:2rem;">Per-Asset-Class Attribution</h3>
+        <p class="muted">Sorted by absolute allocation effect. Green indicates a positive contribution to active return; red indicates a drag.</p>
+        <table style="width:100%;border-collapse:collapse;margin-top:0.75rem;font-size:0.84rem;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);text-align:left;">
+              <th style="padding:0.5rem 0.75rem;">Asset Class</th>
+              <th style="padding:0.5rem 0.75rem;text-align:right;">Portfolio Wt</th>
+              <th style="padding:0.5rem 0.75rem;text-align:right;">Benchmark Wt</th>
+              <th style="padding:0.5rem 0.75rem;text-align:right;">Over/Under</th>
+              <th style="padding:0.5rem 0.75rem;text-align:right;">Expected Return</th>
+              <th style="padding:0.5rem 0.75rem;text-align:right;">Allocation Effect</th>
+              <th style="padding:0.5rem 0.75rem;text-align:right;">Total Effect</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in attribution.rows %}
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:0.5rem 0.75rem;">
+                <div style="font-weight:500;">{{ row.label }}</div>
+                <div class="tiny" style="margin-top:2px;">{{ row.contribution_label }}</div>
+              </td>
+              <td style="padding:0.5rem 0.75rem;text-align:right;">{{ row.w_portfolio_display }}</td>
+              <td style="padding:0.5rem 0.75rem;text-align:right;color:var(--muted);">{{ row.w_benchmark_display }}</td>
+              <td style="padding:0.5rem 0.75rem;text-align:right;color:{{ 'var(--success)' if row.weight_diff_pct >= 0 else 'var(--error)' }};">
+                {{ row.weight_diff_display }}
+              </td>
+              <td style="padding:0.5rem 0.75rem;text-align:right;color:var(--muted);">{{ row.r_expected_display }}</td>
+              <td style="padding:0.5rem 0.75rem;text-align:right;font-weight:600;
+                  color:{{ 'var(--success)' if row.allocation_effect_pct >= 0 else 'var(--error)' }};">
+                {{ row.allocation_effect_display }}
+              </td>
+              <td style="padding:0.5rem 0.75rem;text-align:right;font-weight:600;
+                  color:{{ 'var(--success)' if row.total_effect_pct >= 0 else 'var(--error)' }};">
+                {{ row.total_effect_display }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+
+      <!-- Qualitative summary -->
+      <h3 style="margin-top:2rem;">Summary</h3>
+      <div class="executive-strip" style="margin-top:0.75rem;">
+        <p>{{ attribution.summary }}</p>
+        {% if attribution.top_contributor %}
+          <div class="hero-chip-row">
+            <span class="hero-chip" style="color:var(--success);">Top contributor: {{ attribution.top_contributor | replace("_", " ") | title }}</span>
+            {% if attribution.top_detractor %}
+              <span class="hero-chip" style="color:var(--error);">Top detractor: {{ attribution.top_detractor | replace("_", " ") | title }}</span>
+            {% endif %}
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- History -->
+      {% if attribution.history %}
+        <h3 style="margin-top:2rem;">Attribution History</h3>
+        <table style="width:100%;border-collapse:collapse;margin-top:0.75rem;font-size:0.875rem;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);text-align:left;">
+              <th style="padding:0.4rem 0.75rem;">Date</th>
+              <th style="padding:0.4rem 0.75rem;text-align:right;">Active Return</th>
+              <th style="padding:0.4rem 0.75rem;text-align:right;">Allocation Effect</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for h in attribution.history %}
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:0.4rem 0.75rem;color:var(--muted);">{{ h.computed_at }}</td>
+              <td style="padding:0.4rem 0.75rem;text-align:right;color:{{ 'var(--success)' if h.active_return_pct >= 0 else 'var(--error)' }};">
+                {{ h.active_return_display }}
+              </td>
+              <td style="padding:0.4rem 0.75rem;text-align:right;color:{{ 'var(--success)' if h.allocation_effect_pct >= 0 else 'var(--error)' }};">
+                {{ "+%.4f"|format(h.allocation_effect_pct) if h.allocation_effect_pct >= 0 else "%.4f"|format(h.allocation_effect_pct) }}%
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+
+      <!-- Phase 5.6 note -->
+      <div class="status" style="margin-top:1.5rem;color:var(--muted);font-size:0.82rem;">
+        Selection and interaction effects require holding-level historical returns. These will be enabled in Phase 5.6.
+      </div>
+
+      {% if attribution.error %}
+        <div class="tiny" style="margin-top:0.75rem;color:var(--muted);">Note: {{ attribution.error }}</div>
+      {% endif %}
+
+    {% else %}
+      <!-- Unavailable state -->
+      <div class="warning-box" style="margin-top:1rem;">
+        <strong>Attribution not available.</strong>
+        <p>{{ attribution.error if attribution else "Configure CMA assumptions and allocation targets to enable Brinson attribution." }}</p>
+        <ul class="warning-list">
+          <li>Add expected returns in the CMA tab for each asset class.</li>
+          <li>Configure strategic allocation targets in the Allocation tab.</li>
+          <li>Ensure holdings have weights so actual allocation can be computed.</li>
+        </ul>
+      </div>
+    {% endif %}
+
+  </section>
+  <!-- ===== /ATTRIBUTION ===== -->
 
   <section class="card" id="section-benchmark" data-module-section="section-benchmark">
     <h2>Benchmark</h2>
