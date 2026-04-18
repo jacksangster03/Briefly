@@ -138,6 +138,7 @@ def build_portfolio_analysis(
     risk_config: dict[str, Any] | None = None,
     cma_entries: list[dict[str, Any]] | None = None,
     cma_correlations: list[dict[str, Any]] | None = None,
+    rebalancing_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compute presentation-ready analyzer metrics for the settings UI/API."""
     universe = load_sector_universe(settings)
@@ -259,6 +260,12 @@ def build_portfolio_analysis(
         allocation_targets=allocation_targets or [],
         actual_allocation=actual_allocation or [],
     )
+    rebalance_proposal = _build_rebalance_proposal(
+        profile_name=profile.name,
+        allocation_drift=allocation_drift,
+        holdings_data=holdings_data,
+        rebalancing_config=rebalancing_config,
+    )
 
     delivery_enabled = {
         "morning": bool(profile.channels_for("morning")),
@@ -357,6 +364,7 @@ def build_portfolio_analysis(
         },
         "risk_analytics": risk_analytics,
         "cma_analytics": cma_analytics,
+        "rebalance_proposal": rebalance_proposal,
         "health_checks": health_checks,
         "data_quality": data_quality,
         "charts": {
@@ -1431,6 +1439,27 @@ def _build_cma_analytics(
         actual_allocation=actual_allocation,
         target_allocation=target_allocation,
         policy=policy,
+    )
+
+
+def _build_rebalance_proposal(
+    *,
+    profile_name: str,
+    allocation_drift: dict[str, Any],
+    holdings_data: list[dict[str, Any]],
+    rebalancing_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the rebalance_proposal block. Lazy-imports from app.rebalancing.service."""
+    from app.rebalancing.service import compute_rebalance_proposal, load_rebalancing_config
+    config = rebalancing_config or load_rebalancing_config(profile_name)
+    drift_rows = allocation_drift.get("rows", [])
+    return compute_rebalance_proposal(
+        profile_name=profile_name,
+        allocation_drift_rows=drift_rows,
+        holdings=holdings_data,
+        config=config,
+        trigger_type="auto",
+        persist=False,
     )
 
 

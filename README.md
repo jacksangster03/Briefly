@@ -67,6 +67,17 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - DB-cached return series and metric snapshots (BenchmarkPriceCache, PortfolioReturnSeries, RiskMetricsSnapshot): repeated page loads skip re-fetching
 - Volatility and drawdown policy breach integration
 
+**Rebalancing Engine (Phase 5.4)**
+- Rebalancing configuration: drift-threshold, calendar, and hybrid trigger methods
+- Drift-triggered trade list: per-asset-class buy/sell/hold direction with magnitude in percentage points, trimmed to the nearest band edge
+- Priority ranking: high (outside band), medium (approaching threshold), low (minor drift)
+- Holding-level drill-down: which symbols to trim or add within each asset class, surfaced as collapsible rows
+- One-way turnover calculation and estimated transaction costs in basis points, with optional portfolio-value input for currency amounts
+- Minimum trade size filter to suppress noise trades below a configurable threshold
+- Proposal history log: append-only record of status, turnover, trigger type, and trade count
+- Generate Proposal button for on-demand persistence; auto-computed fresh on every page load
+- Tax-aware flag (v1: informational only, does not change trade mathematics)
+
 **CMA Builder (Phase 5.3)**
 - Per-asset-class capital market assumptions: expected return and volatility, stored in SQLite
 - NxN correlation matrix configuration for asset-class pairs
@@ -212,6 +223,10 @@ POST   /api/v1/profile/{profile}/risk/refresh
 GET    /api/v1/profile/{profile}/cma
 PUT    /api/v1/profile/{profile}/cma
 PUT    /api/v1/profile/{profile}/cma/correlations
+
+GET    /api/v1/profile/{profile}/rebalancing
+POST   /api/v1/profile/{profile}/rebalancing/generate
+GET    /api/v1/profile/{profile}/rebalancing/history
 ```
 
 ### Preferences reference
@@ -368,7 +383,7 @@ make test
 python -m pytest app/tests -q
 ```
 
-Current count: **242 tests, 0 failures.**
+Current count: **264 tests, 0 failures.**
 
 Focused test runs:
 
@@ -451,7 +466,7 @@ In the CMA tab, enter expected return and volatility for each asset class, confi
 | 5.1 | Complete | Policy, allocation, and benchmark foundation |
 | 5.2 | Complete | Risk and benchmark analytics |
 | 5.3 | Complete | CMA builder and expected portfolio analytics |
-| 5.4 | Planned | Rebalancing and implementation engine |
+| 5.4 | Complete | Rebalancing and implementation engine |
 | 5.5 | Planned | Attribution: allocation effect, selection effect, Brinson model |
 
 ---

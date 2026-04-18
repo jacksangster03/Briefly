@@ -328,6 +328,44 @@ class CMACorrelation(Base):
     updated_at = Column(DateTime, default=_utcnow)
 
 
+class RebalancingConfig(Base):
+    """Per-profile rebalancing engine parameters."""
+
+    __tablename__ = "rebalancing_config"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    method = Column(String(40), nullable=False, default="drift_threshold")
+    drift_threshold_pct = Column(Float, nullable=True, default=5.0)
+    frequency = Column(String(40), nullable=True, default="quarterly")
+    portfolio_value = Column(Float, nullable=True)
+    transaction_cost_bps = Column(Float, nullable=True, default=10.0)
+    min_trade_pct = Column(Float, nullable=True, default=0.5)
+    tax_aware = Column(Boolean, default=False)
+    notes = Column(Text, nullable=True)
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+class RebalanceProposal(Base):
+    """Append-only log of generated rebalance proposals."""
+
+    __tablename__ = "rebalance_proposals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    proposed_at = Column(DateTime, nullable=False)
+    status = Column(String(40), nullable=True)
+    trigger_type = Column(String(40), nullable=True, default="manual")
+    turnover_pct = Column(Float, nullable=True)
+    estimated_cost_bps = Column(Float, nullable=True)
+    portfolio_value = Column(Float, nullable=True)
+    trades_json = Column(Text, nullable=True)
+    config_snapshot_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
 class BreakingStoryState(Base):
     """State machine for breaking storyline lifecycle and follow-up control."""
 

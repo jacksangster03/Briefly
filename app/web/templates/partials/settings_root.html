@@ -32,6 +32,8 @@
 {% set risk_config = state.risk_config %}
 {% set cma_entries = state.cma_entries %}
 {% set cma_correlations = state.cma_correlations %}
+{% set rebalancing_config = state.rebalancing_config %}
+{% set profile = state.profile %}
 {% set delivery_summary = metadata.delivery_summary %}
 {% set override_summaries = metadata.override_summaries %}
 {% set policy_summary = metadata.policy_summary %}
@@ -1004,8 +1006,9 @@
   <a href="#section-policy"    data-module-nav="section-policy">Policy</a>
   <a href="#section-allocation" data-module-nav="section-allocation">Allocation</a>
   <a href="#section-risk"      data-module-nav="section-risk">Risk</a>
-  <a href="#section-cma"       data-module-nav="section-cma">CMA</a>
-  <a href="#section-benchmark" data-module-nav="section-benchmark">Benchmark</a>
+  <a href="#section-cma"          data-module-nav="section-cma">CMA</a>
+  <a href="#section-rebalancing"  data-module-nav="section-rebalancing">Rebalancing</a>
+  <a href="#section-benchmark"    data-module-nav="section-benchmark">Benchmark</a>
   <a href="#section-holdings"  data-module-nav="section-holdings">Holdings</a>
   <a href="#section-coverage"  data-module-nav="section-coverage">Coverage</a>
   <a href="#section-delivery"  data-module-nav="section-delivery">Delivery</a>
@@ -1108,6 +1111,19 @@
           {% endif %}
         {% else %}
           <dd style="color: var(--muted);">No CMA assumptions configured.</dd>
+        {% endif %}
+      </dl>
+      <dl class="summary">
+        <dt>Rebalancing</dt>
+        {% set rp = analysis.rebalance_proposal %}
+        {% if rp and rp.available %}
+          {% set _status_color = 'var(--error)' if rp.status == 'rebalance_needed' else ('var(--warning, #c97f2f)' if rp.status == 'monitoring' else 'var(--success)') %}
+          <dd style="color:{{ _status_color }};font-weight:600;">{{ rp.status_label }}</dd>
+          <dd>Turnover: {{ rp.turnover.one_way_display }} one-way</dd>
+          <dd>{{ rp.turnover.high_priority_count }} high-priority trade{{ 's' if rp.turnover.high_priority_count != 1 else '' }}</dd>
+          <dd style="color: var(--muted);">Cost: {{ rp.cost.estimated_cost_display }}</dd>
+        {% else %}
+          <dd style="color: var(--muted);">{{ rp.error if rp else 'Configure allocation targets to generate a proposal.' }}</dd>
         {% endif %}
       </dl>
     </div>
@@ -2082,6 +2098,220 @@
       </div>
     {% endif %}
   </section>
+
+  <!-- ===== REBALANCING ===== -->
+  <section class="card" id="section-rebalancing" data-module-section="section-rebalancing">
+    <h2>Rebalancing</h2>
+    <p class="muted">Drift-triggered trade list, turnover calculation, and estimated implementation costs. Configure your rebalancing policy, then generate a proposal to see which asset classes need attention.</p>
+
+    {% set rp = analysis.rebalance_proposal %}
+    {% set rc = rebalancing_config %}
+
+    <!-- Configuration -->
+    <h3 style="margin-top:1.5rem;">Rebalancing Configuration</h3>
+    <form hx-post="/ui/profile/{{ profile }}/save/rebalancing-config"
+          hx-target="#settings-root" hx-swap="outerHTML">
+      <div class="definition-grid" style="margin-top:0.75rem;">
+        <label>
+          <span class="tiny">Trigger Method</span>
+          <select name="rebalance_method">
+            <option value="drift_threshold" {{ 'selected' if rc.method == 'drift_threshold' }}>Drift Threshold</option>
+            <option value="calendar"        {{ 'selected' if rc.method == 'calendar' }}>Calendar</option>
+            <option value="hybrid"          {{ 'selected' if rc.method == 'hybrid' }}>Hybrid (Drift + Calendar)</option>
+          </select>
+        </label>
+        <label>
+          <span class="tiny">Drift Threshold (pp)</span>
+          <input type="number" name="rebalance_drift_threshold_pct" step="0.5" min="0"
+                 value="{{ rc.drift_threshold_pct | default(5.0) }}">
+        </label>
+        <label>
+          <span class="tiny">Calendar Frequency</span>
+          <select name="rebalance_frequency">
+            <option value="monthly"     {{ 'selected' if rc.frequency == 'monthly' }}>Monthly</option>
+            <option value="quarterly"   {{ 'selected' if rc.frequency == 'quarterly' }}>Quarterly</option>
+            <option value="semi_annual" {{ 'selected' if rc.frequency == 'semi_annual' }}>Semi-Annual</option>
+            <option value="annual"      {{ 'selected' if rc.frequency == 'annual' }}>Annual</option>
+          </select>
+        </label>
+        <label>
+          <span class="tiny">Total Portfolio Value (optional)</span>
+          <input type="number" name="rebalance_portfolio_value" step="1000" min="0"
+                 value="{{ rc.portfolio_value if rc.portfolio_value else '' }}"
+                 placeholder="e.g. 500000">
+        </label>
+        <label>
+          <span class="tiny">Transaction Cost (bps per side)</span>
+          <input type="number" name="rebalance_transaction_cost_bps" step="1" min="0"
+                 value="{{ rc.transaction_cost_bps | default(10.0) }}">
+        </label>
+        <label>
+          <span class="tiny">Min Trade Size (% of portfolio)</span>
+          <input type="number" name="rebalance_min_trade_pct" step="0.1" min="0"
+                 value="{{ rc.min_trade_pct | default(0.5) }}">
+        </label>
+      </div>
+      <div style="margin-top:0.75rem;">
+        <label style="display:flex;align-items:center;gap:0.5rem;">
+          <input type="checkbox" name="rebalance_tax_aware" {{ 'checked' if rc.tax_aware }}>
+          <span class="tiny">Tax-aware mode (flag only: does not change trade mathematics in v1)</span>
+        </label>
+      </div>
+      <label style="display:block;margin-top:0.75rem;">
+        <span class="tiny">Notes</span>
+        <input type="text" name="rebalance_notes" value="{{ rc.notes | default('') }}" style="width:100%;">
+      </label>
+      <div style="display:flex;gap:0.75rem;margin-top:1rem;flex-wrap:wrap;">
+        <button type="submit" class="btn-primary">Save Configuration</button>
+      </div>
+    </form>
+
+    <form hx-post="/ui/profile/{{ profile }}/rebalance/generate"
+          hx-target="#settings-root" hx-swap="outerHTML" style="margin-top:0.5rem;">
+      <button type="submit" class="btn-secondary">Generate Proposal</button>
+    </form>
+
+    <!-- Status -->
+    <h3 style="margin-top:2rem;">Rebalance Status</h3>
+    {% if rp and rp.available %}
+      {% set status_color = 'var(--error)' if rp.status == 'rebalance_needed' else ('var(--warning, #c97f2f)' if rp.status == 'monitoring' else 'var(--success)') %}
+      <div class="status {{ 'error' if rp.status == 'rebalance_needed' else ('success' if rp.status == 'within_tolerance' else '') }}" style="margin-top:0.75rem;">
+        <strong style="color:{{ status_color }};">{{ rp.status_label }}</strong>
+        <p style="margin:0.25rem 0 0;">{{ rp.status_summary }}</p>
+      </div>
+
+      <!-- Turnover & Cost -->
+      <div class="kpi-grid" style="margin-top:1.25rem;">
+        <div class="kpi-card">
+          <span class="kpi-label">One-Way Turnover</span>
+          <span class="kpi-value">{{ rp.turnover.one_way_display }}</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Active Trades</span>
+          <span class="kpi-value">{{ rp.turnover.trades_count }}</span>
+          <span class="tiny">{{ rp.turnover.high_priority_count }} high priority</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Estimated Cost</span>
+          <span class="kpi-value">{{ rp.cost.estimated_cost_display }}</span>
+          <span class="tiny">{{ rp.cost.estimated_cost_bps | round(1) }} bps total</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">Skipped Trades</span>
+          <span class="kpi-value">{{ rp.turnover.skipped_count }}</span>
+          <span class="tiny">below min size or within band</span>
+        </div>
+      </div>
+
+      <!-- Trade List -->
+      {% set active_trades = rp.trades | selectattr('skipped', 'equalto', false) | list %}
+      {% if active_trades %}
+        <h3 style="margin-top:2rem;">Trade List</h3>
+        <p class="muted">Trades to bring each asset class to its nearest policy band edge. High-priority trades are outside their configured band.</p>
+        <table style="width:100%;border-collapse:collapse;margin-top:0.75rem;font-size:0.875rem;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);text-align:left;">
+              <th style="padding:0.5rem 0.75rem;">Asset Class</th>
+              <th style="padding:0.5rem 0.75rem;text-align:right;">Current</th>
+              <th style="padding:0.5rem 0.75rem;text-align:right;">Target</th>
+              <th style="padding:0.5rem 0.75rem;text-align:right;">Band</th>
+              <th style="padding:0.5rem 0.75rem;text-align:right;">Trade</th>
+              <th style="padding:0.5rem 0.75rem;">Priority</th>
+              {% if rp.config.portfolio_value %}<th style="padding:0.5rem 0.75rem;text-align:right;">Est. Value</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for trade in active_trades | sort(attribute='priority', reverse=false) %}
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:0.5rem 0.75rem;">
+                <details style="display:inline-block;">
+                  <summary style="cursor:pointer;font-weight:500;">{{ trade.label }}</summary>
+                  {% if trade.holdings %}
+                    <ul style="margin:0.5rem 0 0.25rem 1rem;list-style:disc;font-size:0.8rem;color:var(--muted);">
+                      {% for h in trade.holdings %}
+                        <li>{{ h.symbol }} ({{ h.weight_display }}) — {{ h.action }}</li>
+                      {% endfor %}
+                    </ul>
+                  {% else %}
+                    <p class="tiny" style="margin:0.25rem 0 0 0.5rem;">No mapped holdings.</p>
+                  {% endif %}
+                </details>
+              </td>
+              <td style="padding:0.5rem 0.75rem;text-align:right;">{{ trade.current_display }}</td>
+              <td style="padding:0.5rem 0.75rem;text-align:right;">{{ trade.target_display }}</td>
+              <td style="padding:0.5rem 0.75rem;text-align:right;color:var(--muted);font-size:0.8rem;">
+                {{ trade.min_pct | default('—') }}%–{{ trade.max_pct | default('—') }}%
+              </td>
+              <td style="padding:0.5rem 0.75rem;text-align:right;font-weight:600;
+                  color:{{ 'var(--success)' if trade.direction == 'buy' else 'var(--error)' }};">
+                {{ trade.trade_display }}
+              </td>
+              <td style="padding:0.5rem 0.75rem;">
+                <span class="severity-badge {{ 'high' if trade.priority == 'high' else ('medium' if trade.priority == 'medium' else 'low') }}">
+                  {{ trade.priority | title }}
+                </span>
+              </td>
+              {% if rp.config.portfolio_value %}
+              <td style="padding:0.5rem 0.75rem;text-align:right;color:var(--muted);">
+                {{ trade.trade_value_display or '—' }}
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+
+      <!-- Skipped trades -->
+      {% set skipped = rp.trades | selectattr('skipped', 'equalto', true) | rejectattr('status', 'equalto', 'unconfigured') | list %}
+      {% if skipped %}
+        <details style="margin-top:1rem;">
+          <summary class="tiny" style="cursor:pointer;">{{ skipped | length }} trade(s) skipped (below minimum size or within band)</summary>
+          <ul style="margin:0.5rem 0 0 1rem;list-style:disc;font-size:0.8rem;color:var(--muted);">
+            {% for t in skipped %}
+              <li>{{ t.label }}: {{ t.skip_reason }}</li>
+            {% endfor %}
+          </ul>
+        </details>
+      {% endif %}
+
+      <!-- Proposal History -->
+      {% if rp.history %}
+        <h3 style="margin-top:2rem;">Proposal History</h3>
+        <table style="width:100%;border-collapse:collapse;margin-top:0.75rem;font-size:0.875rem;">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);text-align:left;">
+              <th style="padding:0.4rem 0.75rem;">Date</th>
+              <th style="padding:0.4rem 0.75rem;">Status</th>
+              <th style="padding:0.4rem 0.75rem;text-align:right;">Turnover</th>
+              <th style="padding:0.4rem 0.75rem;">Trigger</th>
+              <th style="padding:0.4rem 0.75rem;text-align:right;">Trades</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for h in rp.history %}
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:0.4rem 0.75rem;color:var(--muted);">{{ h.proposed_at }}</td>
+              <td style="padding:0.4rem 0.75rem;">{{ h.status | replace('_', ' ') | title }}</td>
+              <td style="padding:0.4rem 0.75rem;text-align:right;">{{ h.turnover_display }}</td>
+              <td style="padding:0.4rem 0.75rem;color:var(--muted);">{{ h.trigger_type }}</td>
+              <td style="padding:0.4rem 0.75rem;text-align:right;">{{ h.trades_count }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+
+    {% else %}
+      <!-- Unavailable state -->
+      <div class="warning-box" style="margin-top:1rem;">
+        <strong>No rebalance proposal available.</strong>
+        <p>{{ rp.error if rp else 'Configure strategic allocation targets in the Allocation tab to generate a rebalance proposal.' }}</p>
+      </div>
+    {% endif %}
+
+  </section>
+  <!-- ===== /REBALANCING ===== -->
 
   <section class="card" id="section-benchmark" data-module-section="section-benchmark">
     <h2>Benchmark</h2>

@@ -28,6 +28,7 @@ from app.web.control_plane_service import (
     save_cma_corr,
     save_holdings_from_form,
     save_policy,
+    save_rebalancing_config_for_profile,
     save_risk_config,
     search_followables,
 )
@@ -62,6 +63,10 @@ class CMAUpdateRequest(BaseModel):
 
 class CMACorrelationsUpdateRequest(BaseModel):
     rows: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class RebalancingConfigUpdateRequest(BaseModel):
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 def create_web_app(settings: Settings | None = None) -> FastAPI:
@@ -554,6 +559,58 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
+    @app.post("/ui/profile/{profile}/save/rebalancing-config")
+    async def ui_save_rebalancing_config(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        try:
+            form = await request.form()
+            payload = _rebalancing_config_from_form(form)
+            save_rebalancing_config_for_profile(normalized_profile, payload)
+            return _render_settings_root(request, profile=normalized_profile, message="Rebalancing configuration saved.", message_kind="success")
+        except Exception as exc:
+            logger.error("save rebalancing config error: %s", exc)
+            return _render_settings_root(request, profile=normalized_profile, message=f"Error saving rebalancing config: {exc}", message_kind="error")
+
+    @app.post("/ui/profile/{profile}/rebalance/generate")
+    async def ui_generate_rebalance(request: Request, profile: str):
+        from app.rebalancing.service import compute_rebalance_proposal, load_rebalancing_config
+        normalized_profile = _normalize_profile(profile)
+        try:
+            state = build_profile_state(_settings(request), normalized_profile)
+            config = state.get("rebalancing_config") or load_rebalancing_config(normalized_profile)
+            drift_rows = state.get("analysis", {}).get("allocation_drift", {}).get("rows", [])
+            raw_holdings = state.get("holdings") or []
+            holdings = [{"symbol": h["symbol"], "weight_pct": h.get("weight_pct")} for h in (raw_holdings if isinstance(raw_holdings, list) else raw_holdings.get("rows", []))]
+            compute_rebalance_proposal(normalized_profile, drift_rows, holdings, config, trigger_type="manual", persist=True)
+            return _render_settings_root(request, profile=normalized_profile, message="Rebalance proposal generated.", message_kind="success")
+        except Exception as exc:
+            logger.error("generate rebalance error: %s", exc)
+            return _render_settings_root(request, profile=normalized_profile, message=f"Error generating proposal: {exc}", message_kind="error")
+
+    @app.get("/api/v1/profile/{profile}/rebalancing")
+    def api_get_rebalancing(profile: str):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings_from_app(app), normalized_profile)
+        return state.get("analysis", {}).get("rebalance_proposal", {})
+
+    @app.post("/api/v1/profile/{profile}/rebalancing/generate")
+    def api_generate_rebalance(profile: str):
+        from app.rebalancing.service import compute_rebalance_proposal, load_rebalancing_config
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings_from_app(app), normalized_profile)
+        config = state.get("rebalancing_config") or load_rebalancing_config(normalized_profile)
+        drift_rows = state.get("analysis", {}).get("allocation_drift", {}).get("rows", [])
+        raw_holdings = state.get("holdings") or []
+        holdings = [{"symbol": h["symbol"], "weight_pct": h.get("weight_pct")} for h in (raw_holdings if isinstance(raw_holdings, list) else raw_holdings.get("rows", []))]
+        proposal = compute_rebalance_proposal(normalized_profile, drift_rows, holdings, config, trigger_type="manual", persist=True)
+        return proposal
+
+    @app.get("/api/v1/profile/{profile}/rebalancing/history")
+    def api_rebalancing_history(profile: str, limit: int = Query(default=20, le=100)):
+        from app.rebalancing.service import load_proposal_history
+        normalized_profile = _normalize_profile(profile)
+        return {"history": load_proposal_history(normalized_profile, limit=limit)}
+
     return app
 
 
@@ -773,6 +830,25 @@ def _cma_correlations_from_form(form) -> list[dict[str, Any]]:
                     corr = 0.0
                 rows.append({"asset_class_a": ac_a, "asset_class_b": ac_b, "correlation": corr})
     return rows
+
+
+def _rebalancing_config_from_form(form) -> dict[str, Any]:
+    def _f(key: str, default: str = "") -> str:
+        return str(form.get(key, default)).strip()
+
+    portfolio_value_raw = _f("rebalance_portfolio_value")
+    portfolio_value = float(portfolio_value_raw) if portfolio_value_raw else None
+
+    return {
+        "method": _f("rebalance_method", "drift_threshold"),
+        "drift_threshold_pct": float(_f("rebalance_drift_threshold_pct", "5.0") or "5.0"),
+        "frequency": _f("rebalance_frequency", "quarterly"),
+        "portfolio_value": portfolio_value,
+        "transaction_cost_bps": float(_f("rebalance_transaction_cost_bps", "10.0") or "10.0"),
+        "min_trade_pct": float(_f("rebalance_min_trade_pct", "0.5") or "0.5"),
+        "tax_aware": "rebalance_tax_aware" in form,
+        "notes": _f("rebalance_notes"),
+    }
 
 
 def _normalize_profile(profile: str) -> str:

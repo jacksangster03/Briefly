@@ -30,6 +30,7 @@ from app.benchmark.service import (
     save_benchmark_config,
 )
 from app.cma.service import load_cma_correlations, load_cma_entries, save_cma_entries, save_cma_correlations
+from app.rebalancing.service import load_rebalancing_config, save_rebalancing_config
 from app.risk.service import invalidate_risk_cache
 from app.db.models import PortfolioHolding as PortfolioHoldingRow
 from app.db.models import UserPreference as UserPreferenceRow
@@ -84,6 +85,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     risk_config = _load_risk_config(normalized_profile)
     cma_entries = load_cma_entries(normalized_profile)
     cma_correlations = load_cma_correlations(normalized_profile)
+    rebalancing_config = load_rebalancing_config(normalized_profile)
     overrides = get_preferences(normalized_profile)
     catalogs = _build_followables_catalog(settings=settings, profile=profile)
     metadata = _build_profile_metadata(profile=profile, profile_name=normalized_profile)
@@ -101,6 +103,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
         risk_config=risk_config,
         cma_entries=cma_entries,
         cma_correlations=cma_correlations,
+        rebalancing_config=rebalancing_config,
     )
     holdings = _build_holdings_view(profile=profile, settings=settings)
     metadata["holdings_snapshot_summary"] = _build_holdings_snapshot_summary(profile, analysis)
@@ -115,6 +118,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
         "risk_config": risk_config,
         "cma_entries": cma_entries,
         "cma_correlations": cma_correlations,
+        "rebalancing_config": rebalancing_config,
         "effective": {
             "timezone": profile.timezone,
             "home_region": profile.home_region,
@@ -813,3 +817,8 @@ def save_risk_config(profile_name: str, lookback_days: int, risk_free_rate_pct: 
 def refresh_risk_for_profile(profile_name: str) -> None:
     """Invalidate cache so next state build recomputes risk analytics."""
     invalidate_risk_cache(normalize_profile_name(profile_name))
+
+
+def save_rebalancing_config_for_profile(profile_name: str, payload: dict) -> dict:
+    """Persist rebalancing config and return the saved values."""
+    return save_rebalancing_config(normalize_profile_name(profile_name), payload)
