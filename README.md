@@ -204,6 +204,12 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - Home (`/ui`) now detects unconfigured portfolio profiles and surfaces a prominent `Quick portfolio setup (recommended)` CTA
 - Advanced subpages remain fully editable; easy setup is optional and re-runnable
 
+**Beginner Comprehension Layer (Phase 6.0A)**
+- Central glossary registry (`metadata.ui_glossary`) for complex financial concepts
+- Reusable question-mark help badge component with hover/focus tooltip behavior
+- Applied to high-jargon portfolio routes: Overview, Risk, CMA, Rebalancing, Attribution, and Simulation Lab
+- Tooltip copy is intentionally short (definition + why-it-matters) and keyboard/mobile accessible through `aria-describedby` + focus states
+
 ### Intelligence pipeline
 
 - Finnhub + NewsAPI event processing with credibility scoring, personal relevance, and clustering
@@ -748,6 +754,8 @@ python -m app.cli simulation runs --profile default_user
 | 5.6D | Complete | Navigation discipline and page focus: portfolio root as dashboard-only, builder isolation, route-level section gating, and canonical CMA asset-class UI controls |
 | 5.7A | Complete | Portfolio simulation and validation harness: canonical presets, golden checks, parameter sweeps, fuzz tests, and Builder preset loading |
 | 5.8 | Complete | Simulation Lab: multi-method simulation engine, macro overrides, interactive charts, persisted runs/presets, and route/API integration |
+| 5.9 | Complete | Easy Setup onboarding wizard: 3-step novice flow that auto-fills policy, allocation, benchmark, CMA, risk preferences, and rebalancing defaults |
+| 6.0A | Complete | Beginner comprehension layer: centralized glossary + reusable question-mark help tooltips across complex portfolio analytics surfaces |
 | 5.7B | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---

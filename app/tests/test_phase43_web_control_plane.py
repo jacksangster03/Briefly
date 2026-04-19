@@ -171,7 +171,7 @@ def test_ui_workspace_routes_set_initial_module_and_section(client):
 def test_portfolio_root_is_summary_only(client):
     response = client.get("/ui/portfolio?profile=default_user")
     assert response.status_code == 200
-    assert "<h2>Overview</h2>" in response.text
+    assert "<h2>Overview" in response.text
     assert "Top Actions" in response.text
     assert "<h2>Holdings</h2>" not in response.text
     assert "<h2>Policy</h2>" not in response.text
@@ -398,6 +398,22 @@ def test_api_put_preferences_and_state_roundtrip(client):
     assert "ui_home" in state["analysis"]
     assert "what_matters_now" in state["analysis"]["ui_home"]
     assert "status_chips" in state["analysis"]["ui_home"]
+    assert "ui_glossary" in state["metadata"]
+    assert "tracking_error" in state["metadata"]["ui_glossary"]
+    assert "short_definition" in state["metadata"]["ui_glossary"]["tracking_error"]
+
+
+def test_complex_routes_render_accessible_help_tooltips(client):
+    risk = client.get("/ui/portfolio/risk?profile=default_user")
+    assert risk.status_code == 200
+    assert "help-tip-btn" in risk.text
+    assert 'role="tooltip"' in risk.text
+    assert "Definition: Tracking Error" in risk.text
+    assert "help-tracking-error" in risk.text
+
+    simulation = client.get("/ui/portfolio/simulation?profile=default_user")
+    assert simulation.status_code == 200
+    assert "Definition: Fan Chart" in simulation.text
 
 
 def test_api_put_preferences_rejects_invalid_values(client):

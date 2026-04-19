@@ -74,6 +74,84 @@ REBALANCING_POLICY_OPTIONS = ["threshold", "calendar", "hybrid"]
 GOVERNANCE_FREQUENCY_OPTIONS = ["monthly", "quarterly", "semi_annual", "annual"]
 ALLOCATION_ROLE_OPTIONS = ["growth", "income", "diversifier", "hedge", "liquidity", "tactical", "other"]
 
+UI_GLOSSARY: dict[str, dict[str, str]] = {
+    "policy_fit": {
+        "term": "Policy Fit",
+        "short_definition": "Checks whether the current portfolio is aligned with your saved policy limits and targets.",
+        "why_it_matters": "If fit is weak, your portfolio may no longer match your intended risk profile.",
+    },
+    "allocation_drift": {
+        "term": "Allocation Drift",
+        "short_definition": "How far current asset-class weights moved away from strategic target bands.",
+        "why_it_matters": "Large drift can change risk and trigger a rebalance.",
+    },
+    "max_drawdown": {
+        "term": "Max Drawdown",
+        "short_definition": "Largest peak-to-trough decline over the selected period.",
+        "why_it_matters": "Shows how severe losses could feel during stress periods.",
+    },
+    "tracking_error": {
+        "term": "Tracking Error",
+        "short_definition": "Volatility of your portfolio's returns relative to the benchmark.",
+        "why_it_matters": "Higher tracking error means more active deviation from benchmark behavior.",
+    },
+    "information_ratio": {
+        "term": "Information Ratio",
+        "short_definition": "Active return divided by tracking error.",
+        "why_it_matters": "Summarizes how efficiently active risk converted into benchmark outperformance.",
+    },
+    "cma": {
+        "term": "Capital Market Assumptions (CMA)",
+        "short_definition": "Forward expected returns, volatilities, and correlations by asset class.",
+        "why_it_matters": "CMA inputs drive expected portfolio analytics and attribution baselines.",
+    },
+    "correlation_matrix": {
+        "term": "Correlation Matrix",
+        "short_definition": "Pairwise relationship between asset-class returns from -1 to +1.",
+        "why_it_matters": "Correlation strongly affects diversification and expected portfolio volatility.",
+    },
+    "expected_sharpe": {
+        "term": "Expected Sharpe",
+        "short_definition": "Expected excess return divided by expected volatility.",
+        "why_it_matters": "A quick risk-adjusted quality check of your forward assumptions.",
+    },
+    "rebalancing_trigger": {
+        "term": "Rebalancing Trigger",
+        "short_definition": "Rule that determines when to generate trades (threshold, calendar, or hybrid).",
+        "why_it_matters": "Triggers control turnover, cost, and how tightly allocations stay on policy.",
+    },
+    "drift_threshold": {
+        "term": "Drift Threshold",
+        "short_definition": "Maximum allowed distance from target weights before action is triggered.",
+        "why_it_matters": "Lower thresholds rebalance sooner but can increase trading frequency.",
+    },
+    "attribution": {
+        "term": "Attribution",
+        "short_definition": "Breaks active return into drivers such as allocation, selection, and interaction effects.",
+        "why_it_matters": "Explains why you beat or lagged the benchmark in a structured way.",
+    },
+    "allocation_effect": {
+        "term": "Allocation Effect",
+        "short_definition": "Contribution from being over/underweight asset classes versus benchmark weights.",
+        "why_it_matters": "Shows whether your allocation decisions helped or hurt active return.",
+    },
+    "active_return": {
+        "term": "Active Return",
+        "short_definition": "Portfolio return minus benchmark return.",
+        "why_it_matters": "Core measure of outperformance or underperformance versus the reference benchmark.",
+    },
+    "var_cvar": {
+        "term": "VaR / CVaR",
+        "short_definition": "VaR estimates a loss threshold; CVaR estimates average loss beyond that threshold.",
+        "why_it_matters": "Useful for understanding tail risk, not just average outcomes.",
+    },
+    "fan_chart": {
+        "term": "Fan Chart",
+        "short_definition": "Percentile bands showing a range of simulated portfolio paths over time.",
+        "why_it_matters": "Helps visualize uncertainty instead of relying on a single forecast path.",
+    },
+}
+
 
 def _display_label(value: str) -> str:
     """Render human labels while preserving finance acronyms in uppercase."""
@@ -130,6 +208,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     metadata["allocation_summary"] = _build_allocation_summary(analysis.get("allocation_drift", {}))
     metadata["benchmark_summary"] = benchmark_view
     metadata["validation_presets"] = list_preset_summaries()
+    metadata["ui_glossary"] = UI_GLOSSARY
     simulation_context = load_simulation_context(
         profile_name=normalized_profile,
         fallback_holdings=holdings,

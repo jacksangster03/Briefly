@@ -58,6 +58,28 @@
 {% set ui_readiness = analysis.ui_readiness if analysis.ui_readiness is defined else {} %}
 {% set cma_asset_options = analysis.ui_cma_asset_options if analysis.ui_cma_asset_options is defined else [] %}
 {% set easy_setup = easy_setup if easy_setup is defined else {"step": 1, "state": {}, "state_json": "{}", "holdings_count": 0, "preview": {}, "errors": []} %}
+{% set ui_glossary = metadata.ui_glossary if metadata.ui_glossary is defined else {} %}
+
+{% macro help_tip(key) -%}
+  {% set item = ui_glossary.get(key) %}
+  {% if item %}
+    <span class="help-tip-wrap">
+      <button
+        type="button"
+        class="help-tip-btn"
+        aria-label="Definition: {{ item.term }}"
+        aria-describedby="help-{{ key | replace('_', '-') }}"
+      >?</button>
+      <span role="tooltip" id="help-{{ key | replace('_', '-') }}" class="help-tip-box">
+        <strong>{{ item.term }}</strong>
+        <span>{{ item.short_definition }}</span>
+        {% if item.why_it_matters %}
+          <span class="help-why"><em>Why it matters:</em> {{ item.why_it_matters }}</span>
+        {% endif %}
+      </span>
+    </span>
+  {% endif %}
+{%- endmacro %}
 
 <style>
   .grid {
@@ -286,6 +308,77 @@
     margin-top: 5px;
     color: var(--muted);
     font-size: 0.74rem;
+  }
+  .help-tip-wrap {
+    position: relative;
+    display: inline-flex;
+    vertical-align: middle;
+    margin-left: 6px;
+  }
+  .help-tip-btn {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--muted);
+    font-size: 0.72rem;
+    line-height: 1;
+    font-weight: 700;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: help;
+  }
+  .help-tip-btn:hover,
+  .help-tip-btn:focus-visible {
+    border-color: var(--accent);
+    color: var(--accent);
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .help-tip-box {
+    position: absolute;
+    z-index: 50;
+    left: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    width: min(300px, 72vw);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--card);
+    color: var(--ink);
+    box-shadow: var(--shadow);
+    padding: 9px 10px;
+    display: none;
+    font-size: 0.77rem;
+    line-height: 1.35;
+  }
+  .help-tip-box strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 0.78rem;
+  }
+  .help-tip-box span {
+    display: block;
+  }
+  .help-tip-box .help-why {
+    margin-top: 5px;
+    color: var(--muted);
+  }
+  .help-tip-wrap:hover .help-tip-box,
+  .help-tip-wrap:focus-within .help-tip-box {
+    display: block;
+  }
+  @media (max-width: 760px) {
+    .help-tip-box {
+      left: auto;
+      right: 0;
+      top: calc(100% + 8px);
+      transform: none;
+      width: min(320px, 90vw);
+    }
   }
   .chart-grid {
     display: grid;
@@ -1235,7 +1328,7 @@
 
   {% if "section-overview" in visible_sections %}
   <section class="card" id="section-overview" data-module-section="section-overview">
-    <h2>Overview</h2>
+    <h2>Overview {{ help_tip("policy_fit") }}</h2>
     <p class="muted">Analyzer-first summary of exposure, editorial fit, and the next morning run for this profile.</p>
 
     <div class="executive-strip">
@@ -1275,7 +1368,7 @@
         <dt>Home Region</dt><dd>{{ overview.home_region_label }}</dd>
       </dl>
       <dl class="summary">
-        <dt>Policy Fit</dt>
+        <dt>Policy Fit {{ help_tip("policy_fit") }}</dt>
         <dd>
           {% if ui_readiness.policy and not ui_readiness.policy.configured %}
             Unavailable
@@ -1292,7 +1385,7 @@
         <dt>Top 5 Concentration</dt><dd>{{ kpis.top5_concentration_display }}</dd>
       </dl>
       <dl class="summary">
-        <dt>Allocation Drift</dt>
+        <dt>Allocation Drift {{ help_tip("allocation_drift") }}</dt>
         <dd>
           {% if ui_readiness.allocation and not ui_readiness.allocation.configured %}
             Partial configuration
@@ -1309,7 +1402,7 @@
         <dt>Last Preferences Update</dt><dd>{{ analysis.timing.last_preferences_update_local }}</dd>
       </dl>
       <dl class="summary">
-        <dt>Risk Snapshot</dt>
+        <dt>Risk Snapshot {{ help_tip("max_drawdown") }}</dt>
         {% if risk_analytics and risk_analytics.available %}
           <dd>
             Sharpe: <strong>{{ risk_analytics.sharpe_display }}</strong>
@@ -1317,8 +1410,8 @@
           </dd>
           <dd>Volatility: {{ risk_analytics.volatility_display }} vs {{ risk_analytics.benchmark_volatility_display }}</dd>
           <dd>Max Drawdown: {{ risk_analytics.max_drawdown_display }} vs {{ risk_analytics.benchmark_max_drawdown_display }}</dd>
-          <dd>Tracking Error: {{ risk_analytics.tracking_error_display }}</dd>
-          <dd>Active Return: {{ risk_analytics.active_return_display }}</dd>
+          <dd>Tracking Error {{ help_tip("tracking_error") }}: {{ risk_analytics.tracking_error_display }}</dd>
+          <dd>Active Return {{ help_tip("active_return") }}: {{ risk_analytics.active_return_display }}</dd>
         {% else %}
           <dd style="color: var(--muted);">Risk metrics not yet computed. Configure a benchmark and click Refresh.</dd>
         {% endif %}
@@ -1363,7 +1456,7 @@
           <dd>
             Active Return: <strong style="color:{{ 'var(--success)' if attribution.active_return_pct >= 0 else 'var(--error)' }};">{{ attribution.active_return_display }}</strong>
           </dd>
-          <dd>Allocation Effect: <strong>{{ attribution.allocation_effect_display }}</strong></dd>
+          <dd>Allocation Effect {{ help_tip("allocation_effect") }}: <strong>{{ attribution.allocation_effect_display }}</strong></dd>
           {% if attribution.top_contributor %}
             <dd>Top contributor: {{ attribution.top_contributor | replace("_", " ") | title }}</dd>
           {% endif %}
@@ -2011,7 +2104,7 @@
 
   {% if "section-risk" in visible_sections %}
   <section class="card" id="section-risk" data-module-section="section-risk">
-    <h2>Risk &amp; Benchmark Analytics</h2>
+    <h2>Risk &amp; Benchmark Analytics {{ help_tip("tracking_error") }}</h2>
     <p class="muted">Annualised risk-adjusted return metrics computed from historical price data. Requires a configured benchmark and weighted holdings.</p>
 
     <div class="inline-grid">
@@ -2122,7 +2215,7 @@
         </div>
       </div>
       <div class="chart-card">
-        <p class="chart-title">Max Drawdown</p>
+        <p class="chart-title">Max Drawdown {{ help_tip("max_drawdown") }}</p>
         <div class="bar-list">
           <div class="bar-row">
             <div>
@@ -2164,7 +2257,7 @@
           <div class="bar-row">
             <div>
               <div class="bar-label">
-                Tracking Error
+                Tracking Error {{ help_tip("tracking_error") }}
               </div>
             </div>
             <div class="bar-value">{{ risk_analytics.tracking_error_display }}</div>
@@ -2172,7 +2265,7 @@
           <div class="bar-row">
             <div>
               <div class="bar-label">
-                Information Ratio
+                Information Ratio {{ help_tip("information_ratio") }}
                 <span class="severity-badge {{ 'low' if risk_analytics.ir_label == 'strong alpha' else 'medium' if risk_analytics.ir_label == 'neutral' else 'high' }}">{{ risk_analytics.ir_label }}</span>
               </div>
             </div>
@@ -2222,7 +2315,7 @@
 
   {% if "section-cma" in visible_sections %}
   <section class="card" id="section-cma" data-module-section="section-cma">
-    <h2>Capital Market Assumptions (CMA)</h2>
+    <h2>Capital Market Assumptions (CMA) {{ help_tip("cma") }}</h2>
     <p class="muted">Enter forward-looking expected return and volatility assumptions per asset class. These power expected portfolio analytics and policy gap checks.</p>
 
     <form
@@ -2351,7 +2444,7 @@
       method="post"
       style="margin-top:16px;"
     >
-      <h3 style="margin:0 0 8px;font-size:0.95rem;">Correlation Matrix</h3>
+      <h3 style="margin:0 0 8px;font-size:0.95rem;">Correlation Matrix {{ help_tip("correlation_matrix") }}</h3>
       <p class="muted">Off-diagonal cells set pairwise correlation (range: -1.0 to 1.0). Diagonal is always 1.00.</p>
       {% set corr_map = {} %}
       {% for c in cma_correlations %}
@@ -2418,7 +2511,7 @@
           </div>
         </div>
         <div class="kpi">
-          <div class="kpi-label">Expected Sharpe (Actual)</div>
+          <div class="kpi-label">Expected Sharpe (Actual) {{ help_tip("expected_sharpe") }}</div>
           <div class="kpi-value">{{ cma_analytics.actual.expected_sharpe_display }}</div>
           <div class="kpi-subtext">SAA: {{ cma_analytics.saa.expected_sharpe_display }}
             <span class="severity-badge {{ 'low' if cma_analytics.sharpe_label in ['excellent','good'] else 'medium' if cma_analytics.sharpe_label == 'moderate' else 'high' }}">{{ cma_analytics.sharpe_label }}</span>
@@ -2428,7 +2521,7 @@
 
       <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr;margin-top:12px;">
         <div class="snapshot-card">
-          <h3>Policy Gap</h3>
+          <h3>Policy Gap {{ help_tip("policy_fit") }}</h3>
           <p>{{ cma_analytics.policy_gap.summary }}</p>
           {% if cma_analytics.policy.target_return_pct is not none %}
           <p style="font-size:0.83rem;margin-top:6px;">
@@ -2522,7 +2615,7 @@
 
   {% if "section-simulation" in visible_sections %}
   <section class="card" id="section-simulation" data-module-section="section-simulation">
-    <h2>Simulation Lab</h2>
+    <h2>Simulation Lab {{ help_tip("fan_chart") }}</h2>
     <p class="muted">Interactive stock and portfolio simulation workspace with Monte Carlo, historical, filtered-historical, bootstrap, scenario stress, and sensitivity views.</p>
 
     <div class="executive-strip">
@@ -2676,7 +2769,7 @@
             <div class="bar-row"><div><div class="bar-label">Median Terminal</div></div><div class="bar-value">{{ simulation_latest.summary.median_terminal_value }}</div></div>
             <div class="bar-row"><div><div class="bar-label">5th / 95th</div></div><div class="bar-value">{{ simulation_latest.summary.percentile_5_terminal_value }} / {{ simulation_latest.summary.percentile_95_terminal_value }}</div></div>
             <div class="bar-row"><div><div class="bar-label">Prob Loss</div></div><div class="bar-value">{{ simulation_latest.summary.probability_of_loss_pct }}%</div></div>
-            <div class="bar-row"><div><div class="bar-label">VaR95 / CVaR95</div></div><div class="bar-value">{{ simulation_latest.summary.var_95_pct }}% / {{ simulation_latest.summary.cvar_95_pct }}%</div></div>
+            <div class="bar-row"><div><div class="bar-label">VaR95 / CVaR95 {{ help_tip("var_cvar") }}</div></div><div class="bar-value">{{ simulation_latest.summary.var_95_pct }}% / {{ simulation_latest.summary.cvar_95_pct }}%</div></div>
           </div>
         </div>
         <div class="chart-card">
@@ -2691,9 +2784,9 @@
       <p class="muted" style="margin-top: 10px;">Charts reflect the latest completed run below.</p>
       <p id="simulation-stale-note" class="tiny" style="display:none;">Inputs changed — rerun simulation to update charts.</p>
       <div class="chart-grid" style="margin-top:10px;">
-        <div class="chart-card wide"><p class="chart-title">Fan Chart (Interactive)</p><div id="simulation-fan-chart" style="min-height:320px;"></div></div>
+        <div class="chart-card wide"><p class="chart-title">Fan Chart (Interactive) {{ help_tip("fan_chart") }}</p><div id="simulation-fan-chart" style="min-height:320px;"></div></div>
         <div class="chart-card"><p class="chart-title">Terminal Distribution</p><div id="simulation-terminal-distribution" style="min-height:280px;"></div></div>
-        <div class="chart-card"><p class="chart-title">Drawdown Distribution</p><div id="simulation-drawdown-distribution" style="min-height:280px;"></div></div>
+        <div class="chart-card"><p class="chart-title">Drawdown Distribution {{ help_tip("max_drawdown") }}</p><div id="simulation-drawdown-distribution" style="min-height:280px;"></div></div>
         <div class="chart-card wide"><p class="chart-title">Sensitivity (Growth Shock)</p><div id="simulation-sensitivity-growth" style="min-height:280px;"></div></div>
       </div>
       <script id="simulation-chart-data" type="application/json">{{ (simulation_latest.chart_data if simulation_latest.chart_data is defined else simulation_latest.charts) | tojson }}</script>
@@ -2725,7 +2818,7 @@
   <!-- ===== REBALANCING ===== -->
   {% if "section-rebalancing" in visible_sections %}
   <section class="card" id="section-rebalancing" data-module-section="section-rebalancing">
-    <h2>Rebalancing</h2>
+    <h2>Rebalancing {{ help_tip("rebalancing_trigger") }}</h2>
     <p class="muted">Drift-triggered trade list, turnover calculation, and estimated implementation costs. Configure your rebalancing policy, then generate a proposal to see which asset classes need attention.</p>
 
     {% set rp = analysis.rebalance_proposal %}
@@ -2737,7 +2830,7 @@
           hx-target="#settings-root" hx-swap="outerHTML">
       <div class="definition-grid" style="margin-top:0.75rem;">
         <label>
-          <span class="tiny">Trigger Method</span>
+          <span class="tiny">Trigger Method {{ help_tip("rebalancing_trigger") }}</span>
           <select name="rebalance_method">
             <option value="drift_threshold" {{ 'selected' if rc.method == 'drift_threshold' }}>Drift Threshold</option>
             <option value="calendar"        {{ 'selected' if rc.method == 'calendar' }}>Calendar</option>
@@ -2745,7 +2838,7 @@
           </select>
         </label>
         <label>
-          <span class="tiny">Drift Threshold (pp)</span>
+          <span class="tiny">Drift Threshold (pp) {{ help_tip("drift_threshold") }}</span>
           <input type="number" name="rebalance_drift_threshold_pct" step="0.5" min="0"
                  value="{{ rc.drift_threshold_pct | default(5.0) }}">
         </label>
@@ -2796,7 +2889,7 @@
     </form>
 
     <!-- Status -->
-    <h3 style="margin-top:2rem;">Rebalance Status</h3>
+    <h3 style="margin-top:2rem;">Rebalance Status {{ help_tip("drift_threshold") }}</h3>
     {% if rp and rp.available %}
       {% set status_color = 'var(--error)' if rp.status == 'rebalance_needed' else ('var(--warning, #c97f2f)' if rp.status == 'monitoring' else 'var(--success)') %}
       <div class="status {{ 'error' if rp.status == 'rebalance_needed' else ('success' if rp.status == 'within_tolerance' else '') }}" style="margin-top:0.75rem;">
@@ -2941,7 +3034,7 @@
   <!-- ===== ATTRIBUTION ===== -->
   {% if "section-attribution" in visible_sections %}
   <section class="card" id="section-attribution" data-module-section="section-attribution">
-    <h2>Attribution</h2>
+    <h2>Attribution {{ help_tip("attribution") }}</h2>
     <p class="muted">Brinson-Hood-Beebower performance attribution. Decomposes the gap between portfolio and benchmark expected return into allocation, selection, and interaction effects using CMA assumptions.</p>
 
     <!-- Method note -->
@@ -2972,7 +3065,7 @@
           <span class="tiny">target weights x CMA</span>
         </div>
         <div class="kpi-card">
-          <span class="kpi-label">Active Return</span>
+          <span class="kpi-label">Active Return {{ help_tip("active_return") }}</span>
           <span class="kpi-value" style="color:{{ 'var(--success)' if attribution.active_return_pct >= 0 else 'var(--error)' }};">
             {{ attribution.active_return_display }}
           </span>
@@ -2984,19 +3077,19 @@
       <h3 style="margin-top:2rem;">Effect Breakdown</h3>
       <div class="kpi-grid" style="margin-top:0.75rem;">
         <div class="kpi-card">
-          <span class="kpi-label">Allocation Effect</span>
+          <span class="kpi-label">Allocation Effect {{ help_tip("allocation_effect") }}</span>
           <span class="kpi-value" style="color:{{ 'var(--success)' if attribution.allocation_effect_pct >= 0 else 'var(--error)' }};">
             {{ attribution.allocation_effect_display }}
           </span>
           <span class="tiny">over/underweight in right sectors</span>
         </div>
         <div class="kpi-card">
-          <span class="kpi-label">Selection Effect</span>
+          <span class="kpi-label">Selection Effect {{ help_tip("attribution") }}</span>
           <span class="kpi-value" style="color:var(--muted);">{{ attribution.selection_effect_display }}</span>
           <span class="tiny">zero in v1: requires historical returns</span>
         </div>
         <div class="kpi-card">
-          <span class="kpi-label">Interaction Effect</span>
+          <span class="kpi-label">Interaction Effect {{ help_tip("attribution") }}</span>
           <span class="kpi-value" style="color:var(--muted);">{{ attribution.interaction_effect_display }}</span>
           <span class="tiny">zero in v1: requires historical returns</span>
         </div>
