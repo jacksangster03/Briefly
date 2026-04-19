@@ -49,7 +49,7 @@
 {% set simulation_count_presets = simulation_ctx.simulation_count_presets if simulation_ctx.simulation_count_presets is defined else {} %}
 {% set simulation_horizon_presets = simulation_ctx.horizon_presets if simulation_ctx.horizon_presets is defined else {} %}
 {% set visible_sections = visible_sections if visible_sections is defined else [
-  "section-overview","section-analyzer","section-policy","section-allocation","section-risk","section-cma","section-scenarios","section-simulation","section-rebalancing","section-attribution","section-benchmark","section-holdings","section-coverage","section-delivery","section-morning","section-audit"
+  "section-briefing-home","section-overview","section-analyzer","section-policy","section-allocation","section-risk","section-cma","section-scenarios","section-simulation","section-rebalancing","section-attribution","section-benchmark","section-holdings","section-coverage","section-delivery","section-morning","section-audit-home","section-audit"
 ] %}
 {% set workspace = workspace if workspace is defined else "briefing" %}
 {% set workspace_page = workspace_page if workspace_page is defined else "home" %}
@@ -1020,6 +1020,54 @@
 {% endif %}
 
 <div class="grid">
+  {% if "section-briefing-home" in visible_sections %}
+  <section class="card" id="section-briefing-home" data-module-section="section-briefing-home">
+    <h2>Briefing</h2>
+    <p class="muted">Briefing root is summary-only. Open one focused subpage at a time for watchlists, delivery, or morning composition.</p>
+
+    <div class="summary-grid">
+      <dl class="summary">
+        <dt>Watchlists</dt><dd>{{ overview.watchlist_total }} symbols total</dd>
+        <dt>Primary Watchlist</dt><dd>{{ watchlist.primary | length }} symbols</dd>
+        <dt>Home Region Focus</dt><dd>{{ overview.home_region_label }}</dd>
+      </dl>
+      <dl class="summary">
+        <dt>Morning Routing</dt><dd>{{ delivery_summary.headline }}</dd>
+        <dt>Quiet Hours</dt><dd>{{ delivery_summary.quiet_hours }}</dd>
+        <dt>LLM Mode</dt><dd>{{ delivery_summary.llm_mode }}</dd>
+      </dl>
+      <dl class="summary">
+        <dt>Morning Composition</dt>
+        <dd>
+          {% set _enabled_sections = [] %}
+          {% for key, enabled in sections.items() %}
+            {% if enabled %}
+              {% set _ = _enabled_sections.append(key.replace("_", " ").title()) %}
+            {% endif %}
+          {% endfor %}
+          {{ _enabled_sections | length }} section{{ "" if (_enabled_sections | length) == 1 else "s" }} enabled
+        </dd>
+        <dt>Next Morning Send</dt><dd>{{ analysis.timing.next_morning_send_local }}</dd>
+      </dl>
+    </div>
+
+    <div class="summary-grid" style="margin-top: 10px;">
+      <a class="summary" href="/ui/briefing/watchlists?profile={{ state.profile }}" style="text-decoration:none;">
+        <div class="kpi-label">Watchlists & Coverage</div>
+        <div>Edit watchlists, region emphasis, and sector coverage priorities.</div>
+      </a>
+      <a class="summary" href="/ui/briefing/delivery?profile={{ state.profile }}" style="text-decoration:none;">
+        <div class="kpi-label">Delivery Routing</div>
+        <div>Set channels, schedule, quiet hours, and email rendering mode.</div>
+      </a>
+      <a class="summary" href="/ui/briefing/morning?profile={{ state.profile }}" style="text-decoration:none;">
+        <div class="kpi-label">Morning Composition</div>
+        <div>Toggle morning brief sections and save composition layout.</div>
+      </a>
+    </div>
+  </section>
+  {% endif %}
+
   {% if "section-overview" in visible_sections %}
   <section class="card" id="section-overview" data-module-section="section-overview">
     <h2>Overview</h2>
@@ -1196,8 +1244,43 @@
         <a class="summary" href="/ui/portfolio/attribution?profile={{ state.profile }}" style="text-decoration:none;">
           <div class="kpi-label">Attribution</div><div>Allocation effect and active-return explanation</div>
         </a>
+        <a class="summary" href="/ui/portfolio/benchmark?profile={{ state.profile }}" style="text-decoration:none;">
+          <div class="kpi-label">Benchmark</div><div>Reference configuration used by risk and attribution</div>
+        </a>
+        <a class="summary" href="/ui/portfolio/history?profile={{ state.profile }}" style="text-decoration:none;">
+          <div class="kpi-label">History & Advanced</div><div>Timestamps, overrides, and advanced state inspection</div>
+        </a>
       </div>
     {% endif %}
+  </section>
+  {% endif %}
+
+  {% if "section-audit-home" in visible_sections %}
+  <section class="card" id="section-audit-home" data-module-section="section-audit-home">
+    <h2>Audit</h2>
+    <p class="muted">Audit root is summary-only. Open one focused subpage for history, overrides, or logs.</p>
+    <div class="summary-grid">
+      <dl class="summary">
+        <dt>Last Holdings Update (Local)</dt>
+        <dd>{{ metadata.last_holdings_update_local }}</dd>
+        <dt>Last Preferences Update (Local)</dt>
+        <dd>{{ metadata.last_preferences_update_local }}</dd>
+        <dt>Active Overrides</dt>
+        <dd>{{ state.overrides | length }} saved</dd>
+      </dl>
+      <a class="summary" href="/ui/audit/history?profile={{ state.profile }}" style="text-decoration:none;">
+        <div class="kpi-label">History</div>
+        <div>Inspect update timestamps and recent source-of-truth activity.</div>
+      </a>
+      <a class="summary" href="/ui/audit/overrides?profile={{ state.profile }}" style="text-decoration:none;">
+        <div class="kpi-label">Overrides</div>
+        <div>Review saved overrides and advanced JSON state payloads.</div>
+      </a>
+      <a class="summary" href="/ui/audit/logs?profile={{ state.profile }}" style="text-decoration:none;">
+        <div class="kpi-label">Logs</div>
+        <div>View friendly event notes and route-level readiness checks.</div>
+      </a>
+    </div>
   </section>
   {% endif %}
 
@@ -3406,8 +3489,29 @@
 
   {% if "section-audit" in visible_sections %}
   <section class="card" id="section-audit" data-module-section="section-audit">
-    <h2>History & Advanced</h2>
-    <p class="muted">Friendly profile history first. Raw override payloads stay tucked under Advanced Settings.</p>
+    {% if workspace == "audit" and workspace_page == "history" %}
+      <h2>Audit / History</h2>
+      <p class="muted">Timeline-style view of holdings/preference updates and profile-level persistence state.</p>
+    {% elif workspace == "audit" and workspace_page == "overrides" %}
+      <h2>Audit / Overrides</h2>
+      <p class="muted">Advanced override inspection with reset controls and raw payload visibility.</p>
+    {% elif workspace == "audit" and workspace_page == "logs" %}
+      <h2>Audit / Logs</h2>
+      <p class="muted">Operational notes and readiness hints from the current profile snapshot.</p>
+    {% elif workspace == "portfolio" and workspace_page == "history" %}
+      <h2>Portfolio / History & Advanced</h2>
+      <p class="muted">Portfolio-local history mirror with a direct path to deep Audit controls.</p>
+    {% else %}
+      <h2>History & Advanced</h2>
+      <p class="muted">Friendly profile history first. Raw override payloads stay tucked under Advanced Settings.</p>
+    {% endif %}
+
+    {% if workspace == "portfolio" and workspace_page == "history" %}
+      <div class="actions" style="margin-bottom: 8px;">
+        <a class="route-link" href="/ui/audit?profile={{ state.profile }}">Open Audit Workspace</a>
+      </div>
+    {% endif %}
+
     <div class="summary-grid">
       <dl class="summary">
         <dt>Last Holdings Update (Local)</dt>
@@ -3435,22 +3539,42 @@
         {% endif %}
       </dl>
     </div>
-    <details class="dev-overrides-details">
-      <summary>Advanced Settings</summary>
-      <pre class="mono" style="margin-top: 8px;">{{ state.overrides | tojson(indent=2) }}</pre>
-      <div class="actions">
-        <form
-          hx-post="/ui/profile/{{ state.profile }}/reset"
-          hx-target="#settings-root"
-          hx-swap="outerHTML"
-          method="post"
-        >
-          <button type="submit" class="danger" onclick="return confirm('Reset all saved overrides for this profile?');">
-            Reset Overrides
-          </button>
-        </form>
+
+    {% if workspace == "audit" and workspace_page == "logs" %}
+      <div class="summary-grid" style="margin-top: 10px;">
+        <dl class="summary">
+          <dt>Readiness</dt>
+          <dd>Policy: {{ "Configured" if ui_readiness.policy and ui_readiness.policy.configured else "Partial / Unavailable" }}</dd>
+          <dd>Allocation: {{ "Configured" if ui_readiness.allocation and ui_readiness.allocation.configured else "Partial / Unavailable" }}</dd>
+          <dd>CMA: {{ "Configured" if ui_readiness.cma and ui_readiness.cma.configured else "Partial / Unavailable" }}</dd>
+          <dd>Benchmark: {{ "Configured" if ui_readiness.benchmark and ui_readiness.benchmark.configured else "Partial / Unavailable" }}</dd>
+        </dl>
+        <dl class="summary">
+          <dt>Recent Status</dt>
+          <dd>{{ analysis.executive_summary }}</dd>
+          <dd>Risk: {{ "available" if risk_analytics and risk_analytics.available else "not computed" }}</dd>
+          <dd>Attribution: {{ "available" if attribution and attribution.available else "not available" }}</dd>
+          <dd>Rebalancing: {{ analysis.rebalance_proposal.status_label if analysis.rebalance_proposal else "n/a" }}</dd>
+        </dl>
       </div>
-    </details>
+    {% else %}
+      <details class="dev-overrides-details" {% if workspace == "audit" and workspace_page == "overrides" %}open{% endif %}>
+        <summary>Advanced Settings</summary>
+        <pre class="mono" style="margin-top: 8px;">{{ state.overrides | tojson(indent=2) }}</pre>
+        <div class="actions">
+          <form
+            hx-post="/ui/profile/{{ state.profile }}/reset"
+            hx-target="#settings-root"
+            hx-swap="outerHTML"
+            method="post"
+          >
+            <button type="submit" class="danger" onclick="return confirm('Reset all saved overrides for this profile?');">
+              Reset Overrides
+            </button>
+          </form>
+        </div>
+      </details>
+    {% endif %}
   </section>
   {% endif %}
 </div>

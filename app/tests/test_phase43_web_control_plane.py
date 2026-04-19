@@ -97,13 +97,15 @@ def test_ui_settings_page_renders(client):
     assert "<h1 class=\"title\">Briefing</h1>" in response.text
     assert "⌂ Home" in response.text
     assert "Saved settings override your default profile values" in response.text
-    assert "<h2>Market Briefing · Watchlists & Coverage Priorities</h2>" in response.text
+    assert "<h2>Briefing</h2>" in response.text
+    assert "Watchlists & Coverage" in response.text
+    assert "Delivery Routing" in response.text
+    assert "Morning Composition" in response.text
     assert "<h2>Policy</h2>" not in response.text
     assert "<h2>Holdings</h2>" not in response.text
     assert "<h2>Risk &amp; Benchmark Analytics</h2>" not in response.text
     assert "Home Region Focus" in response.text
-    assert "Region Weight — US" in response.text
-    assert "Region Weight — LATAM" in response.text
+    assert "Region Weight — US" not in response.text
 
 
 def test_ui_home_renders_workspace_cards(client):
@@ -125,7 +127,12 @@ def test_ui_workspace_routes_set_initial_module_and_section(client):
     briefing = client.get("/ui/briefing?profile=default_user")
     assert briefing.status_code == 200
     assert 'data-page-key="briefing_home"' in briefing.text
-    assert 'data-initial-section="section-coverage"' in briefing.text
+    assert 'data-initial-section="section-briefing-home"' in briefing.text
+
+    briefing_watch = client.get("/ui/briefing/watchlists?profile=default_user")
+    assert briefing_watch.status_code == 200
+    assert 'data-page-key="briefing_watchlists"' in briefing_watch.text
+    assert 'data-initial-section="section-coverage"' in briefing_watch.text
 
     portfolio = client.get("/ui/portfolio?profile=default_user")
     assert portfolio.status_code == 200
@@ -145,7 +152,12 @@ def test_ui_workspace_routes_set_initial_module_and_section(client):
     audit = client.get("/ui/audit?profile=default_user")
     assert audit.status_code == 200
     assert 'data-page-key="audit_home"' in audit.text
-    assert 'data-initial-section="section-audit"' in audit.text
+    assert 'data-initial-section="section-audit-home"' in audit.text
+
+    audit_logs = client.get("/ui/audit/logs?profile=default_user")
+    assert audit_logs.status_code == 200
+    assert 'data-page-key="audit_logs"' in audit_logs.text
+    assert 'data-initial-section="section-audit"' in audit_logs.text
 
 
 def test_portfolio_root_is_summary_only(client):
@@ -158,6 +170,7 @@ def test_portfolio_root_is_summary_only(client):
     assert "<h2>Allocation</h2>" not in response.text
     assert "<h2>Risk &amp; Benchmark Analytics</h2>" not in response.text
     assert "<h2>Simulation Lab</h2>" not in response.text
+    assert "History & Advanced" in response.text
 
 
 def test_builder_tabs_only_show_in_builder_routes(client):
@@ -186,6 +199,36 @@ def test_subpage_navigation_is_limited_to_workspace_and_home(client):
     assert "Trading (Planned)" not in risk.text
     assert "Briefing tabs" not in risk.text
     assert "Builder tabs" not in risk.text
+
+
+def test_briefing_and_audit_workspace_roots_and_subpages_are_split(client):
+    briefing_root = client.get("/ui/briefing?profile=default_user")
+    assert briefing_root.status_code == 200
+    assert "<h2>Briefing</h2>" in briefing_root.text
+    assert "<h2>Market Briefing · Watchlists &amp; Coverage Priorities</h2>" not in briefing_root.text
+
+    briefing_watch = client.get("/ui/briefing/watchlists?profile=default_user")
+    assert briefing_watch.status_code == 200
+    assert "<h2>Market Briefing · Watchlists & Coverage Priorities</h2>" in briefing_watch.text
+
+    audit_root = client.get("/ui/audit?profile=default_user")
+    assert audit_root.status_code == 200
+    assert "<h2>Audit</h2>" in audit_root.text
+    assert "Audit / Overrides" not in audit_root.text
+
+    audit_overrides = client.get("/ui/audit/overrides?profile=default_user")
+    assert audit_overrides.status_code == 200
+    assert "Audit / Overrides" in audit_overrides.text
+    assert "Reset Overrides" in audit_overrides.text
+
+
+def test_portfolio_history_route_exists_and_stays_workspace_scoped(client):
+    history = client.get("/ui/portfolio/history?profile=default_user")
+    assert history.status_code == 200
+    assert 'data-page-key="portfolio_history"' in history.text
+    assert "Portfolio / History & Advanced" in history.text
+    assert "← Portfolio" in history.text
+    assert "⌂ Home" in history.text
 
 
 def test_builder_holdings_can_load_validation_preset(client):

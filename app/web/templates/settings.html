@@ -254,11 +254,15 @@
           "portfolio_implementation": "Rebalancing",
           "portfolio_attribution": "Attribution",
           "portfolio_simulation": "Simulation Lab",
+          "portfolio_history": "History & Advanced",
           "briefing_home": "Home",
           "briefing_watchlists": "Watchlists & Coverage",
           "briefing_delivery": "Delivery",
           "briefing_morning": "Morning Composition",
-          "audit_home": "Overview"
+          "audit_home": "Overview",
+          "audit_history": "History",
+          "audit_overrides": "Overrides",
+          "audit_logs": "Logs"
         } %}
         {% set page_label = page_label_map.get(page_key, workspace_page | replace("_", " ") | title) %}
         <h1 class="title">{{ workspace_label if is_workspace_root else (workspace_label ~ " / " ~ page_label) }}</h1>

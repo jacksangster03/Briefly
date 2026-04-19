@@ -51,6 +51,7 @@ _GOVERNANCE_FREQUENCY_VALUES = {"monthly", "quarterly", "semi_annual", "annual"}
 _ALLOCATION_ROLE_VALUES = {"growth", "income", "diversifier", "hedge", "liquidity", "tactical", "other"}
 
 _ALL_SECTIONS = [
+    "section-briefing-home",
     "section-overview",
     "section-analyzer",
     "section-policy",
@@ -67,6 +68,7 @@ _ALL_SECTIONS = [
     "section-delivery",
     "section-morning",
     "section-audit",
+    "section-audit-home",
 ]
 
 _PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
@@ -74,7 +76,7 @@ _PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
         "global_nav": "briefing",
         "workspace": "briefing",
         "workspace_page": "home",
-        "visible_sections": ["section-coverage"],
+        "visible_sections": ["section-briefing-home"],
     },
     "briefing_watchlists": {
         "global_nav": "briefing",
@@ -158,6 +160,12 @@ _PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
         "workspace_page": "implementation",
         "visible_sections": ["section-rebalancing"],
     },
+    "portfolio_history": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "history",
+        "visible_sections": ["section-audit"],
+    },
     "portfolio_attribution": {
         "global_nav": "portfolio",
         "workspace": "portfolio",
@@ -173,7 +181,25 @@ _PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
     "audit_home": {
         "global_nav": "audit",
         "workspace": "audit",
-        "workspace_page": "audit",
+        "workspace_page": "home",
+        "visible_sections": ["section-audit-home"],
+    },
+    "audit_history": {
+        "global_nav": "audit",
+        "workspace": "audit",
+        "workspace_page": "history",
+        "visible_sections": ["section-audit"],
+    },
+    "audit_overrides": {
+        "global_nav": "audit",
+        "workspace": "audit",
+        "workspace_page": "overrides",
+        "visible_sections": ["section-audit"],
+    },
+    "audit_logs": {
+        "global_nav": "audit",
+        "workspace": "audit",
+        "workspace_page": "logs",
         "visible_sections": ["section-audit"],
     },
 }
@@ -336,6 +362,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             "rebalancing": "portfolio_implementation",
             "attribution": "portfolio_attribution",
             "simulation": "portfolio_simulation",
+            "history": "portfolio_history",
             "overview": "portfolio_home",
         }
         page_key = view_to_page.get((view or "").strip().lower())
@@ -357,6 +384,28 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             request,
             profile=normalized_profile,
             page_key="audit_home",
+        )
+
+    @app.get("/ui/audit/{view}", response_class=HTMLResponse, include_in_schema=False)
+    def ui_audit_view(
+        request: Request,
+        view: str,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        view_to_page = {
+            "history": "audit_history",
+            "overrides": "audit_overrides",
+            "logs": "audit_logs",
+            "overview": "audit_home",
+        }
+        page_key = view_to_page.get((view or "").strip().lower())
+        if not page_key:
+            return RedirectResponse(url=f"/ui/audit?profile={normalized_profile}", status_code=307)
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            page_key=page_key,
         )
 
     @app.post(

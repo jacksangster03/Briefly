@@ -127,6 +127,19 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
   - Workspace roots route into focused subpages
   - Subpages expose only `← Workspace` and `⌂ Home`
   - No cross-workspace tab bars on subpages
+- Briefing is fully split into root + subpages:
+  - `/ui/briefing` (summary root)
+  - `/ui/briefing/watchlists`
+  - `/ui/briefing/delivery`
+  - `/ui/briefing/morning`
+- Portfolio remains root + focused subpages, including:
+  - `/ui/portfolio/history`
+  - `/ui/portfolio/rebalancing` (alias of implementation route)
+- Audit is now a full workspace with root + subpages:
+  - `/ui/audit` (summary root)
+  - `/ui/audit/history`
+  - `/ui/audit/overrides`
+  - `/ui/audit/logs`
 - Briefing controls remain isolated to briefing routes; portfolio routes only show briefing impact outputs
 - CMA assumptions now use canonical asset-class dropdowns in the default UI (no free-text asset-class key entry)
 - UX readiness language now distinguishes configured vs partial/unavailable for policy/allocation presentation states
@@ -453,6 +466,32 @@ Workspace navigation contract
   Subpage header actions: <- Workspace | Home
   No cross-workspace tabs on subpages
 
+Workspace route map
+  Briefing:
+    /ui/briefing
+    /ui/briefing/watchlists
+    /ui/briefing/delivery
+    /ui/briefing/morning
+  Portfolio:
+    /ui/portfolio
+    /ui/portfolio/holdings
+    /ui/portfolio/diagnostics
+    /ui/portfolio/policy
+    /ui/portfolio/allocation
+    /ui/portfolio/risk
+    /ui/portfolio/cma
+    /ui/portfolio/scenarios
+    /ui/portfolio/simulation
+    /ui/portfolio/rebalancing
+    /ui/portfolio/attribution
+    /ui/portfolio/benchmark
+    /ui/portfolio/history
+  Audit:
+    /ui/audit
+    /ui/audit/history
+    /ui/audit/overrides
+    /ui/audit/logs
+
 Providers
   Finnhub | NewsAPI | FRED | SEC EDGAR | yfinance
   Optional: GDELT | Alpha Vantage News | FMP | Mediastack
@@ -503,7 +542,7 @@ make test
 python -m pytest app/tests -q
 ```
 
-Current count: **299 tests, 0 failures.**
+Current count: **301 tests, 0 failures.**
 
 Focused test runs:
 
