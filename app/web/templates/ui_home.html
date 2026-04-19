@@ -251,6 +251,16 @@
       </div>
     </section>
 
+    {% if home.quick_setup_cta %}
+    <section class="hero" aria-label="Quick setup">
+      <h2>{{ home.quick_setup_cta.label }}</h2>
+      <p>{{ home.quick_setup_cta.description }}</p>
+      <div class="action-row">
+        <a class="btn primary" href="{{ home.quick_setup_cta.href }}?profile={{ state.profile }}">Start Easy Setup</a>
+      </div>
+    </section>
+    {% endif %}
+
     <section class="workspace-grid" aria-label="Primary workspaces">
       <a class="workspace-card portfolio" href="/ui/portfolio?profile={{ state.profile }}">
         <p class="kicker">Primary Workspace</p>

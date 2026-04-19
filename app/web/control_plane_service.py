@@ -147,6 +147,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
         profile=profile,
         metadata=metadata,
         analysis=analysis,
+        ui_readiness=analysis["ui_readiness"],
     )
 
     return {
@@ -841,6 +842,7 @@ def _build_ui_home_summary(
     profile: UserProfile,
     metadata: dict[str, Any],
     analysis: dict[str, Any],
+    ui_readiness: dict[str, Any],
 ) -> dict[str, Any]:
     """Build deterministic, personalized home-screen context."""
 
@@ -908,6 +910,11 @@ def _build_ui_home_summary(
         except ValueError:
             pass
 
+    portfolio_is_unconfigured = not all(
+        bool(ui_readiness.get(key, {}).get("configured"))
+        for key in ("policy", "allocation", "benchmark", "cma")
+    )
+
     return {
         "title": "Briefly Home",
         "subtitle": (
@@ -927,6 +934,16 @@ def _build_ui_home_summary(
             {"label": "Edit Briefing", "href": "/ui/briefing", "emphasis": "secondary"},
             {"label": "Review Risk", "href": "/ui/portfolio/risk", "emphasis": "secondary"},
         ],
+        "portfolio_is_unconfigured": portfolio_is_unconfigured,
+        "quick_setup_cta": {
+            "label": "Quick portfolio setup (recommended)"
+            if portfolio_is_unconfigured
+            else "Re-run quick setup",
+            "href": "/ui/portfolio/easy-setup",
+            "description": (
+                "Answer a few simple questions and auto-fill policy, allocation, benchmark, CMA, risk, and rebalancing defaults."
+            ),
+        },
         "status_chips": [
             {"label": "Next Brief", "value": str(timing.get("next_morning_send_local") or "Not provided")},
             {"label": "Policy Fit", "value": _status_label(policy_status)},

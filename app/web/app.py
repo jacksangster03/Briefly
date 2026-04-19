@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -38,6 +39,7 @@ from app.web.control_plane_service import (
     save_risk_config,
     search_followables,
 )
+from app.onboarding.easy_setup import EasySetupInputs, apply_plan, build_plan, default_inputs
 
 logger = get_logger("web")
 
@@ -51,6 +53,7 @@ _GOVERNANCE_FREQUENCY_VALUES = {"monthly", "quarterly", "semi_annual", "annual"}
 _ALLOCATION_ROLE_VALUES = {"growth", "income", "diversifier", "hedge", "liquidity", "tactical", "other"}
 
 _ALL_SECTIONS = [
+    "section-easy-setup",
     "section-briefing-home",
     "section-overview",
     "section-analyzer",
@@ -101,6 +104,12 @@ _PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
         "workspace": "portfolio",
         "workspace_page": "overview",
         "visible_sections": ["section-overview"],
+    },
+    "portfolio_easy_setup": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "easy_setup",
+        "visible_sections": ["section-easy-setup"],
     },
     "portfolio_builder_holdings": {
         "global_nav": "portfolio",
@@ -341,6 +350,28 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             page_key="portfolio_home",
         )
 
+    @app.get("/ui/portfolio/easy-setup", response_class=HTMLResponse, include_in_schema=False)
+    def ui_portfolio_easy_setup(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings(request), normalized_profile)
+        easy_setup = _easy_setup_context(
+            step=1,
+            state_data=_easy_setup_state_from_inputs(default_inputs()),
+            profile_state=state,
+            preview=None,
+            errors=[],
+        )
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            page_key="portfolio_easy_setup",
+            state=state,
+            extra_context={"easy_setup": easy_setup},
+        )
+
     @app.get("/ui/portfolio/{view}", response_class=HTMLResponse, include_in_schema=False)
     def ui_portfolio_view(
         request: Request,
@@ -349,6 +380,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     ):
         normalized_profile = _normalize_profile(profile)
         view_to_page = {
+            "easy-setup": "portfolio_easy_setup",
             "builder": "portfolio_builder_holdings",
             "holdings": "portfolio_builder_holdings",
             "policy": "portfolio_builder_policy",
@@ -373,6 +405,114 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             profile=normalized_profile,
             page_key=page_key,
         )
+
+    @app.post(
+        "/ui/profile/{profile}/easy-setup/step1",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_easy_setup_step1(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        state = build_profile_state(_settings(request), normalized_profile)
+        state_data = _easy_setup_state_from_form(form, previous={})
+        errors: list[str] = []
+        has_file = str(form.get("has_holdings_file", "")).strip().lower() == "yes"
+        upload = form.get("holdings_file")
+        if has_file and isinstance(upload, UploadFile) and upload.filename:
+            try:
+                content = await upload.read()
+                import_holdings_from_upload(
+                    profile_name=normalized_profile,
+                    filename=upload.filename or "holdings.yaml",
+                    content=content,
+                )
+                state = build_profile_state(_settings(request), normalized_profile)
+            except ValueError as exc:
+                errors.append(f"Holdings import failed: {exc}")
+
+        easy_setup = _easy_setup_context(
+            step=2,
+            state_data=state_data,
+            profile_state=state,
+            preview=None,
+            errors=errors,
+        )
+        return _render_settings_root(
+            request,
+            profile=normalized_profile,
+            message="Step 1 saved. Continue to portfolio shape.",
+            message_kind="success" if not errors else "error",
+            state=state,
+            page_key="portfolio_easy_setup",
+            extra_context={"easy_setup": easy_setup},
+            status_code=200 if not errors else 400,
+        )
+
+    @app.post(
+        "/ui/profile/{profile}/easy-setup/step2",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_easy_setup_step2(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        state = build_profile_state(_settings(request), normalized_profile)
+        previous = _easy_setup_state_from_json(str(form.get("easy_state", "")))
+        state_data = _easy_setup_state_from_form(form, previous=previous)
+        parsed_inputs = _easy_setup_inputs_from_state(state_data)
+        plan = build_plan(parsed_inputs, holdings=state.get("holdings", []))
+        easy_setup = _easy_setup_context(
+            step=3,
+            state_data=state_data,
+            profile_state=state,
+            preview=plan.get("summary"),
+            errors=[],
+        )
+        return _render_settings_root(
+            request,
+            profile=normalized_profile,
+            message="Step 2 saved. Review and apply defaults.",
+            message_kind="success",
+            state=state,
+            page_key="portfolio_easy_setup",
+            extra_context={"easy_setup": easy_setup},
+        )
+
+    @app.post(
+        "/ui/profile/{profile}/easy-setup/apply",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_easy_setup_apply(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        previous = _easy_setup_state_from_json(str(form.get("easy_state", "")))
+        state_data = _easy_setup_state_from_form(form, previous=previous)
+        try:
+            parsed_inputs = _easy_setup_inputs_from_state(state_data)
+            plan = build_plan(parsed_inputs, holdings=build_profile_state(_settings(request), normalized_profile).get("holdings", []))
+            apply_plan(normalized_profile, plan)
+            return RedirectResponse(url=f"/ui/portfolio?profile={normalized_profile}", status_code=303)
+        except ValueError as exc:
+            state = build_profile_state(_settings(request), normalized_profile)
+            easy_setup = _easy_setup_context(
+                step=3,
+                state_data=state_data,
+                profile_state=state,
+                preview=None,
+                errors=[f"Easy setup apply failed: {exc}"],
+            )
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Easy setup apply failed: {exc}",
+                message_kind="error",
+                status_code=400,
+                state=state,
+                page_key="portfolio_easy_setup",
+                extra_context={"easy_setup": easy_setup},
+            )
 
     @app.get("/ui/audit", response_class=HTMLResponse, include_in_schema=False)
     def ui_audit(
@@ -1328,25 +1468,30 @@ def _render_settings_page(
     *,
     profile: str,
     page_key: str,
+    state: dict[str, Any] | None = None,
+    extra_context: dict[str, Any] | None = None,
 ) -> HTMLResponse:
     context = _resolve_page_context(page_key)
-    state = build_profile_state(_settings(request), profile)
+    state = state or build_profile_state(_settings(request), profile)
     initial_section = context["visible_sections"][0] if context["visible_sections"] else ""
+    payload = {
+        "state": state,
+        "message": "",
+        "message_kind": "info",
+        "page_key": page_key,
+        "global_nav": context["global_nav"],
+        "workspace": context["workspace"],
+        "workspace_page": context["workspace_page"],
+        "builder_tab": context.get("builder_tab", ""),
+        "visible_sections": context["visible_sections"],
+        "initial_section": initial_section,
+    }
+    if extra_context:
+        payload.update(extra_context)
     return templates.TemplateResponse(
         request,
         "settings.html",
-        {
-            "state": state,
-            "message": "",
-            "message_kind": "info",
-            "page_key": page_key,
-            "global_nav": context["global_nav"],
-            "workspace": context["workspace"],
-            "workspace_page": context["workspace_page"],
-            "builder_tab": context.get("builder_tab", ""),
-            "visible_sections": context["visible_sections"],
-            "initial_section": initial_section,
-        },
+        payload,
     )
 
 
@@ -1359,22 +1504,26 @@ def _render_settings_root(
     status_code: int = 200,
     state: dict[str, Any] | None = None,
     page_key: str = "briefing_home",
+    extra_context: dict[str, Any] | None = None,
 ) -> HTMLResponse:
     context = _resolve_page_context(page_key)
     state = state or build_profile_state(_settings(request), profile)
+    payload = {
+        "state": state,
+        "message": message,
+        "message_kind": message_kind,
+        "page_key": page_key,
+        "workspace": context["workspace"],
+        "workspace_page": context["workspace_page"],
+        "builder_tab": context.get("builder_tab", ""),
+        "visible_sections": context["visible_sections"],
+    }
+    if extra_context:
+        payload.update(extra_context)
     return templates.TemplateResponse(
         request,
         "partials/settings_root.html",
-        {
-            "state": state,
-            "message": message,
-            "message_kind": message_kind,
-            "page_key": page_key,
-            "workspace": context["workspace"],
-            "workspace_page": context["workspace_page"],
-            "builder_tab": context.get("builder_tab", ""),
-            "visible_sections": context["visible_sections"],
-        },
+        payload,
         status_code=status_code,
     )
 
@@ -1400,6 +1549,109 @@ def _normalize_page_key(value: str | None, *, default: str) -> str:
 
 def _page_key_from_form(form: Any, *, default: str) -> str:
     return _normalize_page_key(str(form.get("ui_page", "")).strip(), default=default)
+
+
+def _easy_setup_state_from_inputs(inputs: EasySetupInputs) -> dict[str, Any]:
+    return {
+        "investor_type": inputs.investor_type,
+        "horizon_bucket": inputs.horizon_bucket,
+        "risk_comfort": inputs.risk_comfort,
+        "base_currency": inputs.base_currency,
+        "home_region": inputs.home_region,
+        "has_holdings_file": inputs.has_holdings_file,
+        "infer_from_holdings": inputs.infer_from_holdings,
+        "starting_mix": inputs.starting_mix,
+        "loss_averse": inputs.loss_averse,
+        "concentration_tolerant": inputs.concentration_tolerant,
+        "auto_rebalancing": inputs.auto_rebalancing,
+    }
+
+
+def _easy_setup_state_from_json(raw: str) -> dict[str, Any]:
+    text = (raw or "").strip()
+    if not text:
+        return _easy_setup_state_from_inputs(default_inputs())
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return _easy_setup_state_from_inputs(default_inputs())
+    if not isinstance(parsed, dict):
+        return _easy_setup_state_from_inputs(default_inputs())
+    defaults = _easy_setup_state_from_inputs(default_inputs())
+    defaults.update(parsed)
+    return defaults
+
+
+def _bool_from_form(form: Any, key: str, fallback: bool = False) -> bool:
+    value = str(form.get(key, "")).strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return fallback
+
+
+def _easy_setup_state_from_form(form: Any, *, previous: dict[str, Any]) -> dict[str, Any]:
+    state = dict(_easy_setup_state_from_inputs(default_inputs()))
+    state.update(previous or {})
+
+    mappings = {
+        "investor_type": "investor_type",
+        "horizon_bucket": "horizon_bucket",
+        "risk_comfort": "risk_comfort",
+        "base_currency": "base_currency",
+        "home_region": "home_region",
+        "starting_mix": "starting_mix",
+    }
+    for field, key in mappings.items():
+        raw = str(form.get(field, "")).strip()
+        if raw:
+            state[key] = raw
+
+    for field, key in (
+        ("has_holdings_file", "has_holdings_file"),
+        ("infer_from_holdings", "infer_from_holdings"),
+        ("loss_averse", "loss_averse"),
+        ("concentration_tolerant", "concentration_tolerant"),
+        ("auto_rebalancing", "auto_rebalancing"),
+    ):
+        if field in form:
+            state[key] = _bool_from_form(form, field, fallback=bool(state.get(key)))
+    return state
+
+
+def _easy_setup_inputs_from_state(state: dict[str, Any]) -> EasySetupInputs:
+    return EasySetupInputs(
+        investor_type=str(state.get("investor_type") or "long_term_individual"),
+        horizon_bucket=str(state.get("horizon_bucket") or "7_15"),
+        risk_comfort=str(state.get("risk_comfort") or "medium"),
+        base_currency=str(state.get("base_currency") or "EUR").upper(),
+        home_region=str(state.get("home_region") or "global"),
+        has_holdings_file=bool(state.get("has_holdings_file")),
+        infer_from_holdings=bool(state.get("infer_from_holdings")),
+        starting_mix=str(state.get("starting_mix") or "balanced"),
+        loss_averse=bool(state.get("loss_averse")),
+        concentration_tolerant=bool(state.get("concentration_tolerant")),
+        auto_rebalancing=bool(state.get("auto_rebalancing", True)),
+    )
+
+
+def _easy_setup_context(
+    *,
+    step: int,
+    state_data: dict[str, Any],
+    profile_state: dict[str, Any],
+    preview: dict[str, Any] | None,
+    errors: list[str],
+) -> dict[str, Any]:
+    return {
+        "step": max(1, min(3, int(step))),
+        "state": state_data,
+        "state_json": json.dumps(state_data),
+        "holdings_count": len(profile_state.get("holdings", [])),
+        "preview": preview or {},
+        "errors": errors,
+    }
 
 
 def _coverage_updates_from_form(form) -> dict[str, Any]:

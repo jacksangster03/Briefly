@@ -175,6 +175,22 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
   recession, soft landing, inflation re-acceleration, rates up/down, oil shock, USD spike, AI capex boom
 - Persisted simulation runs and saved presets in SQLite for repeatable comparisons
 
+**Easy Setup Onboarding (Phase 5.9)**
+- New novice-first portfolio onboarding route: `/ui/portfolio/easy-setup?profile=...`
+- Three-step guided flow:
+  - Step 1: Profile basics (investor type, horizon, risk comfort, currency, region, optional holdings upload)
+  - Step 2: Rough portfolio shape (mix preset or infer-from-holdings + simple risk preference toggles)
+  - Step 3: Review and apply defaults (rebalancing mode and deterministic preview)
+- Deterministic mapping engine auto-fills:
+  - Investor Policy
+  - Strategic Allocation targets/bands
+  - Benchmark config
+  - CMA entries + correlation pairs
+  - Risk preferences (`risk.lookback_days`, `risk.risk_free_rate_pct`)
+  - Rebalancing configuration
+- Home (`/ui`) now detects unconfigured portfolio profiles and surfaces a prominent `Quick portfolio setup (recommended)` CTA
+- Advanced subpages remain fully editable; easy setup is optional and re-runnable
+
 ### Intelligence pipeline
 
 - Finnhub + NewsAPI event processing with credibility scoring, personal relevance, and clustering
@@ -474,6 +490,7 @@ Workspace route map
     /ui/briefing/morning
   Portfolio:
     /ui/portfolio
+    /ui/portfolio/easy-setup
     /ui/portfolio/holdings
     /ui/portfolio/diagnostics
     /ui/portfolio/policy
@@ -542,7 +559,7 @@ make test
 python -m pytest app/tests -q
 ```
 
-Current count: **301 tests, 0 failures.**
+Current count: **305 tests, 0 failures.**
 
 Focused test runs:
 

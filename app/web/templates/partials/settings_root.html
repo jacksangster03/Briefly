@@ -49,7 +49,7 @@
 {% set simulation_count_presets = simulation_ctx.simulation_count_presets if simulation_ctx.simulation_count_presets is defined else {} %}
 {% set simulation_horizon_presets = simulation_ctx.horizon_presets if simulation_ctx.horizon_presets is defined else {} %}
 {% set visible_sections = visible_sections if visible_sections is defined else [
-  "section-briefing-home","section-overview","section-analyzer","section-policy","section-allocation","section-risk","section-cma","section-scenarios","section-simulation","section-rebalancing","section-attribution","section-benchmark","section-holdings","section-coverage","section-delivery","section-morning","section-audit-home","section-audit"
+  "section-easy-setup","section-briefing-home","section-overview","section-analyzer","section-policy","section-allocation","section-risk","section-cma","section-scenarios","section-simulation","section-rebalancing","section-attribution","section-benchmark","section-holdings","section-coverage","section-delivery","section-morning","section-audit-home","section-audit"
 ] %}
 {% set workspace = workspace if workspace is defined else "briefing" %}
 {% set workspace_page = workspace_page if workspace_page is defined else "home" %}
@@ -57,6 +57,7 @@
 {% set builder_tab = builder_tab if builder_tab is defined else "" %}
 {% set ui_readiness = analysis.ui_readiness if analysis.ui_readiness is defined else {} %}
 {% set cma_asset_options = analysis.ui_cma_asset_options if analysis.ui_cma_asset_options is defined else [] %}
+{% set easy_setup = easy_setup if easy_setup is defined else {"step": 1, "state": {}, "state_json": "{}", "holdings_count": 0, "preview": {}, "errors": []} %}
 
 <style>
   .grid {
@@ -1020,6 +1021,170 @@
 {% endif %}
 
 <div class="grid">
+  {% if "section-easy-setup" in visible_sections %}
+  <section class="card" id="section-easy-setup" data-module-section="section-easy-setup">
+    <h2>Portfolio / Easy Setup</h2>
+    <p class="muted">Answer a few intuitive questions and auto-fill policy, allocation, benchmark, CMA, risk, and rebalancing defaults.</p>
+
+    {% if easy_setup.errors %}
+      <div class="warning-box">
+        <h3>Setup issues</h3>
+        <ul class="warning-list">
+          {% for err in easy_setup.errors %}
+            <li>{{ err }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <div class="hero-chip-row" style="margin-bottom: 10px;">
+      <span class="hero-chip">Step {{ easy_setup.step }} of 3</span>
+      <span class="mini-chip">{{ easy_setup.holdings_count }} holdings currently loaded</span>
+      <a class="route-link" href="/ui/portfolio?profile={{ state.profile }}">Skip and go to full Portfolio</a>
+    </div>
+
+    {% if easy_setup.step == 1 %}
+      <form
+        hx-post="/ui/profile/{{ state.profile }}/easy-setup/step1"
+        hx-target="#settings-root"
+        hx-swap="outerHTML"
+        method="post"
+        enctype="multipart/form-data"
+      >
+        <div class="inline-grid">
+          <div class="field">
+            <label>Investor Type</label>
+            <select name="investor_type">
+              {% for item in [("beginner","Beginner"),("long_term_individual","Long-term individual"),("conservative_income","Conservative income"),("aggressive_growth","Aggressive growth"),("institutional_advanced","Institutional / advanced")] %}
+                <option value="{{ item[0] }}" {% if easy_setup.state.investor_type == item[0] %}selected{% endif %}>{{ item[1] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>Investment Horizon</label>
+            <select name="horizon_bucket">
+              {% for item in [("lt3","< 3 years"),("3_7","3–7 years"),("7_15","7–15 years"),("15p","15+ years")] %}
+                <option value="{{ item[0] }}" {% if easy_setup.state.horizon_bucket == item[0] %}selected{% endif %}>{{ item[1] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>Risk Comfort</label>
+            <select name="risk_comfort">
+              {% for item in [("low","Low"),("medium","Medium"),("high","High")] %}
+                <option value="{{ item[0] }}" {% if easy_setup.state.risk_comfort == item[0] %}selected{% endif %}>{{ item[1] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>Base Currency</label>
+            <select name="base_currency">
+              {% for item in ["EUR","USD","GBP","OTHER"] %}
+                <option value="{{ item }}" {% if easy_setup.state.base_currency == item %}selected{% endif %}>{{ item }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>Home Region</label>
+            <select name="home_region">
+              {% for item in [("us","US"),("europe","Europe"),("uk","UK"),("global","Global")] %}
+                <option value="{{ item[0] }}" {% if easy_setup.state.home_region == item[0] %}selected{% endif %}>{{ item[1] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>I already have a holdings file</label>
+            <select name="has_holdings_file">
+              <option value="no" {% if not easy_setup.state.has_holdings_file %}selected{% endif %}>No</option>
+              <option value="yes" {% if easy_setup.state.has_holdings_file %}selected{% endif %}>Yes</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Optional holdings upload (YAML/CSV)</label>
+          <input type="file" name="holdings_file" accept=".yaml,.yml,.csv">
+        </div>
+        <div class="actions">
+          <button type="submit">Next: Portfolio Shape</button>
+        </div>
+      </form>
+    {% elif easy_setup.step == 2 %}
+      <form
+        hx-post="/ui/profile/{{ state.profile }}/easy-setup/step2"
+        hx-target="#settings-root"
+        hx-swap="outerHTML"
+        method="post"
+      >
+        <input type="hidden" name="easy_state" value='{{ easy_setup.state_json }}'>
+        <div class="inline-grid">
+          <div class="field">
+            <label>Starting Mix</label>
+            <select name="starting_mix">
+              {% for item in [("conservative","Conservative"),("balanced","Balanced"),("growth","Growth"),("aggressive","Aggressive")] %}
+                <option value="{{ item[0] }}" {% if easy_setup.state.starting_mix == item[0] %}selected{% endif %}>{{ item[1] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>Infer strategic allocation from holdings</label>
+            <select name="infer_from_holdings">
+              <option value="yes" {% if easy_setup.state.infer_from_holdings %}selected{% endif %}>Yes</option>
+              <option value="no" {% if not easy_setup.state.infer_from_holdings %}selected{% endif %}>No</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Prefer downside protection over max returns</label>
+            <select name="loss_averse">
+              <option value="no" {% if not easy_setup.state.loss_averse %}selected{% endif %}>No</option>
+              <option value="yes" {% if easy_setup.state.loss_averse %}selected{% endif %}>Yes</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Comfortable with concentration in top positions</label>
+            <select name="concentration_tolerant">
+              <option value="no" {% if not easy_setup.state.concentration_tolerant %}selected{% endif %}>No</option>
+              <option value="yes" {% if easy_setup.state.concentration_tolerant %}selected{% endif %}>Yes</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="submit">Next: Review & Apply</button>
+        </div>
+      </form>
+    {% else %}
+      <form
+        hx-post="/ui/profile/{{ state.profile }}/easy-setup/apply"
+        hx-target="#settings-root"
+        hx-swap="outerHTML"
+        method="post"
+      >
+        <input type="hidden" name="easy_state" value='{{ easy_setup.state_json }}'>
+        <div class="field">
+          <label>Rebalancing Mode</label>
+          <select name="auto_rebalancing">
+            <option value="yes" {% if easy_setup.state.auto_rebalancing %}selected{% endif %}>Let Briefly suggest rebalances</option>
+            <option value="no" {% if not easy_setup.state.auto_rebalancing %}selected{% endif %}>I will configure later</option>
+          </select>
+        </div>
+
+        {% if easy_setup.preview %}
+          <div class="summary-grid">
+            <dl class="summary"><dt>Policy</dt><dd>{{ easy_setup.preview.policy }}</dd></dl>
+            <dl class="summary"><dt>Allocation</dt><dd>{{ easy_setup.preview.allocation }}</dd></dl>
+            <dl class="summary"><dt>Benchmark</dt><dd>{{ easy_setup.preview.benchmark }}</dd></dl>
+            <dl class="summary"><dt>CMA</dt><dd>{{ easy_setup.preview.cma }}</dd></dl>
+            <dl class="summary"><dt>Risk</dt><dd>{{ easy_setup.preview.risk }}</dd></dl>
+            <dl class="summary"><dt>Rebalancing</dt><dd>{{ easy_setup.preview.rebalancing }}</dd></dl>
+          </div>
+        {% endif %}
+        <div class="actions">
+          <button type="submit">Apply defaults and finish</button>
+        </div>
+      </form>
+    {% endif %}
+  </section>
+  {% endif %}
+
   {% if "section-briefing-home" in visible_sections %}
   <section class="card" id="section-briefing-home" data-module-section="section-briefing-home">
     <h2>Briefing</h2>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import html
 
 import pytest
 from fastapi.testclient import TestClient
@@ -121,6 +122,8 @@ def test_ui_home_renders_workspace_cards(client):
     assert "/ui/briefing?profile=default_user" in response.text
     assert "/ui/portfolio?profile=default_user" in response.text
     assert "/ui/audit?profile=default_user" in response.text
+    assert "Quick portfolio setup" in response.text
+    assert "/ui/portfolio/easy-setup?profile=default_user" in response.text
 
 
 def test_ui_workspace_routes_set_initial_module_and_section(client):
@@ -148,6 +151,11 @@ def test_ui_workspace_routes_set_initial_module_and_section(client):
     assert simulation.status_code == 200
     assert 'data-page-key="portfolio_simulation"' in simulation.text
     assert 'data-initial-section="section-simulation"' in simulation.text
+
+    easy_setup = client.get("/ui/portfolio/easy-setup?profile=default_user")
+    assert easy_setup.status_code == 200
+    assert 'data-page-key="portfolio_easy_setup"' in easy_setup.text
+    assert 'data-initial-section="section-easy-setup"' in easy_setup.text
 
     audit = client.get("/ui/audit?profile=default_user")
     assert audit.status_code == 200
@@ -229,6 +237,59 @@ def test_portfolio_history_route_exists_and_stays_workspace_scoped(client):
     assert "Portfolio / History & Advanced" in history.text
     assert "← Portfolio" in history.text
     assert "⌂ Home" in history.text
+
+
+def test_easy_setup_wizard_applies_defaults_and_redirects(client):
+    step1 = client.post(
+        "/ui/profile/default_user/easy-setup/step1",
+        data={
+            "investor_type": "long_term_individual",
+            "horizon_bucket": "7_15",
+            "risk_comfort": "medium",
+            "base_currency": "EUR",
+            "home_region": "global",
+            "has_holdings_file": "no",
+        },
+    )
+    assert step1.status_code == 200
+    assert "Step 2 of 3" in step1.text
+
+    marker = 'name="easy_state" value=\''
+    assert marker in step1.text
+    start = step1.text.index(marker) + len(marker)
+    end = step1.text.index("'", start)
+    easy_state = html.unescape(step1.text[start:end])
+
+    step2 = client.post(
+        "/ui/profile/default_user/easy-setup/step2",
+        data={
+            "easy_state": easy_state,
+            "starting_mix": "balanced",
+            "infer_from_holdings": "no",
+            "loss_averse": "yes",
+            "concentration_tolerant": "no",
+        },
+    )
+    assert step2.status_code == 200
+    assert "Step 3 of 3" in step2.text
+    assert "Apply defaults and finish" in step2.text
+    start2 = step2.text.index(marker) + len(marker)
+    end2 = step2.text.index("'", start2)
+    easy_state2 = html.unescape(step2.text[start2:end2])
+
+    apply = client.post(
+        "/ui/profile/default_user/easy-setup/apply",
+        data={"easy_state": easy_state2, "auto_rebalancing": "yes"},
+        follow_redirects=False,
+    )
+    assert apply.status_code in {302, 303}
+    assert "/ui/portfolio?profile=default_user" in apply.headers["location"]
+
+    state = client.get("/api/v1/profile/default_user/state").json()
+    assert state["policy"]["target_return_percent"] is not None
+    assert any(row["target_weight_pct"] is not None for row in state["allocation"]["targets"])
+    assert state["benchmark"]["base_symbol"]
+    assert len(state["cma_entries"]) > 0
 
 
 def test_builder_holdings_can_load_validation_preset(client):
