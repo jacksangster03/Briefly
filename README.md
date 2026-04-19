@@ -643,6 +643,33 @@ Phases 5.6B–5.6D add route-based workspace entry, personalized home context, a
 python -m app.cli scheduler
 ```
 
+### Run web + scheduler in background (macOS launchd)
+
+Use the bundled helper:
+
+```bash
+# one-time setup
+./scripts/service.sh install
+
+# start both services (web + scheduler)
+./scripts/service.sh start
+
+# check state
+./scripts/service.sh status
+
+# follow logs
+./scripts/service.sh logs
+```
+
+Control shortcuts:
+
+```bash
+./scripts/service.sh restart
+./scripts/service.sh stop
+./scripts/service.sh logs-web
+./scripts/service.sh logs-scheduler
+```
+
 ### Update risk analytics configuration
 
 In the Risk tab, set lookback period and risk-free rate, then click Refresh Metrics. Or via API:
