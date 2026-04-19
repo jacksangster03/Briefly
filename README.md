@@ -167,10 +167,23 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
   - Standard: 2,500
   - Deep: 10,000
 - Interactive chart outputs:
-  - Fan chart percentile cone (P05/P25/P50/P75/P95)
-  - Terminal value distribution histogram
-  - Drawdown distribution histogram
-  - Sensitivity bar chart (growth-shock sweep)
+  - Fan chart percentile cone with shaded 5–95 and 25–75 bands
+  - Terminal value distribution histogram with summary reference lines
+  - Drawdown distribution histogram (max drawdown %)
+  - Sensitivity growth chart (median terminal + probability of loss)
+- Chart rendering contract now uses `chart_data` with explicit states per panel:
+  - `available: true` -> render Plotly chart
+  - `available: false` + `reason` -> show explanatory unavailable state
+  - runtime render failure -> non-crashing error state while numeric summary remains visible
+- Charts auto-render on:
+  - initial page load
+  - HTMX simulation result swaps
+  - HTMX settle events
+- Simulation chart containers:
+  - `simulation-fan-chart`
+  - `simulation-terminal-distribution`
+  - `simulation-drawdown-distribution`
+  - `simulation-sensitivity-growth`
 - Deterministic scenario pack summary:
   recession, soft landing, inflation re-acceleration, rates up/down, oil shock, USD spike, AI capex boom
 - Persisted simulation runs and saved presets in SQLite for repeatable comparisons
@@ -559,7 +572,7 @@ make test
 python -m pytest app/tests -q
 ```
 
-Current count: **305 tests, 0 failures.**
+Current count: **306 tests, 0 failures.**
 
 Focused test runs:
 

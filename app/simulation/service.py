@@ -238,16 +238,24 @@ def run_simulation(
         base_cov=cov,
         weights=weights,
         config=config,
+        methods=config.methods,
         seed=seed + 220,
     )
     charts["sensitivity"] = build_sensitivity_payload(values=sensitivity)
+    chart_data = _build_chart_data(
+        config=config,
+        summary=summary,
+        charts=charts,
+        sensitivity=charts.get("sensitivity", {}),
+    )
 
     result = {
         "profile": profile_name,
         "config": asdict(config),
         "summary": summary,
         "metrics": metrics,
-        "charts": charts,
+        "charts": chart_data,
+        "chart_data": chart_data,
         "methods": method_payloads,
         "scenarios": scenarios,
     }
@@ -256,7 +264,7 @@ def run_simulation(
             profile_name=profile_name,
             config=asdict(config),
             summary=summary,
-            charts=charts,
+            charts=chart_data,
             metrics=metrics,
             scenarios=scenarios,
             status="completed",
@@ -386,8 +394,12 @@ def _build_sensitivity(
     base_cov: np.ndarray,
     weights: np.ndarray,
     config: SimulationConfig,
+    methods: list[str],
     seed: int,
 ) -> list[dict[str, Any]]:
+    normalized_methods = {str(item or "").strip().lower() for item in methods}
+    if "monte_carlo" not in normalized_methods:
+        return []
     rows: list[dict[str, Any]] = []
     base_paths = run_monte_carlo_paths(
         mu=base_mu,
@@ -398,7 +410,7 @@ def _build_sensitivity(
         seed=seed,
     )
     base_median = float(np.median(base_paths[:, -1] * config.start_value))
-    for label, growth_shift in [("Growth -2", -2.0), ("Growth -1", -1.0), ("Base", 0.0), ("Growth +1", 1.0), ("Growth +2", 2.0)]:
+    for growth_shift in [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0]:
         mu = base_mu + growth_shift * 0.0015
         paths = run_monte_carlo_paths(
             mu=mu,
@@ -409,15 +421,81 @@ def _build_sensitivity(
             seed=seed + int((growth_shift + 3) * 7),
         )
         median = float(np.median(paths[:, -1] * config.start_value))
-        delta = ((median / base_median) - 1.0) * 100.0 if base_median else 0.0
+        prob_loss = float(np.mean(paths[:, -1] * config.start_value < config.start_value))
         rows.append(
             {
-                "label": label,
+                "growth_shock": growth_shift,
                 "median_terminal_value": median,
-                "delta_pct": delta,
+                "probability_of_loss": prob_loss,
+                "delta_pct": ((median / base_median) - 1.0) * 100.0 if base_median else 0.0,
             }
         )
     return rows
+
+
+def _build_chart_data(
+    *,
+    config: SimulationConfig,
+    summary: dict[str, Any],
+    charts: dict[str, Any],
+    sensitivity: dict[str, Any],
+) -> dict[str, Any]:
+    fan = charts.get("fan_chart") or {}
+    terminal_values = charts.get("terminal_values") or []
+    drawdown_values = charts.get("drawdown_values_pct") or []
+    fan_available = bool(fan.get("x")) and bool(fan.get("p50"))
+
+    chart_data = {
+        "run_id": None,
+        "summary": {
+            "median_terminal": summary.get("median_terminal_value"),
+            "p05_terminal": summary.get("percentile_5_terminal_value"),
+            "p95_terminal": summary.get("percentile_95_terminal_value"),
+            "prob_loss": (summary.get("probability_of_loss_pct") or 0.0) / 100.0,
+            "var95": (summary.get("var_95_pct") or 0.0) / 100.0,
+            "cvar95": (summary.get("cvar_95_pct") or 0.0) / 100.0,
+        },
+        "fan_chart": {
+            "available": fan_available,
+            "reason": None if fan_available else "Fan chart requires path-based simulation output.",
+            "x": fan.get("x") or [],
+            "p05": fan.get("p05") or [],
+            "p25": fan.get("p25") or [],
+            "p50": fan.get("p50") or [],
+            "p75": fan.get("p75") or [],
+            "p95": fan.get("p95") or [],
+        },
+        "terminal_distribution": {
+            "available": bool(terminal_values),
+            "reason": None if terminal_values else "Terminal distribution unavailable for this run.",
+            "values": terminal_values,
+        },
+        "drawdown_distribution": {
+            "available": bool(drawdown_values),
+            "reason": None if drawdown_values else "Drawdown distribution unavailable for this run.",
+            "values": drawdown_values,
+        },
+        "sensitivity_growth": (
+            sensitivity
+            if isinstance(sensitivity, dict) and "available" in sensitivity
+            else {"available": False, "reason": "Sensitivity analysis not run for this simulation."}
+        ),
+        "meta": {
+            "mode": config.mode,
+            "frequency": config.frequency,
+            "horizon_periods": config.horizon_periods,
+            "simulation_count": config.simulation_count,
+            "methods": list(config.methods),
+            "assumption_source": config.assumption_source,
+            "benchmark_symbol": config.benchmark_symbol,
+            "start_value": config.start_value,
+        },
+        # Legacy aliases preserved for backwards compatibility with older tests/clients.
+        "terminal_histogram": charts.get("terminal_histogram") or {"x": [], "y": []},
+        "drawdown_histogram": charts.get("drawdown_histogram") or {"x": [], "y": []},
+        "sensitivity": sensitivity if isinstance(sensitivity, dict) else {"available": False},
+    }
+    return chart_data
 
 
 def _fetch_returns_matrix(
@@ -512,4 +590,3 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-

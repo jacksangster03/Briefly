@@ -671,66 +671,219 @@
         });
       }
 
+      function _fmtNumber(value, digits = 2) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return "n/a";
+        return num.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+      }
+
+      function _renderChartState(target, kind, message) {
+        if (!target) return;
+        const tone = kind || "info";
+        target.innerHTML = `<div class="status ${tone === "error" ? "error" : ""}" style="margin:0;">${message}</div>`;
+      }
+
+      function _plotLayout(base = {}) {
+        return {
+          margin: { l: 54, r: 20, t: 24, b: 44 },
+          legend: { orientation: "h", y: -0.18, x: 0 },
+          paper_bgcolor: "rgba(0,0,0,0)",
+          plot_bgcolor: "rgba(0,0,0,0)",
+          font: { color: "var(--ink)", size: 12 },
+          ...base,
+        };
+      }
+
+      function _plotConfig() {
+        return { responsive: true, displayModeBar: false };
+      }
+
+      function renderSimulationCharts(chartPayload, root = document) {
+        const fanTarget = root.querySelector("#simulation-fan-chart");
+        const terminalTarget = root.querySelector("#simulation-terminal-distribution");
+        const drawdownTarget = root.querySelector("#simulation-drawdown-distribution");
+        const sensitivityTarget = root.querySelector("#simulation-sensitivity-growth");
+        const targets = [fanTarget, terminalTarget, drawdownTarget, sensitivityTarget].filter(Boolean);
+        if (!targets.length) return;
+
+        targets.forEach((target) => _renderChartState(target, "info", "Rendering chart..."));
+
+        if (typeof window.Plotly === "undefined") {
+          targets.forEach((target) => _renderChartState(target, "error", "Chart failed to render. Numeric results are still available."));
+          return;
+        }
+
+        try {
+          const payload = chartPayload || {};
+          const summary = payload.summary || {};
+
+          const fan = payload.fan_chart || {};
+          if (!fan.available) {
+            _renderChartState(fanTarget, "info", fan.reason || "Fan chart unavailable for this run.");
+          } else {
+            window.Plotly.newPlot(
+              fanTarget,
+              [
+                { x: fan.x, y: fan.p95, mode: "lines", name: "P95", line: { width: 0.8, color: "#93a9d8" } },
+                { x: fan.x, y: fan.p05, mode: "lines", name: "P05", line: { width: 0.8, color: "#93a9d8" }, fill: "tonexty", fillcolor: "rgba(147,169,216,0.18)" },
+                { x: fan.x, y: fan.p75, mode: "lines", name: "P75", line: { width: 0.9, color: "#6fb0a3" } },
+                { x: fan.x, y: fan.p25, mode: "lines", name: "P25", line: { width: 0.9, color: "#6fb0a3" }, fill: "tonexty", fillcolor: "rgba(111,176,163,0.25)" },
+                { x: fan.x, y: fan.p50, mode: "lines", name: "Median", line: { width: 2.8, color: "#f59f00" } },
+              ],
+              _plotLayout({
+                xaxis: { title: "Period" },
+                yaxis: { title: "Portfolio Value", separatethousands: true },
+                hovermode: "x unified",
+              }),
+              _plotConfig()
+            );
+          }
+
+          const terminal = payload.terminal_distribution || {};
+          if (!terminal.available) {
+            _renderChartState(terminalTarget, "info", terminal.reason || "Terminal distribution unavailable for this run.");
+          } else {
+            const median = Number(summary.median_terminal);
+            const p05 = Number(summary.p05_terminal);
+            const p95 = Number(summary.p95_terminal);
+            const startValue = Number((payload.meta || {}).start_value);
+            window.Plotly.newPlot(
+              terminalTarget,
+              [
+                {
+                  x: terminal.values || [],
+                  type: "histogram",
+                  nbinsx: 36,
+                  marker: { color: "#5e81ac", line: { width: 0.4, color: "#3d4f6a" } },
+                  name: "Terminal value distribution",
+                },
+              ],
+              _plotLayout({
+                xaxis: { title: "Terminal Value", separatethousands: true },
+                yaxis: { title: "Count" },
+                shapes: [
+                  ...(
+                    Number.isFinite(startValue)
+                      ? [{ type: "line", x0: startValue, x1: startValue, y0: 0, y1: 1, yref: "paper", line: { color: "#9aa5b1", width: 1.2, dash: "dot" } }]
+                      : []
+                  ),
+                  ...(
+                    Number.isFinite(median)
+                      ? [{ type: "line", x0: median, x1: median, y0: 0, y1: 1, yref: "paper", line: { color: "#f59f00", width: 2 } }]
+                      : []
+                  ),
+                  ...(
+                    Number.isFinite(p05)
+                      ? [{ type: "line", x0: p05, x1: p05, y0: 0, y1: 1, yref: "paper", line: { color: "#4c78a8", width: 1, dash: "dash" } }]
+                      : []
+                  ),
+                  ...(
+                    Number.isFinite(p95)
+                      ? [{ type: "line", x0: p95, x1: p95, y0: 0, y1: 1, yref: "paper", line: { color: "#4c78a8", width: 1, dash: "dash" } }]
+                      : []
+                  ),
+                ],
+              }),
+              _plotConfig()
+            );
+          }
+
+          const drawdown = payload.drawdown_distribution || {};
+          if (!drawdown.available) {
+            _renderChartState(drawdownTarget, "info", drawdown.reason || "Drawdown distribution unavailable for this run.");
+          } else {
+            const values = (drawdown.values || []).map((v) => Number(v));
+            const medianDd = values.length ? values.slice().sort((a, b) => a - b)[Math.floor(values.length / 2)] : null;
+            window.Plotly.newPlot(
+              drawdownTarget,
+              [
+                {
+                  x: values,
+                  type: "histogram",
+                  nbinsx: 30,
+                  marker: { color: "#bf616a", line: { width: 0.4, color: "#8f4e55" } },
+                  name: "Max drawdown distribution",
+                },
+              ],
+              _plotLayout({
+                xaxis: { title: "Max Drawdown (%)", ticksuffix: "%", separatethousands: true },
+                yaxis: { title: "Count" },
+                shapes: Number.isFinite(medianDd)
+                  ? [{ type: "line", x0: medianDd, x1: medianDd, y0: 0, y1: 1, yref: "paper", line: { color: "#f59f00", width: 1.8 } }]
+                  : [],
+              }),
+              _plotConfig()
+            );
+          }
+
+          const sensitivity = payload.sensitivity_growth || {};
+          if (!sensitivity.available) {
+            _renderChartState(sensitivityTarget, "info", sensitivity.reason || "Run a sensitivity sweep to populate this chart.");
+          } else {
+            window.Plotly.newPlot(
+              sensitivityTarget,
+              [
+                {
+                  x: sensitivity.x || [],
+                  y: sensitivity.y_median_terminal || [],
+                  type: "scatter",
+                  mode: "lines+markers",
+                  marker: { color: "#4c78a8" },
+                  name: "Median Terminal",
+                  yaxis: "y1",
+                },
+                {
+                  x: sensitivity.x || [],
+                  y: (sensitivity.y_prob_loss || []).map((v) => Number(v) * 100),
+                  type: "scatter",
+                  mode: "lines+markers",
+                  marker: { color: "#f59f00" },
+                  name: "Prob Loss (%)",
+                  yaxis: "y2",
+                },
+              ],
+              _plotLayout({
+                xaxis: { title: "Growth Shock" },
+                yaxis: { title: "Median Terminal Value", side: "left", separatethousands: true },
+                yaxis2: { title: "Prob Loss (%)", side: "right", overlaying: "y", rangemode: "tozero" },
+                hovermode: "x unified",
+              }),
+              _plotConfig()
+            );
+          }
+        } catch (err) {
+          console.error("Simulation chart render failed", err);
+          targets.forEach((target) => _renderChartState(target, "error", "Chart failed to render. Numeric results are still available."));
+        }
+      }
+
       function initSimulationCharts(root = document) {
         const dataNode = root.querySelector("#simulation-chart-data");
-        if (!dataNode || typeof window.Plotly === "undefined") return;
+        if (!dataNode) return;
         let payload;
         try {
           payload = JSON.parse(dataNode.textContent || "{}");
-        } catch {
+        } catch (err) {
+          console.error("Invalid simulation chart payload", err);
+          renderSimulationCharts(null, root);
           return;
         }
-        const fan = payload.fan_chart || {};
-        const fanTarget = root.querySelector("#simulation-fan-chart");
-        if (fanTarget && fan.x) {
-          window.Plotly.newPlot(
-            fanTarget,
-            [
-              { x: fan.x, y: fan.p95 || [], mode: "lines", name: "P95", line: { width: 1, color: "#7aa2ff" } },
-              { x: fan.x, y: fan.p75 || [], mode: "lines", name: "P75", line: { width: 1, color: "#4fd1c5" } },
-              { x: fan.x, y: fan.p50 || [], mode: "lines", name: "Median", line: { width: 3, color: "#f59f00" } },
-              { x: fan.x, y: fan.p25 || [], mode: "lines", name: "P25", line: { width: 1, color: "#4fd1c5" } },
-              { x: fan.x, y: fan.p05 || [], mode: "lines", name: "P05", line: { width: 1, color: "#7aa2ff" } },
-            ],
-            {
-              margin: { l: 40, r: 10, t: 10, b: 30 },
-              legend: { orientation: "h" },
-              paper_bgcolor: "rgba(0,0,0,0)",
-              plot_bgcolor: "rgba(0,0,0,0)",
-            },
-            { responsive: true, displayModeBar: false }
-          );
-        }
-        const term = payload.terminal_histogram || {};
-        const termTarget = root.querySelector("#simulation-terminal-hist");
-        if (termTarget && term.x) {
-          window.Plotly.newPlot(
-            termTarget,
-            [{ x: term.x || [], y: term.y || [], type: "bar", marker: { color: "#f59f00" } }],
-            { margin: { l: 40, r: 10, t: 10, b: 30 }, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" },
-            { responsive: true, displayModeBar: false }
-          );
-        }
-        const dd = payload.drawdown_histogram || {};
-        const ddTarget = root.querySelector("#simulation-drawdown-hist");
-        if (ddTarget && dd.x) {
-          window.Plotly.newPlot(
-            ddTarget,
-            [{ x: dd.x || [], y: dd.y || [], type: "bar", marker: { color: "#ea5455" } }],
-            { margin: { l: 40, r: 10, t: 10, b: 30 }, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" },
-            { responsive: true, displayModeBar: false }
-          );
-        }
-        const sens = payload.sensitivity || {};
-        const sensTarget = root.querySelector("#simulation-sensitivity");
-        if (sensTarget && sens.x) {
-          window.Plotly.newPlot(
-            sensTarget,
-            [{ x: sens.x || [], y: sens.delta_pct || [], type: "bar", marker: { color: "#60a5fa" } }],
-            { margin: { l: 40, r: 10, t: 10, b: 40 }, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" },
-            { responsive: true, displayModeBar: false }
-          );
-        }
+        renderSimulationCharts(payload, root);
+      }
+
+      function bindSimulationStaleIndicator(root = document) {
+        const section = root.querySelector("#section-simulation");
+        if (!section) return;
+        const staleNote = section.querySelector("#simulation-stale-note");
+        const runForm = section.querySelector("form[hx-post*='/simulation/run']");
+        if (!staleNote || !runForm || runForm.dataset.staleBound === "true") return;
+        runForm.dataset.staleBound = "true";
+
+        const showStale = () => { staleNote.style.display = "block"; };
+        const clearStale = () => { staleNote.style.display = "none"; };
+        runForm.addEventListener("input", showStale);
+        runForm.addEventListener("change", showStale);
+        runForm.addEventListener("submit", clearStale);
       }
 
       window.addEventListener("beforeunload", (event) => {
@@ -745,6 +898,7 @@
         bindUnsavedChangesGuard(document);
         initHoldingsEditor();
         initSimulationCharts(document);
+        bindSimulationStaleIndicator(document);
         const explicitSection = (document.body.dataset.initialSection || "").trim();
         syncPageHiddenInputs(document);
         if (explicitSection) {
@@ -760,8 +914,17 @@
           bindUnsavedChangesGuard(target);
           initHoldingsEditor();
           initSimulationCharts(target);
+          bindSimulationStaleIndicator(target);
           syncPageHiddenInputs(document);
           clearDirty();
+        }
+      });
+
+      document.body.addEventListener("htmx:afterSettle", (event) => {
+        const target = event.detail && event.detail.target;
+        if (target && target.id === "settings-root") {
+          initSimulationCharts(target);
+          bindSimulationStaleIndicator(target);
         }
       });
     })();

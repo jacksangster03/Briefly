@@ -25,6 +25,7 @@ def test_simulation_routes_and_api(validation_test_settings, monkeypatch):
     assert simulation_page.status_code == 200
     assert "Simulation Lab" in simulation_page.text
     assert "Run Simulation" in simulation_page.text
+    assert 'id="simulation-fan-chart"' not in simulation_page.text
 
     run_resp = client.post(
         "/api/v1/profile/default_user/simulation/run",
@@ -41,6 +42,8 @@ def test_simulation_routes_and_api(validation_test_settings, monkeypatch):
     payload = run_resp.json()
     assert payload["summary"]["median_terminal_value"] > 0
     assert "fan_chart" in payload["charts"]
+    assert "chart_data" in payload
+    assert payload["chart_data"]["fan_chart"]["available"] is True
 
     runs_resp = client.get("/api/v1/profile/default_user/simulation/runs")
     assert runs_resp.status_code == 200
@@ -54,4 +57,13 @@ def test_simulation_routes_and_api(validation_test_settings, monkeypatch):
     assert single["run_id"] == run_id
     assert "summary" in single
     assert "charts" in single
+    assert "chart_data" in single
+    assert "meta" in single["chart_data"]
 
+    simulation_page_after = client.get("/ui/portfolio/simulation?profile=default_user")
+    assert simulation_page_after.status_code == 200
+    assert "simulation-fan-chart" in simulation_page_after.text
+    assert "simulation-terminal-distribution" in simulation_page_after.text
+    assert "simulation-drawdown-distribution" in simulation_page_after.text
+    assert "simulation-sensitivity-growth" in simulation_page_after.text
+    assert "Charts reflect the latest completed run below." in simulation_page_after.text

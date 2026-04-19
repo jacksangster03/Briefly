@@ -111,6 +111,7 @@ def get_simulation_run(profile_name: str, run_id: int) -> dict[str, Any] | None:
             "status": run.status,
             "summary": _loads(result.summary_json if result else None, {}),
             "charts": _loads(result.charts_json if result else None, {}),
+            "chart_data": _loads(result.charts_json if result else None, {}),
             "metrics": _loads(result.metrics_json if result else None, {}),
             "scenarios": _loads(result.scenarios_json if result else None, []),
             "created_at": run.created_at.isoformat() if run.created_at else "",
@@ -205,4 +206,3 @@ def _loads(text: str | None, fallback: Any) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         return fallback
-

@@ -53,6 +53,51 @@ def test_simulation_service_runs_with_stubbed_returns(
     assert "fan_chart" in result["charts"]
     assert "terminal_histogram" in result["charts"]
     assert "sensitivity" in result["charts"]
+    assert "chart_data" in result
+    assert "summary" in result["chart_data"]
+    assert "fan_chart" in result["chart_data"]
+    assert "terminal_distribution" in result["chart_data"]
+    assert "drawdown_distribution" in result["chart_data"]
+    assert "sensitivity_growth" in result["chart_data"]
+    assert "meta" in result["chart_data"]
+    assert result["chart_data"]["fan_chart"]["available"] is True
     assert len(result["scenarios"]) > 0
     assert "monte_carlo" in result["methods"]
 
+
+def test_simulation_service_marks_sensitivity_unavailable_without_monte_carlo(
+    validation_test_settings,
+    monkeypatch,
+):
+    from app.simulation import service as sim_service
+
+    def _stubbed_returns_matrix(*, symbols, benchmark_symbol, lookback_days, frequency):
+        rng = np.random.default_rng(17)
+        matrix = rng.normal(loc=0.001, scale=0.015, size=(420, len(symbols)))
+        benchmark = rng.normal(loc=0.0008, scale=0.012, size=(420,))
+        return matrix, benchmark
+
+    monkeypatch.setattr(sim_service, "_fetch_returns_matrix", _stubbed_returns_matrix)
+    config = parse_simulation_config(
+        payload={
+            "mode": "portfolio",
+            "methods": ["historical", "filtered_historical"],
+            "frequency": "monthly",
+            "horizon_periods": 24,
+            "simulation_count": 600,
+        },
+        fallback_holdings=[
+            {"symbol": "MSFT", "weight_pct": 50.0},
+            {"symbol": "BND", "weight_pct": 50.0},
+        ],
+        fallback_benchmark_symbol="ACWI",
+    )
+    result = run_simulation(
+        profile_name="default_user",
+        settings=validation_test_settings,
+        config=config,
+        persist=False,
+    )
+    sens = result["chart_data"]["sensitivity_growth"]
+    assert sens["available"] is False
+    assert "not run" in sens["reason"].lower()

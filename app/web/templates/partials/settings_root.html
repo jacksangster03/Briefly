@@ -2667,6 +2667,11 @@
       <div class="chart-grid" style="margin-top: 12px;">
         <div class="chart-card">
           <p class="chart-title">Summary</p>
+          <div class="hero-chip-row" style="margin: 0 0 8px;">
+            {% for method in (simulation_latest.chart_data.meta.methods if simulation_latest.chart_data is defined and simulation_latest.chart_data.meta is defined else simulation_latest.config.methods if simulation_latest.config is defined else []) %}
+              <span class="mini-chip">{{ method | replace("_", " ") | title }}</span>
+            {% endfor %}
+          </div>
           <div class="bar-list">
             <div class="bar-row"><div><div class="bar-label">Median Terminal</div></div><div class="bar-value">{{ simulation_latest.summary.median_terminal_value }}</div></div>
             <div class="bar-row"><div><div class="bar-label">5th / 95th</div></div><div class="bar-value">{{ simulation_latest.summary.percentile_5_terminal_value }} / {{ simulation_latest.summary.percentile_95_terminal_value }}</div></div>
@@ -2683,13 +2688,15 @@
           </ul>
         </div>
       </div>
+      <p class="muted" style="margin-top: 10px;">Charts reflect the latest completed run below.</p>
+      <p id="simulation-stale-note" class="tiny" style="display:none;">Inputs changed — rerun simulation to update charts.</p>
       <div class="chart-grid" style="margin-top:10px;">
-        <div class="chart-card wide"><p class="chart-title">Fan Chart (Interactive)</p><div id="simulation-fan-chart" style="height:300px;"></div></div>
-        <div class="chart-card"><p class="chart-title">Terminal Distribution</p><div id="simulation-terminal-hist" style="height:260px;"></div></div>
-        <div class="chart-card"><p class="chart-title">Drawdown Distribution</p><div id="simulation-drawdown-hist" style="height:260px;"></div></div>
-        <div class="chart-card wide"><p class="chart-title">Sensitivity (Growth Shock)</p><div id="simulation-sensitivity" style="height:260px;"></div></div>
+        <div class="chart-card wide"><p class="chart-title">Fan Chart (Interactive)</p><div id="simulation-fan-chart" style="min-height:320px;"></div></div>
+        <div class="chart-card"><p class="chart-title">Terminal Distribution</p><div id="simulation-terminal-distribution" style="min-height:280px;"></div></div>
+        <div class="chart-card"><p class="chart-title">Drawdown Distribution</p><div id="simulation-drawdown-distribution" style="min-height:280px;"></div></div>
+        <div class="chart-card wide"><p class="chart-title">Sensitivity (Growth Shock)</p><div id="simulation-sensitivity-growth" style="min-height:280px;"></div></div>
       </div>
-      <script id="simulation-chart-data" type="application/json">{{ simulation_latest.charts | tojson }}</script>
+      <script id="simulation-chart-data" type="application/json">{{ (simulation_latest.chart_data if simulation_latest.chart_data is defined else simulation_latest.charts) | tojson }}</script>
     {% endif %}
 
     {% if simulation_runs %}

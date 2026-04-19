@@ -63,6 +63,8 @@ def summarize_paths(
         },
         "terminal_histogram": _histogram_payload(terminal, bins=36),
         "drawdown_histogram": _histogram_payload(drawdowns * 100.0, bins=36),
+        "terminal_values": [round(float(v), 4) for v in terminal.tolist()],
+        "drawdown_values_pct": [round(float(v * 100.0), 4) for v in drawdowns.tolist()],
         "sample_paths": [
             [round(float(v), 4) for v in scaled[idx]]
             for idx in np.linspace(0, scaled.shape[0] - 1, num=min(30, scaled.shape[0]), dtype=int)
@@ -76,10 +78,16 @@ def build_sensitivity_payload(
     *,
     values: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    if not values:
+        return {
+            "available": False,
+            "reason": "Sensitivity analysis not run for this simulation.",
+        }
     return {
-        "x": [item["label"] for item in values],
-        "y": [round(float(item["median_terminal_value"]), 2) for item in values],
-        "delta_pct": [round(float(item["delta_pct"]), 2) for item in values],
+        "available": True,
+        "x": [round(float(item["growth_shock"]), 2) for item in values],
+        "y_median_terminal": [round(float(item["median_terminal_value"]), 2) for item in values],
+        "y_prob_loss": [round(float(item["probability_of_loss"]), 6) for item in values],
     }
 
 
@@ -101,4 +109,3 @@ def _histogram_payload(values: np.ndarray, bins: int = 30) -> dict[str, Any]:
         "x": [round(float(v), 4) for v in centers.tolist()],
         "y": [int(v) for v in counts.tolist()],
     }
-
