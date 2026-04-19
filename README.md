@@ -122,7 +122,11 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 **Navigation Discipline & Page Focus (Phase 5.6D)**
 - Portfolio root route (`/ui/portfolio`) now behaves as a summary dashboard only, instead of rendering all builder/risk/CMA/implementation sections inline
 - Route-level section gating is server-side: each portfolio task route renders only its own focused surface
-- Navigation hierarchy is disciplined: compact global nav + one workspace nav, with builder sub-tabs shown only inside Builder routes
+- Navigation hierarchy is strict and minimal:
+  - Home is the only workspace switcher
+  - Workspace roots route into focused subpages
+  - Subpages expose only `← Workspace` and `⌂ Home`
+  - No cross-workspace tab bars on subpages
 - Briefing controls remain isolated to briefing routes; portfolio routes only show briefing impact outputs
 - CMA assumptions now use canonical asset-class dropdowns in the default UI (no free-text asset-class key entry)
 - UX readiness language now distinguishes configured vs partial/unavailable for policy/allocation presentation states
@@ -439,7 +443,15 @@ python -m app.cli --show-output --email-only morning
 
 ```
 Briefly
-  Home | Market Briefing | Portfolio Workbench | Trading Lab (planned) | Audit
+  Home
+    -> Portfolio workspace
+    -> Briefing workspace
+    -> Audit workspace
+    -> Trading workspace (planned)
+
+Workspace navigation contract
+  Subpage header actions: <- Workspace | Home
+  No cross-workspace tabs on subpages
 
 Providers
   Finnhub | NewsAPI | FRED | SEC EDGAR | yfinance
@@ -491,7 +503,7 @@ make test
 python -m pytest app/tests -q
 ```
 
-Current count: **283 tests, 0 failures.**
+Current count: **299 tests, 0 failures.**
 
 Focused test runs:
 

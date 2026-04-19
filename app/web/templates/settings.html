@@ -117,73 +117,54 @@
       max-width: 840px;
     }
 
-    .module-strip {
+    .breadcrumb-row {
       margin-top: 12px;
       display: flex;
       flex-wrap: wrap;
+      align-items: center;
       gap: 8px;
-    }
-
-    .global-nav {
-      margin-top: 12px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .global-link {
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 7px 12px;
-      font-size: 0.76rem;
+      color: var(--muted);
+      font-size: 0.8rem;
       font-weight: 600;
-      letter-spacing: 0.01em;
+    }
+
+    .breadcrumb-row a {
       color: var(--muted);
       text-decoration: none;
-      background: var(--card);
     }
 
-    .global-link.active {
-      color: var(--accent);
-      border-color: var(--accent);
-      background: rgba(245, 159, 0, 0.08);
-    }
-
-    .global-link:hover:not(.active) {
-      border-color: var(--muted);
+    .breadcrumb-row a:hover {
       color: var(--ink);
-      background: var(--card-hover);
     }
 
-    .workspace-strip {
+    .breadcrumb-sep {
+      color: var(--muted);
+      opacity: 0.65;
+    }
+
+    .route-actions {
       margin-top: 10px;
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
     }
 
-    .workspace-link {
+    .route-link {
       border: 1px solid var(--border);
       border-radius: 999px;
       padding: 6px 11px;
-      font-size: 0.75rem;
+      font-size: 0.76rem;
       font-weight: 600;
       letter-spacing: 0.01em;
-      color: var(--muted);
+      color: var(--ink);
       text-decoration: none;
       background: var(--card);
     }
 
-    .workspace-link:hover {
-      color: var(--ink);
+    .route-link:hover {
       border-color: var(--accent);
-      background: var(--card-hover);
-    }
-
-    .workspace-link.active {
       color: var(--accent);
-      border-color: var(--accent);
-      background: rgba(245, 159, 0, 0.08);
+      background: var(--card-hover);
     }
 
     .module-pill {
@@ -257,15 +238,30 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">Briefly</p>
-        <h1 class="title">
-          {% if workspace == "portfolio" %}
-            Portfolio Workbench
-          {% elif workspace == "audit" %}
-            Audit
-          {% else %}
-            Market Briefing
-          {% endif %}
-        </h1>
+        {% set workspace_label = "Portfolio" if workspace == "portfolio" else ("Audit" if workspace == "audit" else "Briefing") %}
+        {% set workspace_root = "/ui/portfolio?profile=" ~ state.profile if workspace == "portfolio" else ("/ui/audit?profile=" ~ state.profile if workspace == "audit" else "/ui/briefing?profile=" ~ state.profile) %}
+        {% set is_workspace_root = page_key in ["portfolio_home", "briefing_home", "audit_home"] %}
+        {% set page_label_map = {
+          "portfolio_home": "Overview",
+          "portfolio_builder_holdings": "Holdings",
+          "portfolio_builder_policy": "Policy",
+          "portfolio_builder_allocation": "Allocation",
+          "portfolio_builder_benchmark": "Benchmark",
+          "portfolio_diagnostics": "Diagnostics",
+          "portfolio_risk": "Risk",
+          "portfolio_cma": "CMA",
+          "portfolio_scenarios": "Scenarios",
+          "portfolio_implementation": "Rebalancing",
+          "portfolio_attribution": "Attribution",
+          "portfolio_simulation": "Simulation Lab",
+          "briefing_home": "Home",
+          "briefing_watchlists": "Watchlists & Coverage",
+          "briefing_delivery": "Delivery",
+          "briefing_morning": "Morning Composition",
+          "audit_home": "Overview"
+        } %}
+        {% set page_label = page_label_map.get(page_key, workspace_page | replace("_", " ") | title) %}
+        <h1 class="title">{{ workspace_label if is_workspace_root else (workspace_label ~ " / " ~ page_label) }}</h1>
         <p class="subtitle">
           {% if workspace == "portfolio" %}
             Summary-first portfolio console. Open one focused route at a time for builder, diagnostics, risk, scenarios, implementation, and attribution.
@@ -275,41 +271,23 @@
             Configure watchlists, coverage priorities, delivery routing, and morning composition in a dedicated briefing workspace.
           {% endif %}
         </p>
-        <nav class="global-nav" aria-label="Global navigation">
-          <a class="global-link {% if global_nav == 'home' %}active{% endif %}" href="/ui?profile={{ state.profile }}">Home</a>
-          <a class="global-link {% if global_nav == 'briefing' %}active{% endif %}" href="/ui/briefing?profile={{ state.profile }}">Briefing</a>
-          <a class="global-link {% if global_nav == 'portfolio' %}active{% endif %}" href="/ui/portfolio?profile={{ state.profile }}">Portfolio</a>
-          <a class="global-link" href="#" aria-disabled="true">Trading (Planned)</a>
-          <a class="global-link {% if global_nav == 'audit' %}active{% endif %}" href="/ui/audit?profile={{ state.profile }}">Audit</a>
-        </nav>
-        {% if workspace == "portfolio" %}
-        <div class="workspace-strip" aria-label="Portfolio routes">
-          <a class="workspace-link {% if workspace_page == 'overview' %}active{% endif %}" href="/ui/portfolio?profile={{ state.profile }}">Overview</a>
-          <a class="workspace-link {% if workspace_page == 'builder' %}active{% endif %}" href="/ui/portfolio/builder?profile={{ state.profile }}">Builder</a>
-          <a class="workspace-link {% if workspace_page == 'diagnostics' %}active{% endif %}" href="/ui/portfolio/diagnostics?profile={{ state.profile }}">Diagnostics</a>
-          <a class="workspace-link {% if workspace_page == 'risk' %}active{% endif %}" href="/ui/portfolio/risk?profile={{ state.profile }}">Risk</a>
-          <a class="workspace-link {% if workspace_page == 'cma' %}active{% endif %}" href="/ui/portfolio/cma?profile={{ state.profile }}">CMA</a>
-          <a class="workspace-link {% if workspace_page == 'scenarios' %}active{% endif %}" href="/ui/portfolio/scenarios?profile={{ state.profile }}">Scenarios</a>
-          <a class="workspace-link {% if workspace_page == 'simulation' %}active{% endif %}" href="/ui/portfolio/simulation?profile={{ state.profile }}">Simulation</a>
-          <a class="workspace-link {% if workspace_page == 'implementation' %}active{% endif %}" href="/ui/portfolio/implementation?profile={{ state.profile }}">Implementation</a>
-          <a class="workspace-link {% if workspace_page == 'attribution' %}active{% endif %}" href="/ui/portfolio/attribution?profile={{ state.profile }}">Attribution</a>
+        <div class="breadcrumb-row" aria-label="Breadcrumb">
+          <a href="/ui?profile={{ state.profile }}">⌂ Home</a>
+          <span class="breadcrumb-sep">/</span>
+          {% if is_workspace_root %}
+            <span>{{ workspace_label }}</span>
+          {% else %}
+            <a href="{{ workspace_root }}">{{ workspace_label }}</a>
+            <span class="breadcrumb-sep">/</span>
+            <span>{{ page_label }}</span>
+          {% endif %}
         </div>
-        {% if workspace_page == "builder" %}
-        <div class="workspace-strip" aria-label="Builder tabs">
-          <a class="workspace-link {% if builder_tab == 'holdings' %}active{% endif %}" href="/ui/portfolio/holdings?profile={{ state.profile }}">Holdings</a>
-          <a class="workspace-link {% if builder_tab == 'policy' %}active{% endif %}" href="/ui/portfolio/policy?profile={{ state.profile }}">Policy</a>
-          <a class="workspace-link {% if builder_tab == 'allocation' %}active{% endif %}" href="/ui/portfolio/allocation?profile={{ state.profile }}">Allocation</a>
-          <a class="workspace-link {% if builder_tab == 'benchmark' %}active{% endif %}" href="/ui/portfolio/benchmark?profile={{ state.profile }}">Benchmark</a>
+        <div class="route-actions" aria-label="Page navigation">
+          {% if not is_workspace_root %}
+            <a class="route-link" href="{{ workspace_root }}">← {{ workspace_label }}</a>
+          {% endif %}
+          <a class="route-link" href="/ui?profile={{ state.profile }}">⌂ Home</a>
         </div>
-        {% endif %}
-        {% elif workspace == "briefing" %}
-        <div class="workspace-strip" aria-label="Briefing tabs">
-          <a class="workspace-link {% if workspace_page in ['home','watchlists'] %}active{% endif %}" href="/ui/briefing/watchlists?profile={{ state.profile }}">Watchlists</a>
-          <a class="workspace-link {% if workspace_page in ['home','watchlists'] %}active{% endif %}" href="/ui/briefing/watchlists?profile={{ state.profile }}">Coverage</a>
-          <a class="workspace-link {% if workspace_page == 'delivery' %}active{% endif %}" href="/ui/briefing/delivery?profile={{ state.profile }}">Delivery</a>
-          <a class="workspace-link {% if workspace_page == 'morning' %}active{% endif %}" href="/ui/briefing/morning?profile={{ state.profile }}">Morning Composition</a>
-        </div>
-        {% endif %}
       </div>
       <button id="themeToggle" class="theme-toggle" type="button">Switch Theme</button>
     </header>

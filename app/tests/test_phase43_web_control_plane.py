@@ -94,13 +94,8 @@ def test_ui_settings_page_renders(client):
     response = client.get("/ui/settings?profile=default_user")
     assert response.status_code == 200
     assert "Briefly" in response.text
-    assert "Market Briefing" in response.text
-    assert "Watchlists" in response.text
-    assert "Coverage" in response.text
-    assert "Delivery" in response.text
-    assert "Morning Composition" in response.text
-    assert "Portfolio Workbench" in response.text
-    assert "Audit" in response.text
+    assert "<h1 class=\"title\">Briefing</h1>" in response.text
+    assert "⌂ Home" in response.text
     assert "Saved settings override your default profile values" in response.text
     assert "<h2>Market Briefing · Watchlists & Coverage Priorities</h2>" in response.text
     assert "<h2>Policy</h2>" not in response.text
@@ -168,13 +163,29 @@ def test_portfolio_root_is_summary_only(client):
 def test_builder_tabs_only_show_in_builder_routes(client):
     builder = client.get("/ui/portfolio/builder?profile=default_user")
     assert builder.status_code == 200
-    assert "Builder tabs" in builder.text
+    assert "← Portfolio" in builder.text
+    assert "⌂ Home" in builder.text
+    assert "Builder tabs" not in builder.text
     assert "<h2>Holdings</h2>" in builder.text
     assert "<h2>Policy</h2>" not in builder.text
 
     diagnostics = client.get("/ui/portfolio/diagnostics?profile=default_user")
     assert diagnostics.status_code == 200
+    assert "← Portfolio" in diagnostics.text
     assert "Builder tabs" not in diagnostics.text
+    assert "Portfolio routes" not in diagnostics.text
+    assert "Global navigation" not in diagnostics.text
+
+
+def test_subpage_navigation_is_limited_to_workspace_and_home(client):
+    risk = client.get("/ui/portfolio/risk?profile=default_user")
+    assert risk.status_code == 200
+    assert "Portfolio / Risk" in risk.text
+    assert "← Portfolio" in risk.text
+    assert "⌂ Home" in risk.text
+    assert "Trading (Planned)" not in risk.text
+    assert "Briefing tabs" not in risk.text
+    assert "Builder tabs" not in risk.text
 
 
 def test_builder_holdings_can_load_validation_preset(client):
