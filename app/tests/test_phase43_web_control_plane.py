@@ -213,6 +213,8 @@ def test_briefing_and_audit_workspace_roots_and_subpages_are_split(client):
     briefing_root = client.get("/ui/briefing?profile=default_user")
     assert briefing_root.status_code == 200
     assert "<h2>Briefing</h2>" in briefing_root.text
+    assert "Regional Intelligence Board" in briefing_root.text
+    assert "Cross-Asset Spillovers" in briefing_root.text
     assert "<h2>Market Briefing · Watchlists &amp; Coverage Priorities</h2>" not in briefing_root.text
 
     briefing_watch = client.get("/ui/briefing/watchlists?profile=default_user")
@@ -399,6 +401,8 @@ def test_api_put_preferences_and_state_roundtrip(client):
     assert "what_matters_now" in state["analysis"]["ui_home"]
     assert "status_chips" in state["analysis"]["ui_home"]
     assert "ui_glossary" in state["metadata"]
+    assert "briefing_region_board" in state["metadata"]
+    assert "rows" in state["metadata"]["briefing_region_board"]
     assert "tracking_error" in state["metadata"]["ui_glossary"]
     assert "short_definition" in state["metadata"]["ui_glossary"]["tracking_error"]
 

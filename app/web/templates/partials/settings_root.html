@@ -6,6 +6,7 @@
 {% set sections = state.effective.sections %}
 {% set watchlist = state.effective.watchlist %}
 {% set metadata = state.metadata %}
+{% set briefing_region_board = metadata.briefing_region_board if metadata.briefing_region_board is defined else {"headline":"", "rows": []} %}
 {% set validations = state.validations %}
 {% set analysis = state.analysis %}
 {% set policy = state.policy %}
@@ -510,6 +511,71 @@
     margin: 0;
     color: var(--ink);
     font-size: 0.8rem;
+  }
+  .region-board-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    margin-top: 10px;
+  }
+  .region-board-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    padding: 10px;
+  }
+  .region-board-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 7px;
+  }
+  .region-board-head strong {
+    font-size: 0.86rem;
+    color: var(--ink);
+  }
+  .region-share {
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-weight: 600;
+  }
+  .region-status {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 7px;
+  }
+  .region-status.lead {
+    background: rgba(31, 170, 111, 0.14);
+    color: var(--success);
+  }
+  .region-status.active {
+    background: rgba(59, 130, 246, 0.14);
+    color: #60a5fa;
+  }
+  .region-status.monitor {
+    background: rgba(245, 159, 0, 0.14);
+    color: var(--accent-strong);
+  }
+  .region-status.underweight,
+  .region-status.needs_attention {
+    background: rgba(234, 84, 85, 0.14);
+    color: var(--error);
+  }
+  .region-focus {
+    margin: 0;
+    color: var(--ink);
+    font-size: 0.79rem;
+  }
+  .region-lens {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 0.76rem;
   }
   .insight-list,
   .issue-list {
@@ -1307,6 +1373,28 @@
         </dd>
         <dt>Next Morning Send</dt><dd>{{ analysis.timing.next_morning_send_local }}</dd>
       </dl>
+    </div>
+
+    <div class="executive-strip" style="margin-top:10px;">
+      <strong>Regional Intelligence Board</strong>
+      <p>{{ briefing_region_board.headline }}</p>
+      <div class="hero-chip-row">
+        <span class="hero-chip">Home region: {{ briefing_region_board.home_region_label }}</span>
+        <span class="hero-chip">Market-link gated, portfolio-aware regional routing</span>
+      </div>
+    </div>
+    <div class="region-board-grid">
+      {% for row in briefing_region_board.rows %}
+        <div class="region-board-card">
+          <div class="region-board-head">
+            <strong>{{ row.label }}</strong>
+            <span class="region-share">{{ row.coverage_share_display }}</span>
+          </div>
+          <span class="region-status {{ row.status }}">{{ row.status_label }}</span>
+          <p class="region-focus">{{ row.focus }}</p>
+          <p class="region-lens">{{ row.portfolio_lens }}</p>
+        </div>
+      {% endfor %}
     </div>
 
     <div class="summary-grid" style="margin-top: 10px;">

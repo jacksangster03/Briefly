@@ -152,6 +152,57 @@ UI_GLOSSARY: dict[str, dict[str, str]] = {
     },
 }
 
+REGIONAL_INTELLIGENCE_BUCKETS: list[dict[str, Any]] = [
+    {
+        "key": "us",
+        "label": "US",
+        "aliases": {"us", "united_states", "north_america"},
+        "focus": "Rates path, megacap earnings, and broad-dollar liquidity conditions.",
+    },
+    {
+        "key": "europe",
+        "label": "Europe",
+        "aliases": {"europe", "eu", "uk", "united_kingdom"},
+        "focus": "ECB policy direction, energy sensitivity, and cyclical export momentum.",
+    },
+    {
+        "key": "china",
+        "label": "China",
+        "aliases": {"china", "greater_china"},
+        "focus": "Growth impulse, policy support cadence, and property-credit confidence.",
+    },
+    {
+        "key": "asia_ex_china",
+        "label": "Rest of Asia",
+        "aliases": {"asia", "asia_pacific", "japan", "korea", "taiwan", "india", "asean"},
+        "focus": "Semiconductor cycle, Japan rates normalization, and Asia FX pressure.",
+    },
+    {
+        "key": "middle_east",
+        "label": "Middle East",
+        "aliases": {"middle_east", "gulf"},
+        "focus": "Energy supply risk, shipping-lane stability, and geopolitical volatility spillover.",
+    },
+    {
+        "key": "russia_ukraine",
+        "label": "Russia/Ukraine",
+        "aliases": {"russia", "ukraine", "russia_ukraine"},
+        "focus": "Sanctions trajectory, commodity flow risk, and Europe risk-premium shifts.",
+    },
+    {
+        "key": "latam",
+        "label": "Latin America",
+        "aliases": {"latam", "latin_america", "brazil", "mexico"},
+        "focus": "Commodity beta, domestic inflation cycles, and EM policy divergence.",
+    },
+    {
+        "key": "cross_asset_spillovers",
+        "label": "Cross-Asset Spillovers",
+        "aliases": {"global", "global_macro", "fx", "commodities", "rates_macro"},
+        "focus": "Cross-market transmission into rates, FX, credit spreads, and volatility.",
+    },
+]
+
 
 def _display_label(value: str) -> str:
     """Render human labels while preserving finance acronyms in uppercase."""
@@ -204,6 +255,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     metadata["holdings_snapshot_summary"] = _build_holdings_snapshot_summary(profile, analysis)
     metadata["override_summaries"] = _build_override_summaries(overrides)
     metadata["delivery_summary"] = _build_delivery_summary(profile)
+    metadata["briefing_region_board"] = _build_briefing_region_board(profile=profile, analysis=analysis)
     metadata["policy_summary"] = _build_policy_summary(policy)
     metadata["allocation_summary"] = _build_allocation_summary(analysis.get("allocation_drift", {}))
     metadata["benchmark_summary"] = benchmark_view
@@ -567,7 +619,18 @@ def _build_followables_catalog(
         for instrument in universe.macro_instruments
     ]
 
-    default_regions = {"us", "europe", "asia", "latam", "middle_east", "global"}
+    default_regions = {
+        "us",
+        "europe",
+        "china",
+        "asia",
+        "asia_ex_china",
+        "middle_east",
+        "russia_ukraine",
+        "latam",
+        "global",
+        "cross_asset_spillovers",
+    }
     profile_regions = set(profile.coverage_weights.keys()) if profile else set()
     if profile and profile.home_region:
         profile_regions.add(profile.home_region)
@@ -811,6 +874,101 @@ def _build_delivery_summary(profile: UserProfile) -> dict[str, str]:
             if bool(profile.delivery.get('llm_shadow_mode', False))
             else "Morning email uses the selected primary formatter."
         ),
+    }
+
+
+def _normalise_region_key(raw: str) -> str:
+    return str(raw or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def _region_bucket_for_key(region_key: str) -> str | None:
+    normalized = _normalise_region_key(region_key)
+    for bucket in REGIONAL_INTELLIGENCE_BUCKETS:
+        if normalized in bucket["aliases"]:
+            return str(bucket["key"])
+    return None
+
+
+def _build_briefing_region_board(*, profile: UserProfile, analysis: dict[str, Any]) -> dict[str, Any]:
+    totals: dict[str, float] = {str(bucket["key"]): 0.0 for bucket in REGIONAL_INTELLIGENCE_BUCKETS}
+    positive_total = 0.0
+    for key, value in (profile.coverage_weights or {}).items():
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if numeric <= 0:
+            continue
+        positive_total += numeric
+        bucket_key = _region_bucket_for_key(str(key))
+        if bucket_key:
+            totals[bucket_key] += numeric
+
+    home_bucket = _region_bucket_for_key(profile.home_region) or "cross_asset_spillovers"
+    top_sector = str(((analysis.get("kpis") or {}).get("top_sector_label") or "core sectors")).strip()
+    holdings_count = len(profile.portfolio_holdings)
+
+    def _status_for_share(share_pct: float) -> tuple[str, str]:
+        if share_pct >= 28.0:
+            return "lead", "Lead"
+        if share_pct >= 14.0:
+            return "active", "Active"
+        if share_pct >= 6.0:
+            return "monitor", "Monitor"
+        return "underweight", "Underweight"
+
+    rows: list[dict[str, Any]] = []
+    for index, bucket in enumerate(REGIONAL_INTELLIGENCE_BUCKETS):
+        key = str(bucket["key"])
+        raw_weight = float(totals.get(key, 0.0))
+        share_pct = (raw_weight / positive_total * 100.0) if positive_total > 0 else 0.0
+        status_key, status_label = _status_for_share(share_pct)
+        if key == home_bucket and share_pct < 8.0:
+            status_key, status_label = "needs_attention", "Needs Attention"
+
+        if key == "cross_asset_spillovers":
+            portfolio_lens = "Prioritize rates/FX/volatility transmission into cross-sleeve risk."
+        elif key == home_bucket:
+            portfolio_lens = (
+                f"Home-region lens ({_display_label(profile.home_region)}) should remain visible in tomorrow's routing."
+            )
+        else:
+            portfolio_lens = (
+                f"Watch for spillover into {top_sector} and {holdings_count} holding(s) as regional narratives rotate."
+            )
+
+        rows.append(
+            {
+                "key": key,
+                "label": str(bucket["label"]),
+                "priority_rank": index + 1,
+                "coverage_weight": raw_weight,
+                "coverage_share_pct": round(share_pct, 1),
+                "coverage_share_display": f"{share_pct:.1f}%",
+                "status": status_key,
+                "status_label": status_label,
+                "focus": str(bucket["focus"]),
+                "portfolio_lens": portfolio_lens,
+                "is_home_region": key == home_bucket,
+            }
+        )
+
+    rows.sort(key=lambda item: (-(item["coverage_share_pct"]), item["priority_rank"]))
+    lead = rows[0] if rows else None
+    secondary = rows[1] if len(rows) > 1 else None
+    headline = (
+        f"Regional lead is {lead['label']} ({lead['coverage_share_display']}). "
+        + (
+            f"Secondary emphasis is {secondary['label']} ({secondary['coverage_share_display']})."
+            if secondary
+            else "Configure additional positive region weights for broader global balance."
+        )
+    ) if lead else "Configure region weights to activate regional intelligence routing."
+
+    return {
+        "headline": headline,
+        "home_region_label": _display_label(profile.home_region),
+        "rows": rows,
     }
 
 

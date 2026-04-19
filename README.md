@@ -210,6 +210,16 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - Applied to high-jargon portfolio routes: Overview, Risk, CMA, Rebalancing, Attribution, and Simulation Lab
 - Tooltip copy is intentionally short (definition + why-it-matters) and keyboard/mobile accessible through `aria-describedby` + focus states
 
+**Regional Intelligence Board (Phase 6.0B)**
+- Briefing workspace root now includes a deterministic **Regional Intelligence Board** designed for market-first geographic orientation
+- Structured region blocks: US, Europe, China, Rest of Asia, Middle East, Russia/Ukraine, Latin America, and Cross-Asset Spillovers
+- Each region card includes:
+  - share of configured region emphasis
+  - status label (Lead / Active / Monitor / Underweight / Needs Attention)
+  - concise focus thesis
+  - portfolio lens text linking regional developments back to likely holdings/sector implications
+- Region board is derived from saved coverage weights + home-region context, preserving deterministic behavior and local-first operation
+
 ### Intelligence pipeline
 
 - Finnhub + NewsAPI event processing with credibility scoring, personal relevance, and clustering
@@ -756,6 +766,7 @@ python -m app.cli simulation runs --profile default_user
 | 5.8 | Complete | Simulation Lab: multi-method simulation engine, macro overrides, interactive charts, persisted runs/presets, and route/API integration |
 | 5.9 | Complete | Easy Setup onboarding wizard: 3-step novice flow that auto-fills policy, allocation, benchmark, CMA, risk preferences, and rebalancing defaults |
 | 6.0A | Complete | Beginner comprehension layer: centralized glossary + reusable question-mark help tooltips across complex portfolio analytics surfaces |
+| 6.0B | Complete | Regional Intelligence Board: briefing-root regional structure with deterministic region statuses, emphasis shares, and portfolio-impact lens copy |
 | 5.7B | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---
