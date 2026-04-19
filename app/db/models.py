@@ -414,3 +414,60 @@ class BreakingStoryState(Base):
     closed = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow)
+
+
+class SimulationRun(Base):
+    """Simulation run metadata and configuration snapshot."""
+
+    __tablename__ = "simulation_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    name = Column(String(120), nullable=True)
+    mode = Column(String(30), nullable=False, default="portfolio")  # portfolio | stock
+    methods_json = Column(JSON, default=list)
+    frequency = Column(String(20), nullable=False, default="monthly")  # daily | weekly | monthly
+    horizon_periods = Column(Integer, nullable=False, default=12)
+    simulation_count = Column(Integer, nullable=False, default=2500)
+    assumption_source = Column(String(30), nullable=False, default="historical")  # historical | cma | manual
+    benchmark_symbol = Column(String(32), nullable=True)
+    status = Column(String(20), nullable=False, default="completed")  # completed | failed
+    config_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+class SimulationResult(Base):
+    """Simulation output payload for a given run."""
+
+    __tablename__ = "simulation_results"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_simulation_result_run"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, nullable=False, index=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    summary_json = Column(Text, nullable=False)
+    charts_json = Column(Text, nullable=False)
+    metrics_json = Column(Text, nullable=False)
+    scenarios_json = Column(Text, nullable=False, default="[]")
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class SimulationPreset(Base):
+    """Saved simulation presets for repeated experimentation."""
+
+    __tablename__ = "simulation_presets"
+    __table_args__ = (
+        UniqueConstraint("profile_name", "preset_name", name="uq_simulation_preset_profile_name"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    preset_name = Column(String(80), nullable=False)
+    description = Column(String(255), nullable=True)
+    config_json = Column(Text, nullable=False)
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)

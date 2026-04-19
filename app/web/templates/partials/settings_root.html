@@ -40,8 +40,16 @@
 {% set override_summaries = metadata.override_summaries %}
 {% set policy_summary = metadata.policy_summary %}
 {% set allocation_summary = metadata.allocation_summary %}
+{% set simulation_ctx = metadata.simulation if metadata.simulation is defined else {} %}
+{% set simulation_defaults = simulation_ctx.defaults if simulation_ctx.defaults is defined else {} %}
+{% set simulation_latest = simulation_ctx.latest_run if simulation_ctx.latest_run is defined else None %}
+{% set simulation_runs = simulation_ctx.runs if simulation_ctx.runs is defined else [] %}
+{% set simulation_presets = simulation_ctx.presets if simulation_ctx.presets is defined else [] %}
+{% set simulation_method_options = simulation_ctx.method_options if simulation_ctx.method_options is defined else [] %}
+{% set simulation_count_presets = simulation_ctx.simulation_count_presets if simulation_ctx.simulation_count_presets is defined else {} %}
+{% set simulation_horizon_presets = simulation_ctx.horizon_presets if simulation_ctx.horizon_presets is defined else {} %}
 {% set visible_sections = visible_sections if visible_sections is defined else [
-  "section-overview","section-analyzer","section-policy","section-allocation","section-risk","section-cma","section-scenarios","section-rebalancing","section-attribution","section-benchmark","section-holdings","section-coverage","section-delivery","section-morning","section-audit"
+  "section-overview","section-analyzer","section-policy","section-allocation","section-risk","section-cma","section-scenarios","section-simulation","section-rebalancing","section-attribution","section-benchmark","section-holdings","section-coverage","section-delivery","section-morning","section-audit"
 ] %}
 {% set workspace = workspace if workspace is defined else "briefing" %}
 {% set workspace_page = workspace_page if workspace_page is defined else "home" %}
@@ -2258,6 +2266,201 @@
         </div>
       {% endfor %}
     </div>
+  </section>
+  {% endif %}
+
+  {% if "section-simulation" in visible_sections %}
+  <section class="card" id="section-simulation" data-module-section="section-simulation">
+    <h2>Simulation Lab</h2>
+    <p class="muted">Interactive stock and portfolio simulation workspace with Monte Carlo, historical, filtered-historical, bootstrap, scenario stress, and sensitivity views.</p>
+
+    <div class="executive-strip">
+      <strong>Run Profile</strong>
+      <p>Choose horizon, frequency, methods, and macro assumptions. Use Fast/Standard/Deep presets depending on speed vs tail-stability needs.</p>
+      <div class="hero-chip-row">
+        <span class="hero-chip">Fast: {{ simulation_count_presets.fast if simulation_count_presets else 500 }}</span>
+        <span class="hero-chip">Standard: {{ simulation_count_presets.standard if simulation_count_presets else 2500 }}</span>
+        <span class="hero-chip">Deep: {{ simulation_count_presets.deep if simulation_count_presets else 10000 }}</span>
+      </div>
+    </div>
+
+    <form hx-post="/ui/profile/{{ state.profile }}/simulation/run" hx-target="#settings-root" hx-swap="outerHTML" method="post" class="tracked-form">
+      <div class="inline-grid">
+        <div class="field">
+          <label for="simulation_name">Run Name</label>
+          <input id="simulation_name" type="text" name="simulation_name" value="{{ simulation_defaults.name if simulation_defaults else '' }}" placeholder="e.g. 5Y baseline">
+        </div>
+        <div class="field">
+          <label for="simulation_mode">Mode</label>
+          <select id="simulation_mode" name="simulation_mode">
+            <option value="portfolio" {% if not simulation_defaults or simulation_defaults.mode != "stock" %}selected{% endif %}>Portfolio</option>
+            <option value="stock" {% if simulation_defaults and simulation_defaults.mode == "stock" %}selected{% endif %}>Single Stock</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="simulation_frequency">Frequency</label>
+          {% set _freq = simulation_defaults.frequency if simulation_defaults else "monthly" %}
+          <select id="simulation_frequency" name="simulation_frequency">
+            <option value="daily" {% if _freq == "daily" %}selected{% endif %}>Daily</option>
+            <option value="weekly" {% if _freq == "weekly" %}selected{% endif %}>Weekly</option>
+            <option value="monthly" {% if _freq == "monthly" %}selected{% endif %}>Monthly</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="simulation_horizon_preset">Horizon Preset</label>
+          <select id="simulation_horizon_preset" name="simulation_horizon_preset">
+            <option value="">Custom periods</option>
+            {% for key, value in simulation_horizon_presets.items() %}
+              <option value="{{ key }}">{{ key | upper }} · {{ value[0] }} periods ({{ value[1] }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="simulation_horizon_periods">Horizon Periods</label>
+          <input id="simulation_horizon_periods" type="number" min="1" max="600" step="1" name="simulation_horizon_periods" value="{{ simulation_defaults.horizon_periods if simulation_defaults else 60 }}">
+        </div>
+        <div class="field">
+          <label for="simulation_count_preset">Simulation Count Preset</label>
+          <select id="simulation_count_preset" name="simulation_count_preset">
+            <option value="fast">Fast (500)</option>
+            <option value="standard" selected>Standard (2,500)</option>
+            <option value="deep">Deep (10,000)</option>
+            <option value="">Custom</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="simulation_count">Custom Simulation Count</label>
+          <input id="simulation_count" type="number" min="100" max="100000" step="100" name="simulation_count" value="{{ simulation_defaults.simulation_count if simulation_defaults else 2500 }}">
+        </div>
+        <div class="field">
+          <label for="simulation_assumption_source">Assumption Source</label>
+          {% set _src = simulation_defaults.assumption_source if simulation_defaults else "historical" %}
+          <select id="simulation_assumption_source" name="simulation_assumption_source">
+            <option value="historical" {% if _src == "historical" %}selected{% endif %}>Historical</option>
+            <option value="cma" {% if _src == "cma" %}selected{% endif %}>CMA Forward</option>
+            <option value="manual" {% if _src == "manual" %}selected{% endif %}>Manual Macro</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="simulation_benchmark_symbol">Benchmark Symbol</label>
+          <input id="simulation_benchmark_symbol" type="text" name="simulation_benchmark_symbol" value="{{ simulation_defaults.benchmark_symbol if simulation_defaults else 'ACWI' }}">
+        </div>
+        <div class="field">
+          <label for="simulation_start_value">Start Value</label>
+          <input id="simulation_start_value" type="number" min="1" step="1" name="simulation_start_value" value="{{ simulation_defaults.start_value if simulation_defaults else 100 }}">
+        </div>
+      </div>
+
+      <div class="inline-grid" style="margin-top: 8px;">
+        <div class="field"><label for="simulation_growth_shock">Growth Shock</label><input id="simulation_growth_shock" type="number" step="0.5" min="-3" max="3" name="simulation_growth_shock" value="0"></div>
+        <div class="field"><label for="simulation_inflation_shock">Inflation Shock</label><input id="simulation_inflation_shock" type="number" step="0.5" min="-3" max="3" name="simulation_inflation_shock" value="0"></div>
+        <div class="field"><label for="simulation_rates_shock">Rates Shock</label><input id="simulation_rates_shock" type="number" step="0.5" min="-3" max="3" name="simulation_rates_shock" value="0"></div>
+        <div class="field"><label for="simulation_volatility_regime">Volatility Regime</label><input id="simulation_volatility_regime" type="number" step="0.5" min="-3" max="3" name="simulation_volatility_regime" value="0"></div>
+        <div class="field"><label for="simulation_correlation_stress">Correlation Stress</label><input id="simulation_correlation_stress" type="number" step="0.5" min="-3" max="3" name="simulation_correlation_stress" value="0"></div>
+      </div>
+
+      <div class="field">
+        <label>Methods</label>
+        <div class="check-grid">
+          {% set selected_methods = simulation_defaults.methods if simulation_defaults and simulation_defaults.methods else ["monte_carlo", "historical"] %}
+          {% for method in simulation_method_options %}
+            <label class="check-item">
+              <input type="checkbox" name="simulation_methods" value="{{ method.key }}" {% if method.key in selected_methods %}checked{% endif %}>
+              {{ method.label }}
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="table-wrap" style="margin-top: 10px;">
+        <table>
+          <thead><tr><th>Symbol</th><th>Weight %</th></tr></thead>
+          <tbody>
+            {% set _sim_holdings = simulation_defaults.holdings if simulation_defaults and simulation_defaults.holdings else state.holdings %}
+            {% for row in _sim_holdings[:20] %}
+              <tr>
+                <td>
+                  {{ row.symbol if row.symbol is defined else row["symbol"] }}
+                  <input type="hidden" name="simulation_holding_symbol" value="{{ row.symbol if row.symbol is defined else row['symbol'] }}">
+                </td>
+                <td><input type="number" step="0.1" min="0" max="100" name="simulation_holding_weight" value="{{ row.weight_pct if row.weight_pct is defined else row['weight_pct'] }}"></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="actions"><button type="submit">Run Simulation</button></div>
+    </form>
+
+    <div class="inline-grid" style="margin-top: 12px;">
+      <form hx-post="/ui/profile/{{ state.profile }}/simulation/preset/save" hx-target="#settings-root" hx-swap="outerHTML" method="post" class="tracked-form">
+        <div class="field"><label for="simulation_preset_name">Save Preset</label><input id="simulation_preset_name" type="text" name="simulation_preset_name" placeholder="e.g. strategic_5y"></div>
+        <div class="field"><label for="simulation_preset_description">Description</label><input id="simulation_preset_description" type="text" name="simulation_preset_description" placeholder="Optional notes"></div>
+        <div class="actions"><button type="submit" class="secondary">Save Preset</button></div>
+      </form>
+      <form hx-post="/ui/profile/{{ state.profile }}/simulation/preset/load" hx-target="#settings-root" hx-swap="outerHTML" method="post" class="tracked-form">
+        <div class="field">
+          <label for="simulation_preset_load_name">Load Preset</label>
+          <select id="simulation_preset_load_name" name="simulation_preset_load_name">
+            <option value="">Select preset…</option>
+            {% for item in simulation_presets %}
+              <option value="{{ item.preset_name }}">{{ item.preset_name }}{% if item.description %} — {{ item.description }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="actions"><button type="submit" class="secondary">Load Preset</button></div>
+      </form>
+    </div>
+
+    {% if simulation_latest %}
+      <div class="chart-grid" style="margin-top: 12px;">
+        <div class="chart-card">
+          <p class="chart-title">Summary</p>
+          <div class="bar-list">
+            <div class="bar-row"><div><div class="bar-label">Median Terminal</div></div><div class="bar-value">{{ simulation_latest.summary.median_terminal_value }}</div></div>
+            <div class="bar-row"><div><div class="bar-label">5th / 95th</div></div><div class="bar-value">{{ simulation_latest.summary.percentile_5_terminal_value }} / {{ simulation_latest.summary.percentile_95_terminal_value }}</div></div>
+            <div class="bar-row"><div><div class="bar-label">Prob Loss</div></div><div class="bar-value">{{ simulation_latest.summary.probability_of_loss_pct }}%</div></div>
+            <div class="bar-row"><div><div class="bar-label">VaR95 / CVaR95</div></div><div class="bar-value">{{ simulation_latest.summary.var_95_pct }}% / {{ simulation_latest.summary.cvar_95_pct }}%</div></div>
+          </div>
+        </div>
+        <div class="chart-card">
+          <p class="chart-title">Scenario Pack</p>
+          <ul class="insight-list">
+            {% for row in simulation_latest.scenarios[:5] %}
+              <li class="insight-item"><strong>{{ row.name | replace("_"," ") | title }}</strong><p>{{ row.impact_display }} · {{ row.action }}</p></li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      <div class="chart-grid" style="margin-top:10px;">
+        <div class="chart-card wide"><p class="chart-title">Fan Chart (Interactive)</p><div id="simulation-fan-chart" style="height:300px;"></div></div>
+        <div class="chart-card"><p class="chart-title">Terminal Distribution</p><div id="simulation-terminal-hist" style="height:260px;"></div></div>
+        <div class="chart-card"><p class="chart-title">Drawdown Distribution</p><div id="simulation-drawdown-hist" style="height:260px;"></div></div>
+        <div class="chart-card wide"><p class="chart-title">Sensitivity (Growth Shock)</p><div id="simulation-sensitivity" style="height:260px;"></div></div>
+      </div>
+      <script id="simulation-chart-data" type="application/json">{{ simulation_latest.charts | tojson }}</script>
+    {% endif %}
+
+    {% if simulation_runs %}
+      <div class="table-wrap" style="margin-top: 12px;">
+        <table>
+          <thead><tr><th>Run ID</th><th>Methods</th><th>Frequency</th><th>Horizon</th><th>Sims</th><th>Status</th><th>Created</th></tr></thead>
+          <tbody>
+            {% for run in simulation_runs %}
+              <tr>
+                <td>{{ run.run_id }}</td>
+                <td>{{ run.methods | join(", ") }}</td>
+                <td>{{ run.frequency }}</td>
+                <td>{{ run.horizon_periods }}</td>
+                <td>{{ run.simulation_count }}</td>
+                <td>{{ run.status }}</td>
+                <td>{{ run.created_at }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
   </section>
   {% endif %}
 

@@ -142,6 +142,11 @@ def test_ui_workspace_routes_set_initial_module_and_section(client):
     assert 'data-page-key="portfolio_risk"' in risk.text
     assert 'data-initial-section="section-risk"' in risk.text
 
+    simulation = client.get("/ui/portfolio/simulation?profile=default_user")
+    assert simulation.status_code == 200
+    assert 'data-page-key="portfolio_simulation"' in simulation.text
+    assert 'data-initial-section="section-simulation"' in simulation.text
+
     audit = client.get("/ui/audit?profile=default_user")
     assert audit.status_code == 200
     assert 'data-page-key="audit_home"' in audit.text
@@ -157,6 +162,7 @@ def test_portfolio_root_is_summary_only(client):
     assert "<h2>Policy</h2>" not in response.text
     assert "<h2>Allocation</h2>" not in response.text
     assert "<h2>Risk &amp; Benchmark Analytics</h2>" not in response.text
+    assert "<h2>Simulation Lab</h2>" not in response.text
 
 
 def test_builder_tabs_only_show_in_builder_routes(client):

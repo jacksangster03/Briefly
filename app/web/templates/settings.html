@@ -15,6 +15,7 @@
     })();
   </script>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <style>
     :root {
       --bg: #0b0d12;
@@ -289,6 +290,7 @@
           <a class="workspace-link {% if workspace_page == 'risk' %}active{% endif %}" href="/ui/portfolio/risk?profile={{ state.profile }}">Risk</a>
           <a class="workspace-link {% if workspace_page == 'cma' %}active{% endif %}" href="/ui/portfolio/cma?profile={{ state.profile }}">CMA</a>
           <a class="workspace-link {% if workspace_page == 'scenarios' %}active{% endif %}" href="/ui/portfolio/scenarios?profile={{ state.profile }}">Scenarios</a>
+          <a class="workspace-link {% if workspace_page == 'simulation' %}active{% endif %}" href="/ui/portfolio/simulation?profile={{ state.profile }}">Simulation</a>
           <a class="workspace-link {% if workspace_page == 'implementation' %}active{% endif %}" href="/ui/portfolio/implementation?profile={{ state.profile }}">Implementation</a>
           <a class="workspace-link {% if workspace_page == 'attribution' %}active{% endif %}" href="/ui/portfolio/attribution?profile={{ state.profile }}">Attribution</a>
         </div>
@@ -686,6 +688,68 @@
         });
       }
 
+      function initSimulationCharts(root = document) {
+        const dataNode = root.querySelector("#simulation-chart-data");
+        if (!dataNode || typeof window.Plotly === "undefined") return;
+        let payload;
+        try {
+          payload = JSON.parse(dataNode.textContent || "{}");
+        } catch {
+          return;
+        }
+        const fan = payload.fan_chart || {};
+        const fanTarget = root.querySelector("#simulation-fan-chart");
+        if (fanTarget && fan.x) {
+          window.Plotly.newPlot(
+            fanTarget,
+            [
+              { x: fan.x, y: fan.p95 || [], mode: "lines", name: "P95", line: { width: 1, color: "#7aa2ff" } },
+              { x: fan.x, y: fan.p75 || [], mode: "lines", name: "P75", line: { width: 1, color: "#4fd1c5" } },
+              { x: fan.x, y: fan.p50 || [], mode: "lines", name: "Median", line: { width: 3, color: "#f59f00" } },
+              { x: fan.x, y: fan.p25 || [], mode: "lines", name: "P25", line: { width: 1, color: "#4fd1c5" } },
+              { x: fan.x, y: fan.p05 || [], mode: "lines", name: "P05", line: { width: 1, color: "#7aa2ff" } },
+            ],
+            {
+              margin: { l: 40, r: 10, t: 10, b: 30 },
+              legend: { orientation: "h" },
+              paper_bgcolor: "rgba(0,0,0,0)",
+              plot_bgcolor: "rgba(0,0,0,0)",
+            },
+            { responsive: true, displayModeBar: false }
+          );
+        }
+        const term = payload.terminal_histogram || {};
+        const termTarget = root.querySelector("#simulation-terminal-hist");
+        if (termTarget && term.x) {
+          window.Plotly.newPlot(
+            termTarget,
+            [{ x: term.x || [], y: term.y || [], type: "bar", marker: { color: "#f59f00" } }],
+            { margin: { l: 40, r: 10, t: 10, b: 30 }, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" },
+            { responsive: true, displayModeBar: false }
+          );
+        }
+        const dd = payload.drawdown_histogram || {};
+        const ddTarget = root.querySelector("#simulation-drawdown-hist");
+        if (ddTarget && dd.x) {
+          window.Plotly.newPlot(
+            ddTarget,
+            [{ x: dd.x || [], y: dd.y || [], type: "bar", marker: { color: "#ea5455" } }],
+            { margin: { l: 40, r: 10, t: 10, b: 30 }, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" },
+            { responsive: true, displayModeBar: false }
+          );
+        }
+        const sens = payload.sensitivity || {};
+        const sensTarget = root.querySelector("#simulation-sensitivity");
+        if (sensTarget && sens.x) {
+          window.Plotly.newPlot(
+            sensTarget,
+            [{ x: sens.x || [], y: sens.delta_pct || [], type: "bar", marker: { color: "#60a5fa" } }],
+            { margin: { l: 40, r: 10, t: 10, b: 40 }, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)" },
+            { responsive: true, displayModeBar: false }
+          );
+        }
+      }
+
       window.addEventListener("beforeunload", (event) => {
         if (!hasUnsavedChanges) return;
         event.preventDefault();
@@ -697,6 +761,7 @@
         initWatchlistBuilders(document);
         bindUnsavedChangesGuard(document);
         initHoldingsEditor();
+        initSimulationCharts(document);
         const explicitSection = (document.body.dataset.initialSection || "").trim();
         syncPageHiddenInputs(document);
         if (explicitSection) {
@@ -711,6 +776,7 @@
           initWatchlistBuilders(target);
           bindUnsavedChangesGuard(target);
           initHoldingsEditor();
+          initSimulationCharts(target);
           syncPageHiddenInputs(document);
           clearDirty();
         }

@@ -383,6 +383,94 @@ def validation_fuzz(ctx, profile_name: str, cases: int, seed: int, json_output: 
         raise click.ClickException("Fuzz validation found failing cases.")
 
 
+@cli.group("simulation")
+def simulation():
+    """Phase 5.8 simulation lab commands."""
+
+
+@simulation.command("run")
+@click.option("--profile", "profile_name", default="default_user", show_default=True)
+@click.option("--mode", default="portfolio", show_default=True, type=click.Choice(["portfolio", "stock"]))
+@click.option("--methods", default="monte_carlo,historical", show_default=True, help="Comma-separated methods.")
+@click.option("--frequency", default="monthly", show_default=True, type=click.Choice(["daily", "weekly", "monthly"]))
+@click.option("--horizon-periods", default=60, show_default=True, type=int)
+@click.option("--simulation-count", default=2500, show_default=True, type=int)
+@click.option("--assumption-source", default="historical", show_default=True, type=click.Choice(["historical", "cma", "manual"]))
+@click.option("--benchmark", "benchmark_symbol", default="ACWI", show_default=True)
+@click.option("--start-value", default=100.0, show_default=True, type=float)
+@click.option("--json-output/--text-output", default=False)
+@click.pass_context
+def simulation_run(
+    ctx,
+    profile_name: str,
+    mode: str,
+    methods: str,
+    frequency: str,
+    horizon_periods: int,
+    simulation_count: int,
+    assumption_source: str,
+    benchmark_symbol: str,
+    start_value: float,
+    json_output: bool,
+):
+    """Run a simulation using current profile holdings."""
+    from app.simulation.service import parse_simulation_config, run_simulation
+    from app.web.control_plane_service import build_profile_state
+
+    init_db()
+    settings = ctx.obj["settings"]
+    state = build_profile_state(settings, profile_name)
+    payload = {
+        "mode": mode,
+        "methods": [item.strip() for item in methods.split(",") if item.strip()],
+        "frequency": frequency,
+        "horizon_periods": horizon_periods,
+        "simulation_count": simulation_count,
+        "assumption_source": assumption_source,
+        "benchmark_symbol": benchmark_symbol,
+        "start_value": start_value,
+    }
+    config = parse_simulation_config(
+        payload=payload,
+        fallback_holdings=state.get("holdings", []),
+        fallback_benchmark_symbol=str(state.get("benchmark", {}).get("base_symbol") or "ACWI"),
+    )
+    result = run_simulation(
+        profile_name=profile_name,
+        settings=settings,
+        config=config,
+        persist=True,
+    )
+    if json_output:
+        click.echo(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        summary = result.get("summary", {})
+        click.echo(f"Simulation completed for profile '{profile_name}'")
+        click.echo(f"  Median terminal: {summary.get('median_terminal_value')}")
+        click.echo(f"  P5/P95: {summary.get('percentile_5_terminal_value')} / {summary.get('percentile_95_terminal_value')}")
+        click.echo(f"  Prob loss: {summary.get('probability_of_loss_pct')}%")
+        click.echo(f"  VaR95/CVaR95: {summary.get('var_95_pct')}% / {summary.get('cvar_95_pct')}%")
+
+
+@simulation.command("runs")
+@click.option("--profile", "profile_name", default="default_user", show_default=True)
+@click.option("--limit", default=20, show_default=True, type=int)
+def simulation_runs(profile_name: str, limit: int):
+    """List recent simulation runs."""
+    from app.simulation.repository import list_simulation_runs
+
+    init_db()
+    rows = list_simulation_runs(profile_name, limit=limit)
+    if not rows:
+        click.echo("(no simulation runs)")
+        return
+    for row in rows:
+        click.echo(
+            f"- #{row['run_id']} {','.join(row['methods'])} {row['frequency']} "
+            f"h={row['horizon_periods']} sims={row['simulation_count']} {row['status']} {row['created_at']}"
+        )
+
+
 @cli.command("init-db")
 @click.pass_context
 def init_database(ctx):

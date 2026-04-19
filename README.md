@@ -33,7 +33,7 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 - Static PNG chart cards: Market Snapshot, Macro Risk Strip, Top Holdings Performance, Sector Exposure vs Performance, Event-Linked Trend
 - HTML email with inline charts
 
-### Portfolio workbench (Phases 4.7–5.7A)
+### Portfolio workbench (Phases 4.7–5.8)
 
 The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full portfolio workbench:
 
@@ -135,6 +135,29 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - Randomized fuzz harness (`validation fuzz`) generates constrained random portfolios and checks state invariants for robustness
 - Builder UI includes a **Load Test Preset** action for rapid scenario iteration from `/ui/portfolio/holdings`
 
+**Simulation Lab (Phase 5.8)**
+- Dedicated portfolio route: `/ui/portfolio/simulation?profile=default_user`
+- Supports `portfolio` and `single stock` simulation modes
+- Multi-method engine stack:
+  - Monte Carlo (multivariate)
+  - Historical simulation
+  - Filtered historical simulation
+  - Block bootstrap simulation
+- Structured macro override controls: growth shock, inflation shock, rates shock, volatility regime, correlation stress
+- Horizon/frequency controls with presets and custom periods
+- Simulation run presets:
+  - Fast: 500
+  - Standard: 2,500
+  - Deep: 10,000
+- Interactive chart outputs:
+  - Fan chart percentile cone (P05/P25/P50/P75/P95)
+  - Terminal value distribution histogram
+  - Drawdown distribution histogram
+  - Sensitivity bar chart (growth-shock sweep)
+- Deterministic scenario pack summary:
+  recession, soft landing, inflation re-acceleration, rates up/down, oil shock, USD spike, AI capex boom
+- Persisted simulation runs and saved presets in SQLite for repeatable comparisons
+
 ### Intelligence pipeline
 
 - Finnhub + NewsAPI event processing with credibility scoring, personal relevance, and clustering
@@ -211,6 +234,10 @@ python -m app.cli validation presets
 python -m app.cli validation run --preset allocation_drift_case --profile default_user
 python -m app.cli validation sweep --preset balanced_60_40 --dimension top_holding_pct --values 10,15,22,30
 python -m app.cli validation fuzz --profile default_user --cases 25 --seed 42
+
+# Phase 5.8 simulation lab
+python -m app.cli simulation run --profile default_user --methods monte_carlo,historical --frequency monthly --horizon-periods 60 --simulation-count 2500
+python -m app.cli simulation runs --profile default_user
 ```
 
 ### Dry-run and output inspection
@@ -298,6 +325,12 @@ GET    /api/v1/profile/{profile}/rebalancing/history
 GET    /api/v1/profile/{profile}/attribution
 POST   /api/v1/profile/{profile}/attribution/generate
 GET    /api/v1/profile/{profile}/attribution/history
+
+POST   /api/v1/profile/{profile}/simulation/run
+GET    /api/v1/profile/{profile}/simulation/runs
+GET    /api/v1/profile/{profile}/simulation/runs/{run_id}
+GET    /api/v1/profile/{profile}/simulation/presets
+POST   /api/v1/profile/{profile}/simulation/presets
 ```
 
 ### Preferences reference
@@ -431,6 +464,7 @@ Portfolio workbench layers
   -> CMA Builder (Phase 5.3)
   -> Rebalancing Engine (Phase 5.4)
   -> Attribution (Phase 5.5)
+  -> Simulation Lab (Phase 5.8)
 
 Portfolio analyzer
   build_portfolio_analysis()
@@ -444,6 +478,7 @@ Persistence (SQLite)
   BenchmarkConfig | PortfolioReturnSeries | BenchmarkPriceCache
   RiskMetricsSnapshot | CMAEntry | CMACorrelation
   RebalancingConfig | RebalanceProposal | AttributionSnapshot
+  SimulationRun | SimulationResult | SimulationPreset
 ```
 
 ---
@@ -469,6 +504,8 @@ python -m pytest app/tests/test_phase55_attribution.py -q
 python -m pytest app/tests/test_phase57_validation_runner.py -q
 python -m pytest app/tests/test_phase57_sweeps.py -q
 python -m pytest app/tests/test_phase57_fuzz.py -q
+python -m pytest app/tests/test_phase58_simulation_service.py -q
+python -m pytest app/tests/test_phase58_simulation_api.py -q
 python -m pytest app/tests/test_portfolio_phase3.py -q
 python -m pytest app/tests/test_market_data.py -q
 python -m pytest app/tests/test_circuit_breaker.py -q
@@ -488,6 +525,7 @@ Test coverage includes:
 - Rebalancing engine: drift detection, trade list generation, turnover, cost estimation, proposal persistence
 - Attribution: Brinson-Hood-Beebower allocation effect, selection/interaction effect (zero in v1), waterfall, persistence
 - Validation harness: canonical presets, golden checks, parameter sweeps, and randomized invariant testing
+- Simulation lab: multi-method forward/risk engine, macro override controls, persisted runs/presets, and interactive charts
 - LLM email render guardrails, shadow mode, and fallback behaviour
 - Provider circuit breaker and quote fallback
 
@@ -565,6 +603,23 @@ python -m app.cli validation sweep \
 python -m app.cli validation fuzz --profile default_user --cases 50 --seed 7
 ```
 
+### Run 5.8 simulation workflows
+
+```bash
+# Run a standard 5-year monthly simulation on current profile holdings
+python -m app.cli simulation run \
+  --profile default_user \
+  --methods monte_carlo,historical,bootstrap \
+  --frequency monthly \
+  --horizon-periods 60 \
+  --simulation-count 2500 \
+  --assumption-source historical \
+  --benchmark ACWI
+
+# List recent persisted simulation runs
+python -m app.cli simulation runs --profile default_user
+```
+
 ---
 
 ## Roadmap
@@ -584,6 +639,7 @@ python -m app.cli validation fuzz --profile default_user --cases 50 --seed 7
 | 5.6C | Complete | Personalized home workspace: what-matters-now hero, deterministic home summaries, prioritized workflow actions, and secondary audit treatment |
 | 5.6D | Complete | Navigation discipline and page focus: portfolio root as dashboard-only, builder isolation, route-level section gating, and canonical CMA asset-class UI controls |
 | 5.7A | Complete | Portfolio simulation and validation harness: canonical presets, golden checks, parameter sweeps, fuzz tests, and Builder preset loading |
+| 5.8 | Complete | Simulation Lab: multi-method simulation engine, macro overrides, interactive charts, persisted runs/presets, and route/API integration |
 | 5.7B | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---

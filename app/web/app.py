@@ -60,6 +60,7 @@ _ALL_SECTIONS = [
     "section-scenarios",
     "section-rebalancing",
     "section-attribution",
+    "section-simulation",
     "section-benchmark",
     "section-holdings",
     "section-coverage",
@@ -163,6 +164,12 @@ _PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
         "workspace_page": "attribution",
         "visible_sections": ["section-attribution"],
     },
+    "portfolio_simulation": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "simulation",
+        "visible_sections": ["section-simulation"],
+    },
     "audit_home": {
         "global_nav": "audit",
         "workspace": "audit",
@@ -199,6 +206,10 @@ class CMACorrelationsUpdateRequest(BaseModel):
 
 
 class RebalancingConfigUpdateRequest(BaseModel):
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class SimulationRunRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -324,6 +335,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             "implementation": "portfolio_implementation",
             "rebalancing": "portfolio_implementation",
             "attribution": "portfolio_attribution",
+            "simulation": "portfolio_simulation",
             "overview": "portfolio_home",
         }
         page_key = view_to_page.get((view or "").strip().lower())
@@ -629,6 +641,125 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 status_code=400,
                 page_key=page_key,
             )
+
+    @app.post(
+        "/ui/profile/{profile}/simulation/run",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_run_simulation(request: Request, profile: str):
+        from app.simulation.service import parse_simulation_config, run_simulation
+
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_simulation")
+        try:
+            state = build_profile_state(_settings(request), normalized_profile)
+            payload = _simulation_payload_from_form(form)
+            config = parse_simulation_config(
+                payload=payload,
+                fallback_holdings=state.get("holdings", []),
+                fallback_benchmark_symbol=str(state.get("benchmark", {}).get("base_symbol") or "ACWI"),
+            )
+            result = run_simulation(
+                profile_name=normalized_profile,
+                settings=_settings(request),
+                config=config,
+                persist=True,
+            )
+            state = build_profile_state(_settings(request), normalized_profile)
+            state.setdefault("metadata", {}).setdefault("simulation", {})["latest_run"] = result
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message="Simulation run completed.",
+                message_kind="success",
+                state=state,
+                page_key=page_key,
+            )
+        except Exception as exc:
+            logger.error("simulation run failed: %s", exc)
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Simulation run failed: {exc}",
+                message_kind="error",
+                status_code=400,
+                page_key=page_key,
+            )
+
+    @app.post(
+        "/ui/profile/{profile}/simulation/preset/save",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_simulation_preset(request: Request, profile: str):
+        from app.simulation.service import save_preset_from_config
+
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_simulation")
+        try:
+            payload = _simulation_payload_from_form(form)
+            preset_name = str(form.get("simulation_preset_name", "")).strip()
+            description = str(form.get("simulation_preset_description", "")).strip()
+            save_preset_from_config(
+                profile_name=normalized_profile,
+                preset_name=preset_name,
+                description=description,
+                config_payload=payload,
+            )
+            state = build_profile_state(_settings(request), normalized_profile)
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Saved simulation preset '{preset_name}'.",
+                message_kind="success",
+                state=state,
+                page_key=page_key,
+            )
+        except Exception as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Saving simulation preset failed: {exc}",
+                message_kind="error",
+                status_code=400,
+                page_key=page_key,
+            )
+
+    @app.post(
+        "/ui/profile/{profile}/simulation/preset/load",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_load_simulation_preset(request: Request, profile: str):
+        from app.simulation.service import load_preset_config
+
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_simulation")
+        preset_name = str(form.get("simulation_preset_load_name", "")).strip()
+        preset = load_preset_config(normalized_profile, preset_name)
+        if not preset:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Preset '{preset_name}' not found.",
+                message_kind="error",
+                status_code=404,
+                page_key=page_key,
+            )
+        state = build_profile_state(_settings(request), normalized_profile)
+        state.setdefault("metadata", {}).setdefault("simulation", {})["defaults"] = preset
+        return _render_settings_root(
+            request,
+            profile=normalized_profile,
+            message=f"Loaded simulation preset '{preset_name}'.",
+            message_kind="success",
+            state=state,
+            page_key=page_key,
+        )
 
     @app.post(
         "/ui/profile/{profile}/reset",
@@ -1047,6 +1178,66 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         normalized_profile = _normalize_profile(profile)
         return {"history": load_attribution_history(normalized_profile, limit=limit)}
 
+    @app.post("/api/v1/profile/{profile}/simulation/run")
+    def api_run_simulation(profile: str, payload: SimulationRunRequest):
+        from app.simulation.service import parse_simulation_config, run_simulation
+
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings_from_app(app), normalized_profile)
+        config = parse_simulation_config(
+            payload=payload.payload,
+            fallback_holdings=state.get("holdings", []),
+            fallback_benchmark_symbol=str(state.get("benchmark", {}).get("base_symbol") or "ACWI"),
+        )
+        return run_simulation(
+            profile_name=normalized_profile,
+            settings=_settings_from_app(app),
+            config=config,
+            persist=True,
+        )
+
+    @app.get("/api/v1/profile/{profile}/simulation/runs")
+    def api_simulation_runs(profile: str, limit: int = Query(default=20, ge=1, le=200)):
+        from app.simulation.repository import list_simulation_runs
+
+        normalized_profile = _normalize_profile(profile)
+        return {"runs": list_simulation_runs(normalized_profile, limit=limit)}
+
+    @app.get("/api/v1/profile/{profile}/simulation/runs/{run_id}")
+    def api_simulation_run(profile: str, run_id: int):
+        from app.simulation.service import fetch_run
+
+        normalized_profile = _normalize_profile(profile)
+        run = fetch_run(normalized_profile, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail={"error": "Simulation run not found"})
+        return run
+
+    @app.get("/api/v1/profile/{profile}/simulation/presets")
+    def api_simulation_presets(profile: str):
+        from app.simulation.repository import list_simulation_presets
+
+        normalized_profile = _normalize_profile(profile)
+        return {"presets": list_simulation_presets(normalized_profile)}
+
+    @app.post("/api/v1/profile/{profile}/simulation/presets")
+    def api_save_simulation_preset(profile: str, payload: SimulationRunRequest):
+        from app.simulation.service import save_preset_from_config
+
+        normalized_profile = _normalize_profile(profile)
+        body = payload.payload or {}
+        name = str(body.get("preset_name") or "").strip()
+        description = str(body.get("description") or "").strip()
+        config = body.get("config")
+        if not name or not isinstance(config, dict):
+            raise HTTPException(status_code=400, detail={"error": "preset_name and config are required"})
+        return save_preset_from_config(
+            profile_name=normalized_profile,
+            preset_name=name,
+            description=description,
+            config_payload=config,
+        )
+
     return app
 
 
@@ -1233,6 +1424,45 @@ def _section_updates_from_form(form) -> dict[str, Any]:
         key = "sections.global_news" if section == "global_news" else f"sections.morning.{section}"
         updates[key] = f"section_{section}" in form
     return updates
+
+
+def _simulation_payload_from_form(form) -> dict[str, Any]:
+    methods = [str(item).strip().lower() for item in form.getlist("simulation_methods") if str(item).strip()]
+    holdings_symbols = list(form.getlist("simulation_holding_symbol"))
+    holdings_weights = list(form.getlist("simulation_holding_weight"))
+    holdings: list[dict[str, Any]] = []
+    for idx, symbol in enumerate(holdings_symbols):
+        sym = str(symbol).strip().upper()
+        if not sym:
+            continue
+        raw_weight = holdings_weights[idx] if idx < len(holdings_weights) else ""
+        try:
+            weight = float(str(raw_weight).strip())
+        except (TypeError, ValueError):
+            weight = 0.0
+        holdings.append({"symbol": sym, "weight_pct": weight})
+
+    return {
+        "name": str(form.get("simulation_name", "")).strip(),
+        "mode": str(form.get("simulation_mode", "portfolio")).strip().lower(),
+        "methods": methods,
+        "frequency": str(form.get("simulation_frequency", "monthly")).strip().lower(),
+        "horizon_preset": str(form.get("simulation_horizon_preset", "")).strip().lower(),
+        "horizon_periods": str(form.get("simulation_horizon_periods", "")).strip(),
+        "simulation_count_preset": str(form.get("simulation_count_preset", "")).strip().lower(),
+        "simulation_count": str(form.get("simulation_count", "")).strip(),
+        "assumption_source": str(form.get("simulation_assumption_source", "historical")).strip().lower(),
+        "benchmark_symbol": str(form.get("simulation_benchmark_symbol", "")).strip().upper(),
+        "start_value": str(form.get("simulation_start_value", "")).strip(),
+        "macro_overrides": {
+            "growth_shock": str(form.get("simulation_growth_shock", "")).strip(),
+            "inflation_shock": str(form.get("simulation_inflation_shock", "")).strip(),
+            "rates_shock": str(form.get("simulation_rates_shock", "")).strip(),
+            "volatility_regime": str(form.get("simulation_volatility_regime", "")).strip(),
+            "correlation_stress": str(form.get("simulation_correlation_stress", "")).strip(),
+        },
+        "holdings": holdings,
+    }
 
 
 def _policy_updates_from_form(form) -> dict[str, Any]:
