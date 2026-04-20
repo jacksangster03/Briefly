@@ -12,7 +12,7 @@ from app.briefing.formatter import TelegramFormatter
 from app.schemas.briefings import MorningBriefing
 from app.schemas.delivery import EmailRenderResult
 from app.schemas.events import NormalisedEvent, QuoteData
-from app.universe.ticker_metadata import format_company_ticker_list
+from app.universe.ticker_metadata import format_company_ticker, format_company_ticker_list
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -102,6 +102,10 @@ class EmailFormatter:
         watchlist_block = self._watchlist_block(briefing.watchlist_quotes, briefing.watchlist_events)
         if watchlist_block:
             parts.append(self._section("Watchlist", watchlist_block))
+
+        earnings_block = self._earnings_block(briefing.earnings_calendar, briefing.earnings_relevance)
+        if earnings_block:
+            parts.append(self._section("Earnings Calendar", earnings_block))
 
         footer = (
             f"{briefing.events_fetched} fetched | "
@@ -197,6 +201,11 @@ class EmailFormatter:
             parts.append(
                 f"<div style=\"margin-bottom:12px;font-size:14px;color:#334e68;\">{' | '.join(html.escape(x) for x in compact)}</div>"
             )
+            summary = self.telegram_formatter._watchlist_summary_line(quotes, events)
+            if summary:
+                parts.append(
+                    f"<div style=\"margin:-4px 0 12px 0;font-size:13px;color:#486581;line-height:1.5;\">{html.escape(summary)}</div>"
+                )
             freshness = self._quotes_freshness_summary(quotes)
             if freshness:
                 parts.append(
@@ -236,6 +245,41 @@ class EmailFormatter:
             )
             items.append(body)
         return "<ol style=\"padding-left:20px;margin:0;\">" + "".join(items) + "</ol>"
+
+    def _earnings_block(self, earnings, relevance: dict[str, str] | None) -> str:
+        if not earnings:
+            return ""
+        relevance = relevance or {}
+        grouped = self.telegram_formatter._group_earnings(earnings[:10])
+        total = sum(len(items) for items in grouped.values())
+        relevant = sum(1 for item in earnings[:10] if str(item.symbol or "").upper() in relevance)
+        parts = [
+            (
+                "<div style=\"margin-bottom:10px;font-size:13px;color:#486581;\">"
+                f"Upcoming: {total} earnings ({relevant} portfolio/watchlist relevant)."
+                "</div>"
+            )
+        ]
+        for label in ("Today", "Tomorrow", "This Week"):
+            bucket = grouped.get(label, [])
+            if not bucket:
+                continue
+            rows = [f"<div style=\"font-weight:700;color:#102a43;margin:8px 0 6px 0;\">{html.escape(label)}</div>"]
+            for item in bucket:
+                base_name = (item.company_name or "").strip() or format_company_ticker(item.symbol)
+                if "(" not in base_name:
+                    display = f"{base_name} ({item.symbol})"
+                else:
+                    display = base_name
+                tag = relevance.get(str(item.symbol or "").upper(), "")
+                suffix = f" [{tag}]" if tag else ""
+                rows.append(
+                    f"<div style=\"font-size:13px;color:#334e68;line-height:1.45;\">"
+                    f"{html.escape(display)} — {html.escape(item.fiscal_quarter or '')}{html.escape(suffix)}"
+                    "</div>"
+                )
+            parts.append("".join(rows))
+        return "".join(parts)
 
     def _event_meta(self, event: NormalisedEvent) -> str:
         meta = []

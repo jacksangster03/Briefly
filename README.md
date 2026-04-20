@@ -229,6 +229,14 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - Audit logs now include recent delivery outcomes by message type + channel using persisted `SentMessage` records
 - Email failure troubleshooting is surfaced directly in morning-run logs with concrete next-step commands
 
+**Briefing Signal Upgrade (Phase 6.2)**
+- Setup-read v2 now explicitly calls out US/Europe/Asia direction, volatility regime (VIX level + direction), rates/curve impulse, and commodity impulse
+- Net takeaway sentence links market setup to likely session driver (including geopolitics/energy when relevant)
+- Earnings Calendar is now grouped by **Today / Tomorrow / This Week** with friendlier `Company (TICKER)` labels
+- Earnings entries include deterministic relevance tags (`[portfolio]`, `[watchlist]`) when symbols overlap with the active profile
+- Top Themes ranking now favors holdings/watchlist relevance and de-emphasizes low-signal filing stubs when not portfolio-linked
+- Watchlist section adds a compact mover/catalyst summary line before the detailed list
+
 ### Intelligence pipeline
 
 - Finnhub + NewsAPI event processing with credibility scoring, personal relevance, and clustering
@@ -777,6 +785,7 @@ python -m app.cli simulation runs --profile default_user
 | 6.0A | Complete | Beginner comprehension layer: centralized glossary + reusable question-mark help tooltips across complex portfolio analytics surfaces |
 | 6.0B | Complete | Regional Intelligence Board: briefing-root regional structure with deterministic region statuses, emphasis shares, and portfolio-impact lens copy |
 | 6.1 | Complete | Briefing clarity + delivery trust: deterministic setup-read paragraph, humanized setup symbol labels, deduped relevance notes, and explicit channel delivery outcomes in logs + Audit |
+| 6.2 | Complete | Briefing signal upgrade: richer setup-read regime analysis, grouped + relevance-tagged earnings calendar, watchlist summary line, and stronger theme relevance prioritization |
 | 5.7B | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---

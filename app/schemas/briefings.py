@@ -60,6 +60,7 @@ class MorningBriefing(BaseModel):
     portfolio_focus: list[NormalisedEvent] = Field(default_factory=list)
     sector_scan: list[SectorSnapshot] = Field(default_factory=list)
     earnings_calendar: list[EarningsEvent] = Field(default_factory=list)
+    earnings_relevance: dict[str, str] = Field(default_factory=dict)
     watchlist_events: list[NormalisedEvent] = Field(default_factory=list)
     watchlist_quotes: list[QuoteData] = Field(default_factory=list)
     portfolio_quotes: list[QuoteData] = Field(default_factory=list)

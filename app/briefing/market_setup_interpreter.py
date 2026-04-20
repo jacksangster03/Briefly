@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from app.schemas.briefings import MarketSetup
-from app.schemas.events import MacroDataPoint
+from app.schemas.events import MacroDataPoint, NormalisedEvent
 
 
 @dataclass
@@ -21,6 +21,7 @@ class MarketSetupInterpretation:
 def interpret_market_setup(
     setup: MarketSetup,
     macro_context: Iterable[MacroDataPoint] | None = None,
+    global_news: Iterable[NormalisedEvent] | None = None,
 ) -> MarketSetupInterpretation:
     """Summarize setup + macro into one deterministic paragraph."""
     index_quotes = list(setup.index_quotes or [])
@@ -37,10 +38,18 @@ def interpret_market_setup(
 
     tone = _tone_phrase(total)
     breadth = _breadth_phrase(index_quotes=index_quotes, region_score=region_score)
+    divergence = _regional_divergence_phrase(index_quotes)
+    vol = _volatility_phrase(index_quotes)
     rates = _rates_phrase(setup=setup, macro_points=macro_points)
     commodities = _commodities_phrase(macro_quotes)
+    takeaway = _net_takeaway(
+        total=total,
+        commodity_score=commodity_score,
+        region_score=region_score,
+        global_news=global_news or [],
+    )
 
-    narrative = f"{tone} {breadth} {rates} {commodities}"
+    narrative = f"{tone} {breadth} {divergence} {vol} {rates} {commodities} {takeaway}"
     tags = _tags(risk_score=risk_score, rates_score=rates_score, commodity_score=commodity_score, region_score=region_score)
     return MarketSetupInterpretation(narrative=narrative, tags=tags, confidence=confidence)
 
@@ -150,6 +159,49 @@ def _breadth_phrase(*, index_quotes, region_score: int) -> str:
     return f"Equity breadth is balanced ({positive}/{total} tracked benchmarks up) without strong regional confirmation."
 
 
+def _regional_divergence_phrase(index_quotes) -> str:
+    if not index_quotes:
+        return "Regional direction is unclear from available benchmarks."
+    us = _region_avg(index_quotes, ("S&P", "NASDAQ", "DOW", "RUSSELL"))
+    eu = _region_avg(index_quotes, ("STOXX", "FTSE", "DAX", "CAC", "IBEX"))
+    asia = _region_avg(index_quotes, ("NIKKEI", "HANG SENG"))
+    phrases: list[str] = []
+    if us is not None:
+        phrases.append(f"US {us:+.2f}%")
+    if eu is not None:
+        phrases.append(f"Europe {eu:+.2f}%")
+    if asia is not None:
+        phrases.append(f"Asia {asia:+.2f}%")
+    if not phrases:
+        return "Regional direction is unclear from available benchmarks."
+    divergence = (
+        us is not None
+        and eu is not None
+        and ((us > 0 and eu < 0) or (us < 0 and eu > 0))
+    )
+    if divergence:
+        return f"Regional split is visible ({', '.join(phrases)}), signaling divergence across major sessions."
+    return f"Regional performance is comparatively aligned ({', '.join(phrases)})."
+
+
+def _volatility_phrase(index_quotes) -> str:
+    vix = next((q for q in index_quotes if "VIX" in (q.display_name or q.symbol or "").upper()), None)
+    if vix is None:
+        return "Volatility signal is unavailable."
+    level = float(vix.current_price or 0.0)
+    move = float(vix.change_percent or 0.0)
+    if level >= 25:
+        regime = "stress"
+    elif level >= 19:
+        regime = "elevated caution"
+    elif level >= 15:
+        regime = "watchful but contained"
+    else:
+        regime = "calm"
+    direction = "rising" if move > 0.5 else "falling" if move < -0.5 else "flat"
+    return f"Volatility regime is {regime} (VIX {level:.2f}, {move:+.2f}%, {direction})."
+
+
 def _rates_phrase(*, setup: MarketSetup, macro_points: list[MacroDataPoint]) -> str:
     ten_y_change = _macro_change(macro_points, ("10y treasury", "us 10y", "10y treasury yield"))
     spread_change = _macro_change(macro_points, ("10y-2y yield spread", "yield spread"))
@@ -178,6 +230,27 @@ def _commodities_phrase(macro_quotes) -> str:
     if gold is not None:
         parts.append(f"gold {float(gold.change_percent or 0.0):+.2f}%")
     return "Commodity impulse: " + ", ".join(parts) + "."
+
+
+def _net_takeaway(
+    *,
+    total: int,
+    commodity_score: int,
+    region_score: int,
+    global_news: Iterable[NormalisedEvent],
+) -> str:
+    text = " ".join(f"{evt.title} {evt.summary}".lower() for evt in global_news)
+    has_geo_energy = any(
+        term in text
+        for term in ("hormuz", "iran", "israel", "ceasefire", "blockade", "tanker", "shipping", "oil")
+    )
+    if has_geo_energy and commodity_score <= -1:
+        return "Net takeaway: this is a geopolitics-driven, oil-led session with tighter risk conditions for Europe and EM-sensitive assets."
+    if total >= 3 and region_score >= 0:
+        return "Net takeaway: risk appetite is constructive, but monitoring rates and energy remains important for follow-through."
+    if total <= -3:
+        return "Net takeaway: defensive posture is warranted as volatility and macro pressure outweigh broad equity support."
+    return "Net takeaway: conditions are mixed; focus on regional dispersion and macro headlines rather than index direction alone."
 
 
 def _confidence_label(*, total: int, signals: list[int]) -> str:
@@ -230,3 +303,14 @@ def _mean(values: list[float]) -> float:
     if not values:
         return 0.0
     return float(sum(values) / len(values))
+
+
+def _region_avg(index_quotes, tokens: tuple[str, ...]) -> float | None:
+    values = [
+        float(q.change_percent or 0.0)
+        for q in index_quotes
+        if any(token in (q.display_name or q.symbol or "").upper() for token in tokens)
+    ]
+    if not values:
+        return None
+    return _mean(values)

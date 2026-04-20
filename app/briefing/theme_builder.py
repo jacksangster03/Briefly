@@ -17,10 +17,10 @@ def build_top_themes(
     events: list[NormalisedEvent],
     max_themes: int = 5,
     editorial_gate: Callable[[NormalisedEvent], bool] | None = None,
+    preferred_symbols: set[str] | None = None,
 ) -> list[NormalisedEvent]:
-    themes: list[NormalisedEvent] = []
-    seen_clusters: set[str] = set()
-
+    candidates: list[tuple[float, NormalisedEvent]] = []
+    preferred_symbols = preferred_symbols or set()
     for evt in events:
         if not is_actionable_event(evt):
             continue
@@ -32,13 +32,31 @@ def build_top_themes(
             continue
         if editorial_gate and not editorial_gate(evt):
             continue
+        rank = float(evt.final_score or 0.0)
+        overlap = set(evt.tickers) & preferred_symbols
+        if overlap:
+            rank += 0.35
+        if evt.cluster_size >= 3:
+            rank += 0.08
+        if evt.source == "sec_edgar" and not overlap and evt.cluster_size < 2:
+            rank -= 0.35
+        title_lower = str(evt.title or "").lower()
+        if evt.source == "sec_edgar" and not overlap and any(
+            token in title_lower for token in ("8-k", "10-q", "10-k", "filing")
+        ):
+            rank -= 0.2
+        candidates.append((rank, evt))
+
+    candidates.sort(key=lambda item: (item[0], item[1].cluster_size, item[1].final_score), reverse=True)
+
+    themes: list[NormalisedEvent] = []
+    seen_clusters: set[str] = set()
+    for _, evt in candidates:
         if evt.cluster_id and evt.cluster_id in seen_clusters:
             continue
-
         themed = evt.model_copy(deep=True)
         themed.summary = _build_theme_summary(evt)
         themes.append(themed)
-
         if themed.cluster_id:
             seen_clusters.add(themed.cluster_id)
         if len(themes) >= max_themes:

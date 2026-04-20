@@ -39,7 +39,7 @@ from app.schemas.events import (
     QuoteData,
     SectorSnapshot,
 )
-from app.universe.ticker_metadata import format_company_ticker_list
+from app.universe.ticker_metadata import company_name_for_ticker, format_company_ticker, format_company_ticker_list
 
 
 class TelegramFormatter:
@@ -104,7 +104,7 @@ class TelegramFormatter:
             sections.append(sector)
 
         # Earnings calendar
-        earnings = self._format_earnings(briefing.earnings_calendar)
+        earnings = self._format_earnings(briefing.earnings_calendar, briefing.earnings_relevance)
         if earnings:
             sections.append(earnings)
 
@@ -411,14 +411,32 @@ class TelegramFormatter:
                 lines.append(f"  <i>{' | '.join(meta)}</i>")
         return "\n".join(lines)
 
-    def _format_earnings(self, earnings: list[EarningsEvent]) -> str:
+    def _format_earnings(self, earnings: list[EarningsEvent], relevance: dict[str, str] | None = None) -> str:
         if not earnings:
             return ""
+        relevance = relevance or {}
         lines = [f"<b>{SECTION_HEADERS['earnings']}</b>"]
-        for e in earnings[:MAX_EARNINGS_DISPLAY]:
-            time_label = {"bmo": "pre", "amc": "post", "during": "during"}.get(e.time, "")
-            est = f" (est. ${e.eps_estimate:.2f})" if e.eps_estimate else ""
-            lines.append(f"  {e.symbol} {e.fiscal_quarter} {time_label}{est}")
+        grouped = self._group_earnings(earnings[:MAX_EARNINGS_DISPLAY])
+        total = sum(len(items) for items in grouped.values())
+        relevant = sum(1 for item in earnings[:MAX_EARNINGS_DISPLAY] if str(item.symbol or "").upper() in relevance)
+        lines.append(f"Upcoming: {total} earnings ({relevant} portfolio/watchlist relevant).")
+        for label in ("Today", "Tomorrow", "This Week"):
+            bucket = grouped.get(label, [])
+            if not bucket:
+                continue
+            lines.append(f"  <i>{label}</i>")
+            for e in bucket:
+                time_label = {"bmo": "pre-market", "amc": "post-market", "during": "during-market"}.get(e.time, "")
+                est = f" (est. ${e.eps_estimate:.2f})" if e.eps_estimate else ""
+                base_name = (e.company_name or "").strip() or company_name_for_ticker(e.symbol)
+                display = f"{base_name} ({e.symbol})" if base_name.upper() != e.symbol.upper() else format_company_ticker(e.symbol)
+                tag = ""
+                normalized_symbol = str(e.symbol or "").upper()
+                if relevance.get(normalized_symbol) == "portfolio":
+                    tag = " [portfolio]"
+                elif relevance.get(normalized_symbol) == "watchlist":
+                    tag = " [watchlist]"
+                lines.append(f"    {display} — {e.fiscal_quarter} {time_label}{est}{tag}".rstrip())
         return "\n".join(lines)
 
     def _format_watchlist(
@@ -434,6 +452,9 @@ class TelegramFormatter:
             q_lines = [format_compact_price(q.display_name or q.symbol, q.change_percent)
                        for q in quotes[:10]]
             parts.append(" | ".join(q_lines))
+            summary = self._watchlist_summary_line(quotes, events)
+            if summary:
+                parts.append(f"<i>{summary}</i>")
             freshness = self._format_quotes_freshness_summary(quotes, session_mode)
             if freshness:
                 parts.append(f"<i>{freshness}</i>")
@@ -448,6 +469,41 @@ class TelegramFormatter:
                     parts.append(f"  {evt.title[:150]}")
 
         return "\n".join(parts) if len(parts) > 1 else ""
+
+    def _watchlist_summary_line(self, quotes: list[QuoteData], events: list[NormalisedEvent]) -> str:
+        if not quotes:
+            return ""
+        sorted_quotes = sorted(quotes, key=lambda q: float(q.change_percent or 0.0), reverse=True)
+        top = sorted_quotes[0]
+        bottom = sorted_quotes[-1]
+        positives = sum(1 for q in quotes if float(q.change_percent or 0.0) > 0.0)
+        direction = "mostly green" if positives >= max(1, int(len(quotes) * 0.6)) else "mixed-to-red"
+        catalyst = (events[0].title[:88] + "...") if events and len(events[0].title) > 88 else (events[0].title if events else "no dominant catalyst yet")
+        return (
+            f"Watchlist is {direction}; leaders: {(top.display_name or top.symbol)} {float(top.change_percent or 0.0):+.2f}% "
+            f"vs laggard {(bottom.display_name or bottom.symbol)} {float(bottom.change_percent or 0.0):+.2f}%. "
+            f"Main catalyst: {catalyst}"
+        )
+
+    def _group_earnings(self, earnings: list[EarningsEvent]) -> dict[str, list[EarningsEvent]]:
+        now_local = datetime.now(self.local_tz).date()
+        grouped: dict[str, list[EarningsEvent]] = {"Today": [], "Tomorrow": [], "This Week": []}
+        for event in earnings:
+            label = "This Week"
+            try:
+                report_date = datetime.strptime(str(event.report_date or ""), "%Y-%m-%d").date()
+                delta = (report_date - now_local).days
+                if delta <= 0:
+                    label = "Today"
+                elif delta == 1:
+                    label = "Tomorrow"
+                elif delta <= 7:
+                    label = "This Week"
+            except ValueError:
+                label = "This Week"
+            grouped.setdefault(label, []).append(event)
+        return grouped
+
 
     def _format_intraday_market_snapshot(self, quotes: list[QuoteData]) -> str:
         """Render intraday snapshot with exact levels + % change."""

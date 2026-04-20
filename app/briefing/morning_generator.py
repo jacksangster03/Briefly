@@ -288,9 +288,18 @@ class MorningBriefingGenerator:
         briefing.portfolio_focus = self._build_portfolio_focus(eligible)
         briefing.sector_scan = self._build_sector_scan(eligible, briefing.session_mode)
         briefing.earnings_calendar = self._fetch_earnings()
+        briefing.earnings_relevance = self._build_earnings_relevance(briefing.earnings_calendar)
         briefing.watchlist_events = self._filter_watchlist_events(eligible)
         briefing.watchlist_quotes = self._fetch_watchlist_quotes()
         briefing.portfolio_quotes = self._fetch_portfolio_quotes()
+        setup_interpretation = interpret_market_setup(
+            briefing.market_setup,
+            briefing.macro_context,
+            global_news=briefing.global_news,
+        )
+        briefing.market_setup_analysis = setup_interpretation.narrative
+        briefing.market_setup_analysis_confidence = setup_interpretation.confidence
+        briefing.market_setup_signal_tags = setup_interpretation.tags
         self._dedupe_cross_section_events(briefing)
         if self._should_build_charts():
             briefing.chart_assets = MorningChartBuilder(
@@ -353,6 +362,14 @@ class MorningBriefingGenerator:
         session_mode: str,
     ) -> list[NormalisedEvent]:
         """Build top themes with an editorial trust gate."""
+        preferred_symbols = {
+            symbol.upper()
+            for symbol in (
+                list(self.profile.portfolio_symbols)
+                + list(self.profile.all_watchlist_tickers)
+            )
+            if symbol
+        }
         return build_top_themes(
             scored_events,
             max_themes=self.rules.max_themes,
@@ -361,6 +378,7 @@ class MorningBriefingGenerator:
                 session_mode,
                 section="top_themes",
             ),
+            preferred_symbols=preferred_symbols,
         )
 
     def _build_global_news(
@@ -440,10 +458,24 @@ class MorningBriefingGenerator:
         return any(term in text for term in MACRO_BLEED_TERMS)
 
     def _fetch_earnings(self):
-        """Fetch today's earnings calendar."""
+        """Fetch upcoming earnings calendar."""
         if not self.news_svc.finnhub or not self.news_svc.finnhub.is_configured():
             return []
-        return self.news_svc.finnhub.get_earnings_calendar(days_ahead=1)[: self.rules.max_earnings]
+        return self.news_svc.finnhub.get_earnings_calendar(days_ahead=7)[: self.rules.max_earnings]
+
+    def _build_earnings_relevance(self, earnings: list) -> dict[str, str]:
+        portfolio = {holding.symbol.upper() for holding in self.profile.portfolio_holdings}
+        watchlist = {symbol.upper() for symbol in self.profile.all_watchlist_tickers}
+        relevance: dict[str, str] = {}
+        for item in earnings:
+            symbol = str(getattr(item, "symbol", "") or "").upper()
+            if not symbol:
+                continue
+            if symbol in portfolio:
+                relevance[symbol] = "portfolio"
+            elif symbol in watchlist:
+                relevance[symbol] = "watchlist"
+        return relevance
 
     def _build_portfolio_focus(self, scored_events: list[NormalisedEvent]) -> list[NormalisedEvent]:
         """Select concise portfolio-first items for the morning briefing."""

@@ -6,10 +6,11 @@ from app.briefing.email_formatter import EmailFormatter
 from app.briefing.formatter import TelegramFormatter
 from app.briefing.morning_generator import MorningBriefingGenerator
 from app.briefing.global_news_selector import build_market_relevance_note
+from app.briefing.market_setup_interpreter import interpret_market_setup
 from app.briefing.templates import format_change, format_price_line, TELEGRAM_MAX_LENGTH
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MorningBriefing, MarketSetup, IntradayUpdate, BreakingAlert
-from app.schemas.events import QuoteData, NormalisedEvent, MacroDataPoint, SectorSnapshot
+from app.schemas.events import QuoteData, NormalisedEvent, MacroDataPoint, SectorSnapshot, EarningsEvent
 from app.settings import Settings
 from app.universe.sector_universe import InstrumentDef, SectorDef, SectorUniverse
 
@@ -154,6 +155,54 @@ class TestTelegramFormatter:
         email = EmailFormatter("Europe/Madrid").format_morning_briefing(briefing)
         assert "Setup read:" in email.html_body
         assert "single dominant impulse" in email.html_body
+
+    def test_market_setup_analysis_mentions_divergence_and_vol_regime(self):
+        setup = MarketSetup(
+            index_quotes=[
+                QuoteData(symbol="^GSPC", display_name="S&P 500 (SPX)", current_price=7100, change=84, change_percent=1.2),
+                QuoteData(symbol="^IXIC", display_name="Nasdaq Composite (COMP)", current_price=24000, change=360, change_percent=1.5),
+                QuoteData(symbol="^STOXX50E", display_name="EURO STOXX 50", current_price=6057, change=-80, change_percent=-1.3),
+                QuoteData(symbol="^DAX", display_name="DAX", current_price=24700, change=-220, change_percent=-0.9),
+                QuoteData(symbol="^VIX", display_name="VIX", current_price=19.5, change=2.0, change_percent=11.5),
+            ],
+            macro_quotes=[
+                QuoteData(symbol="CL=F", display_name="WTI Crude Oil (CL1:COM)", current_price=82.5, change=4.5, change_percent=5.96),
+                QuoteData(symbol="GC=F", display_name="Gold (GC1:COM)", current_price=4800.0, change=-2.0, change_percent=-0.04),
+            ],
+        )
+        macro = [
+            MacroDataPoint(series_id="UST10Y", name="US 10Y Treasury Yield", value=4.32, change=0.03),
+            MacroDataPoint(series_id="UST2Y", name="US 2Y Treasury Yield", value=3.78, change=0.02),
+            MacroDataPoint(series_id="SPREAD", name="10Y-2Y Yield Spread", value=0.55, change=0.01),
+        ]
+        global_news = [
+            NormalisedEvent(
+                title="Iran reopens Strait of Hormuz",
+                summary="Shipping risk remains elevated.",
+                event_type="geopolitical",
+            )
+        ]
+        result = interpret_market_setup(setup, macro, global_news=global_news)
+        text = result.narrative.lower()
+        assert "regional split" in text
+        assert "volatility regime" in text
+        assert "oil-led" in text or "geopolitics-driven" in text
+
+    def test_earnings_section_uses_company_name_and_grouping(self):
+        briefing = MorningBriefing(
+            earnings_calendar=[
+                EarningsEvent(symbol="AAPL", company_name="Apple Inc.", report_date="2026-04-20", fiscal_quarter="Q2 2026", time="amc"),
+                EarningsEvent(symbol="MSFT", company_name="Microsoft Corp.", report_date="2026-04-21", fiscal_quarter="Q2 2026", time="amc"),
+            ],
+            earnings_relevance={"AAPL": "portfolio"},
+        )
+        messages = self.formatter.format_morning_briefing(briefing)
+        full = "\n".join(messages)
+        assert "Upcoming: 2 earnings" in full
+        assert "Today" in full
+        assert "Tomorrow" in full
+        assert "Apple Inc. (AAPL)" in full
+        assert "[portfolio]" in full
 
     def test_breaking_alert_format(self):
         evt = NormalisedEvent(
