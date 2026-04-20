@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 from click.testing import CliRunner
 
 from app.cli import cli
-from app.main import _deliver, _get_messengers, _print_terminal_output
+from app.main import _deliver, _delivery_channel_plan, _get_messengers, _print_terminal_output
 from app.messaging.telegram import TelegramMessenger
 from app.personalization.user_profile import UserProfile
 from app.settings import Settings
@@ -202,6 +202,24 @@ def test_get_messengers_respects_email_only_setting():
     messengers = _get_messengers(settings, profile)
     names = [messenger.name for messenger in messengers]
     assert names == ["email"]
+
+
+def test_delivery_channel_plan_marks_email_skipped_when_unconfigured():
+    settings = Settings(
+        delivery_channel="all",
+        dry_run=False,
+        telegram_bot_token="tg-token",
+        telegram_chat_id="12345",
+        email_user="",
+        email_password="",
+        email_to="",
+    )
+    profile = UserProfile()
+    plan = _delivery_channel_plan(settings=settings, profile=profile, message_type="morning")
+    email_row = next(item for item in plan if item["channel"] == "email")
+    assert email_row["attempted"] is False
+    assert email_row["status"] == "skipped"
+    assert "not configured" in str(email_row["reason"])
 
 
 def test_get_messengers_respects_telegram_only_setting():

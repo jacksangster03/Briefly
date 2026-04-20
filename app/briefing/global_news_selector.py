@@ -313,17 +313,56 @@ def select_global_market_events(
     return selected
 
 
-def build_market_relevance_note(event: NormalisedEvent) -> str:
+def build_market_relevance_note(
+    event: NormalisedEvent,
+    *,
+    used_notes: set[str] | None = None,
+) -> str:
     """Generate a concise market-impact phrase for global sections."""
     text = _normalise_text(f"{event.title} {event.summary}")
+    templates: list[str]
     if any(term in text for term in ("hormuz", "opec", "oil", "crude", "shipping", "tanker", "freight")):
-        return "Why market-relevant: energy and transport shocks can reprice inflation and risk assets."
-    if any(term in text for term in ("fomc", "fed", "ecb", "boe", "boj", "inflation", "cpi", "ppi", "yield", "rates")):
-        return "Why market-relevant: rates and inflation expectations can shift equity leadership quickly."
-    if any(term in text for term in ("sanction", "tariff", "export restriction", "trade", "blockade")):
-        return "Why market-relevant: policy and trade shocks can hit margins, demand, and FX."
-    if any(term in text for term in ("iran", "israel", "war", "conflict", "ceasefire", "missile")):
-        return "Why market-relevant: geopolitical risk can alter commodity prices and market risk tone."
-    if any(term in text for term in ("supply chain", "manufacturing", "imports", "exports")):
-        return "Why market-relevant: supply-chain stress can flow into costs, guidance, and earnings risk."
-    return "Why market-relevant: cross-asset macro risk can move index direction and sector rotation."
+        templates = [
+            "Why market-relevant: energy chokepoints can quickly reprice inflation and transport-sensitive sectors.",
+            "Why market-relevant: oil and shipping shocks can move inflation expectations, margins, and risk premia.",
+        ]
+    elif any(term in text for term in ("fomc", "fed", "ecb", "boe", "boj", "inflation", "cpi", "ppi", "yield", "rates")):
+        templates = [
+            "Why market-relevant: rates and inflation repricing can rotate equity leadership and valuation multiples.",
+            "Why market-relevant: policy-rate expectations can move discount rates, duration assets, and USD direction.",
+        ]
+    elif any(term in text for term in ("sanction", "tariff", "export restriction", "trade", "blockade")):
+        templates = [
+            "Why market-relevant: sanctions and trade controls can hit supply chains, earnings guidance, and FX.",
+            "Why market-relevant: policy frictions can alter trade volumes, input costs, and cross-border risk appetite.",
+        ]
+    elif any(term in text for term in ("iran", "israel", "war", "conflict", "ceasefire", "missile", "naval")):
+        templates = [
+            "Why market-relevant: conflict headlines can shift energy risk premia and broad risk sentiment.",
+            "Why market-relevant: geopolitical escalation/de-escalation can rapidly move commodities, rates, and defensives.",
+        ]
+    elif any(term in text for term in ("supply chain", "manufacturing", "imports", "exports", "factory")):
+        templates = [
+            "Why market-relevant: supply-chain pressure can feed through to costs, delivery timing, and margin outlooks.",
+            "Why market-relevant: production and trade flow changes can alter earnings momentum across cyclicals.",
+        ]
+    else:
+        templates = [
+            "Why market-relevant: cross-asset macro moves can quickly shift index direction and sector rotation.",
+            "Why market-relevant: headline risk can change liquidity tone, factor leadership, and benchmark dispersion.",
+        ]
+    return _pick_unique_note(templates, used_notes)
+
+
+def _pick_unique_note(templates: list[str], used_notes: set[str] | None) -> str:
+    if not templates:
+        return "Why market-relevant: cross-asset macro moves can quickly shift index direction and sector rotation."
+    if used_notes is None:
+        return templates[0]
+    for candidate in templates:
+        if candidate not in used_notes:
+            used_notes.add(candidate)
+            return candidate
+    # Fallback if all templates already used.
+    used_notes.add(templates[0])
+    return templates[0]

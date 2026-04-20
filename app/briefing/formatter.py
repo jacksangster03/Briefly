@@ -7,6 +7,7 @@ phone reading: short sections, clear labels, numbers first, sparse emoji.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.processing.cleaners import truncate
@@ -244,12 +245,12 @@ class TelegramFormatter:
 
         # Index quotes
         for q in briefing.market_setup.index_quotes:
-            name = q.display_name or q.symbol
+            name = self._friendly_instrument_label(q.display_name or q.symbol, q.symbol)
             lines.append(format_price_line(name, q.current_price, q.change, q.change_percent))
 
         # Macro instruments (gold, oil, USD, BTC)
         for q in briefing.market_setup.macro_quotes:
-            name = q.display_name or q.symbol
+            name = self._friendly_instrument_label(q.display_name or q.symbol, q.symbol)
             lines.append(format_price_line(name, q.current_price, q.change, q.change_percent))
 
         # Treasury yields from FRED
@@ -260,6 +261,9 @@ class TelegramFormatter:
         if setup.treasury_2y:
             chg = f" ({format_change(setup.treasury_2y.change or 0, 0)})" if setup.treasury_2y.change else ""
             lines.append(f"US 2Y: {setup.treasury_2y.value:.3f}%{chg}")
+        if briefing.market_setup_analysis:
+            lines.append("")
+            lines.append(f"<i>Setup read:</i> {briefing.market_setup_analysis}")
 
         return "\n".join(lines) if len(lines) > 1 else ""
 
@@ -283,9 +287,10 @@ class TelegramFormatter:
         if not events:
             return ""
         lines = [f"<b>{SECTION_HEADERS['global_news']}</b>"]
+        used_notes: set[str] = set()
         for idx, evt in enumerate(events[:6], 1):
             lines.append(f"{idx}. <b>{evt.title}</b>")
-            lines.append(f"   {build_market_relevance_note(evt)}")
+            lines.append(f"   {build_market_relevance_note(evt, used_notes=used_notes)}")
             meta = self._build_event_meta(
                 evt,
                 include_company=True,
@@ -392,9 +397,10 @@ class TelegramFormatter:
         if not events:
             return ""
         lines = [f"<b>{SECTION_HEADERS['global_risk_update']}</b>"]
+        used_notes: set[str] = set()
         for evt in events[:3]:
             lines.append(f"- <b>{evt.title}</b>")
-            lines.append(f"  {build_market_relevance_note(evt)}")
+            lines.append(f"  {build_market_relevance_note(evt, used_notes=used_notes)}")
             meta = self._build_event_meta(
                 evt,
                 include_company=True,
@@ -447,8 +453,23 @@ class TelegramFormatter:
         """Render intraday snapshot with exact levels + % change."""
         if not quotes:
             return ""
-        lines = [format_compact_price_with_level(q.display_name or q.symbol, q.current_price, q.change_percent) for q in quotes]
+        lines = [
+            format_compact_price_with_level(
+                self._friendly_instrument_label(q.display_name or q.symbol, q.symbol),
+                q.current_price,
+                q.change_percent,
+            )
+            for q in quotes
+        ]
         return " | ".join(lines)
+
+    @staticmethod
+    def _friendly_instrument_label(label: str, symbol: str) -> str:
+        text = str(label or symbol or "").strip()
+        if "^" in text:
+            text = re.sub(r"\(\^?[A-Z0-9:=._-]+\)", "", text).strip()
+            text = text.replace("^", "").strip()
+        return text or str(symbol or "").strip()
 
     def _format_empty_sector_compact(
         self,

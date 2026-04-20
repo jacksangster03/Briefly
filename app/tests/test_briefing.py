@@ -2,8 +2,10 @@
 
 from datetime import datetime, timezone
 
+from app.briefing.email_formatter import EmailFormatter
 from app.briefing.formatter import TelegramFormatter
 from app.briefing.morning_generator import MorningBriefingGenerator
+from app.briefing.global_news_selector import build_market_relevance_note
 from app.briefing.templates import format_change, format_price_line, TELEGRAM_MAX_LENGTH
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MorningBriefing, MarketSetup, IntradayUpdate, BreakingAlert
@@ -45,6 +47,7 @@ class TestTelegramFormatter:
                               current_price=5234.5, change=12.3, change_percent=0.24),
                 ],
             ),
+            market_setup_analysis="Market tone is broadly risk-on with supportive breadth and easing commodity pressure.",
             top_themes=[
                 NormalisedEvent(
                     title="Fed signals rate hold through Q3",
@@ -62,6 +65,7 @@ class TestTelegramFormatter:
         assert len(messages) >= 1
         assert "MORNING BRIEFING" in messages[0]
         assert "S&P 500" in messages[0]
+        assert "Setup read:" in messages[0]
         assert "Fed signals" in messages[0]
 
     def test_message_splitting(self):
@@ -104,6 +108,52 @@ class TestTelegramFormatter:
         assert "GLOBAL NEWS & GEOPOLITICS" in full
         assert "Why market-relevant:" in full
         assert "Oil rises as Strait of Hormuz disruptions persist" in full
+
+    def test_global_news_relevance_note_dedup_uses_alternates(self):
+        event = NormalisedEvent(
+            title="Iran reopens Strait of Hormuz",
+            summary="Shipping lanes and tanker risk remain in focus.",
+            event_type="geopolitical",
+        )
+        used: set[str] = set()
+        first = build_market_relevance_note(event, used_notes=used)
+        second = build_market_relevance_note(event, used_notes=used)
+        assert first.startswith("Why market-relevant:")
+        assert second.startswith("Why market-relevant:")
+        assert first != second
+
+    def test_morning_market_setup_uses_display_label_not_provider_symbol(self):
+        briefing = MorningBriefing(
+            market_setup=MarketSetup(
+                index_quotes=[
+                    QuoteData(
+                        symbol="^GSPC",
+                        display_name="S&P 500 (SPX)",
+                        current_price=7100.0,
+                        change=50.0,
+                        change_percent=0.71,
+                    ),
+                ],
+            ),
+        )
+        messages = self.formatter.format_morning_briefing(briefing)
+        full = "\n".join(messages)
+        assert "S&P 500 (SPX)" in full
+        assert "^GSPC" not in full
+
+    def test_email_formatter_includes_setup_analysis(self):
+        briefing = MorningBriefing(
+            generated_at=datetime(2026, 4, 9, 12, 30),
+            market_setup=MarketSetup(
+                index_quotes=[
+                    QuoteData(symbol="SPY", display_name="S&P 500 (SPX)", current_price=5234.5, change=12.3, change_percent=0.24),
+                ],
+            ),
+            market_setup_analysis="Market tone is mixed with no single dominant impulse.",
+        )
+        email = EmailFormatter("Europe/Madrid").format_morning_briefing(briefing)
+        assert "Setup read:" in email.html_body
+        assert "single dominant impulse" in email.html_body
 
     def test_breaking_alert_format(self):
         evt = NormalisedEvent(

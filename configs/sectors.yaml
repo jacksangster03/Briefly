@@ -76,25 +76,25 @@ sectors:
 # Indices and macro instruments tracked in market setup
 indices:
   # US broad + volatility
-  - { symbol: "^GSPC", display: "S&P 500 (^GSPC / SPX)" }
-  - { symbol: "^IXIC", display: "Nasdaq Composite (^IXIC)" }
-  - { symbol: "^DJI", display: "Dow Jones (^DJI)" }
-  - { symbol: "^RUT", display: "Russell 2000 (^RUT)" }
-  - { symbol: "^VIX", display: "VIX (^VIX)" }
+  - { symbol: "^GSPC", display: "S&P 500 (SPX)" }
+  - { symbol: "^IXIC", display: "Nasdaq Composite (COMP)" }
+  - { symbol: "^DJI", display: "Dow Jones (DJIA)" }
+  - { symbol: "^RUT", display: "Russell 2000 (RUT)" }
+  - { symbol: "^VIX", display: "VIX" }
 
   # Europe
-  - { symbol: "^STOXX50E", display: "EURO STOXX 50 (^STOXX50E)" }
-  - { symbol: "^FTSE", display: "FTSE 100 (^FTSE)" }
-  - { symbol: "^GDAXI", display: "DAX (^GDAXI)" }
-  - { symbol: "^FCHI", display: "CAC 40 (^FCHI)" }
-  - { symbol: "^IBEX", display: "IBEX 35 (^IBEX)" }
+  - { symbol: "^STOXX50E", display: "EURO STOXX 50" }
+  - { symbol: "^FTSE", display: "FTSE 100" }
+  - { symbol: "^GDAXI", display: "DAX" }
+  - { symbol: "^FCHI", display: "CAC 40" }
+  - { symbol: "^IBEX", display: "IBEX 35" }
 
   # Asia
-  - { symbol: "^N225", display: "Nikkei 225 (^N225)" }
-  - { symbol: "^HSI", display: "Hang Seng (^HSI)" }
+  - { symbol: "^N225", display: "Nikkei 225" }
+  - { symbol: "^HSI", display: "Hang Seng" }
 
 macro_instruments:
   # Rates / commodities
-  - { symbol: "^TNX", display: "10Y US Treasury Yield (^TNX)" }
+  - { symbol: "^TNX", display: "10Y US Treasury Yield" }
   - { symbol: "CL=F", display: "WTI Crude Oil (CL1:COM)" }
   - { symbol: "GC=F", display: "Gold (GC1:COM)" }

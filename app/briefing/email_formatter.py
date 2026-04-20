@@ -78,7 +78,11 @@ class EmailFormatter:
                 )
             parts.append("</div>")
 
-        market_block = self._market_setup_block(briefing.market_setup.index_quotes, briefing.market_setup.macro_quotes)
+        market_block = self._market_setup_block(
+            briefing.market_setup.index_quotes,
+            briefing.market_setup.macro_quotes,
+            briefing.market_setup_analysis,
+        )
         if market_block:
             parts.append(self._section("Market Setup", market_block))
 
@@ -110,14 +114,20 @@ class EmailFormatter:
         parts.append("</div></body></html>")
         return "".join(parts)
 
-    def _market_setup_block(self, indices: list[QuoteData], macro_quotes: list[QuoteData]) -> str:
+    def _market_setup_block(
+        self,
+        indices: list[QuoteData],
+        macro_quotes: list[QuoteData],
+        setup_analysis: str = "",
+    ) -> str:
         selected_quotes = indices[:4] + macro_quotes[:4]
         rows = []
         for quote in selected_quotes:
             sign = "+" if quote.change_percent >= 0 else ""
+            label = self.telegram_formatter._friendly_instrument_label(quote.display_name or quote.symbol, quote.symbol)
             rows.append(
                 "<tr>"
-                f"<td style=\"padding:8px 10px;border-bottom:1px solid #e6edf5;\">{html.escape(quote.display_name or quote.symbol)}</td>"
+                f"<td style=\"padding:8px 10px;border-bottom:1px solid #e6edf5;\">{html.escape(label)}</td>"
                 f"<td style=\"padding:8px 10px;border-bottom:1px solid #e6edf5;text-align:right;\">{quote.current_price:,.2f}</td>"
                 f"<td style=\"padding:8px 10px;border-bottom:1px solid #e6edf5;text-align:right;color:{'#0f9d58' if quote.change_percent >= 0 else '#d93025'};\">{sign}{quote.change_percent:.2f}%</td>"
                 "</tr>"
@@ -133,6 +143,13 @@ class EmailFormatter:
         if freshness:
             table += (
                 f"<div style=\"margin-top:8px;font-size:12px;color:#829ab1;\">{html.escape(freshness)}</div>"
+            )
+        if setup_analysis:
+            table += (
+                "<div style=\"margin-top:12px;padding:10px 12px;border-radius:10px;background:#f6f9fc;"
+                "font-size:13px;line-height:1.55;color:#334e68;\">"
+                f"<strong>Setup read:</strong> {html.escape(setup_analysis)}"
+                "</div>"
             )
         return table
 
@@ -194,11 +211,12 @@ class EmailFormatter:
         if not events:
             return ""
         items = []
+        used_notes: set[str] = set()
         for event in events[:max_items]:
             summary = ""
             if event.summary and not self.telegram_formatter._summary_duplicates_title(event.summary, event.title):
                 summary = self.telegram_formatter._strip_cluster_suffix(event.summary)
-            note = build_market_relevance_note(event)
+            note = build_market_relevance_note(event, used_notes=used_notes)
             meta = self._event_meta(event)
             body = (
                 "<li style=\"margin:0 0 12px 0;\">"

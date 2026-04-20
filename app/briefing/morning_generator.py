@@ -12,6 +12,7 @@ from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
 from app.briefing.chart_builder import MorningChartBuilder
 from app.briefing.global_news_selector import select_global_market_events
+from app.briefing.market_setup_interpreter import interpret_market_setup
 from app.briefing.theme_builder import build_top_themes
 from app.logger import get_logger
 from app.personalization.delivery_rules import load_alert_rules
@@ -258,6 +259,10 @@ class MorningBriefingGenerator:
         ten_y, two_y = self.macro_svc.get_treasury_yields()
         briefing.market_setup.treasury_10y = ten_y
         briefing.market_setup.treasury_2y = two_y
+        setup_interpretation = interpret_market_setup(briefing.market_setup, briefing.macro_context)
+        briefing.market_setup_analysis = setup_interpretation.narrative
+        briefing.market_setup_analysis_confidence = setup_interpretation.confidence
+        briefing.market_setup_signal_tags = setup_interpretation.tags
 
         # 3. Fetch all news/events
         all_events = self.news_svc.fetch_all(

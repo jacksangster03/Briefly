@@ -9,8 +9,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
+from app.db.models import SentMessage
 from app.db import session as db_session
 from app.db.base import Base, create_app_engine
+from app.db.session import get_session
 from app.settings import Settings
 from app.web.control_plane_service import _display_label
 from app.web.app import create_web_app
@@ -230,6 +232,35 @@ def test_briefing_and_audit_workspace_roots_and_subpages_are_split(client):
     assert audit_overrides.status_code == 200
     assert "Audit / Overrides" in audit_overrides.text
     assert "Reset Overrides" in audit_overrides.text
+
+
+def test_audit_logs_show_recent_delivery_outcomes(client):
+    with get_session() as session:
+        session.add(
+            SentMessage(
+                message_type="morning_brief",
+                channel="email",
+                success=False,
+                content_preview="Morning run",
+                error_message="smtp auth failed",
+            )
+        )
+        session.add(
+            SentMessage(
+                message_type="morning_brief",
+                channel="telegram",
+                success=True,
+                content_preview="Morning run",
+            )
+        )
+        session.commit()
+
+    audit_logs = client.get("/ui/audit/logs?profile=default_user")
+    assert audit_logs.status_code == 200
+    assert "Recent Delivery Outcomes" in audit_logs.text
+    assert "morning_brief · email" in audit_logs.text
+    assert "failed" in audit_logs.text
+    assert "smtp auth failed" in audit_logs.text
 
 
 def test_portfolio_history_route_exists_and_stays_workspace_scoped(client):

@@ -26,17 +26,20 @@ class EmailMessenger(BaseMessenger):
         self.password = settings.email_password
         self.to_addr = settings.email_to
         self.dry_run = settings.dry_run
+        self.last_error: str = ""
 
     def is_configured(self) -> bool:
         return bool(self.user and self.password and self.to_addr)
 
     def send(self, text: str, parse_mode: str = "HTML", subject: str = "") -> bool:
+        self.last_error = ""
         if self.dry_run:
             logger.info("[DRY RUN] Would send email (%d chars)", len(text))
             return True
 
         if not self.is_configured():
             logger.warning("Email not configured; message not sent")
+            self.last_error = "email not configured"
             return False
 
         if not subject:
@@ -66,6 +69,7 @@ class EmailMessenger(BaseMessenger):
             return True
         except Exception as exc:
             logger.error("Email send failed: %s", exc)
+            self.last_error = str(exc)
             return False
 
     def send_rich(
@@ -78,6 +82,7 @@ class EmailMessenger(BaseMessenger):
     ) -> bool:
         """Send an HTML email with optional inline PNG charts."""
         inline_assets = inline_assets or []
+        self.last_error = ""
 
         if self.dry_run:
             logger.info(
@@ -89,6 +94,7 @@ class EmailMessenger(BaseMessenger):
 
         if not self.is_configured():
             logger.warning("Email not configured; rich message not sent")
+            self.last_error = "email not configured"
             return False
 
         msg = MIMEMultipart("related")
@@ -122,4 +128,5 @@ class EmailMessenger(BaseMessenger):
             return True
         except Exception as exc:
             logger.error("Rich email send failed: %s", exc)
+            self.last_error = str(exc)
             return False

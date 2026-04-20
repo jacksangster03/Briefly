@@ -33,6 +33,7 @@ from app.cma.service import load_cma_correlations, load_cma_entries, save_cma_en
 from app.rebalancing.service import load_rebalancing_config, save_rebalancing_config
 from app.risk.service import invalidate_risk_cache
 from app.db.models import PortfolioHolding as PortfolioHoldingRow
+from app.db.models import SentMessage as SentMessageRow
 from app.db.models import UserPreference as UserPreferenceRow
 from app.db.session import get_session
 from app.personalization.preferences_service import (
@@ -670,6 +671,7 @@ def _build_profile_metadata(*, profile: UserProfile, profile_name: str) -> dict[
         "last_holdings_update_local": _display_local_datetime(holdings_updated_at, profile.timezone),
         "last_preferences_update_local": _display_local_datetime(preferences_updated_at, profile.timezone),
         "next_morning_send_local": _next_morning_send(profile),
+        "delivery_recent": _recent_delivery_status(profile=profile),
     }
 
 
@@ -781,6 +783,65 @@ def _next_morning_send(profile: UserProfile) -> str:
     if candidate <= now_local:
         candidate = candidate + timedelta(days=1)
     return candidate.strftime("%Y-%m-%d %H:%M %Z")
+
+
+def _recent_delivery_status(*, profile: UserProfile) -> list[dict[str, str]]:
+    """Summarize latest delivery outcomes by message type and channel."""
+    with get_session() as session:
+        rows = (
+            session.query(SentMessageRow)
+            .order_by(SentMessageRow.sent_at.desc())
+            .limit(200)
+            .all()
+        )
+
+    latest: dict[tuple[str, str], SentMessageRow] = {}
+    for row in rows:
+        key = (str(row.message_type or ""), str(row.channel or ""))
+        latest.setdefault(key, row)
+
+    expected: list[tuple[str, str]] = []
+    for msg_type, channels in (
+        ("morning_brief", profile.channels_for("morning")),
+        ("intraday", profile.channels_for("intraday")),
+        ("breaking", profile.channels_for("breaking")),
+    ):
+        expected.extend((msg_type, channel) for channel in channels)
+
+    unique_pairs: list[tuple[str, str]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for pair in expected + list(latest.keys()):
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        unique_pairs.append(pair)
+
+    summary: list[dict[str, str]] = []
+    for message_type, channel in unique_pairs:
+        row = latest.get((message_type, channel))
+        if row is None:
+            status = "never_sent"
+            reason = "No successful or failed delivery records yet."
+            sent_at_local = "Not yet"
+        else:
+            status = "sent" if bool(row.success) else "failed"
+            reason = (
+                str(row.error_message)
+                if row.error_message
+                else ("Delivered successfully." if bool(row.success) else "Delivery attempt returned unsuccessful status.")
+            )
+            sent_at_local = _display_local_datetime(row.sent_at, profile.timezone)
+        summary.append(
+            {
+                "message_type": message_type,
+                "channel": channel,
+                "status": status,
+                "reason": reason,
+                "sent_at_local": sent_at_local,
+            }
+        )
+    summary.sort(key=lambda item: (item["message_type"], item["channel"]))
+    return summary
 
 
 def _display_local_datetime(value: datetime | None, tz_name: str) -> str:

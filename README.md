@@ -20,6 +20,7 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 
 - Morning briefing with market setup, macro context, geopolitics, top themes, sector scan, watchlist, and portfolio focus sections
 - Expanded market setup panel: US, Europe, Asia, VIX, 10Y UST, WTI, gold levels with percentage moves
+- Deterministic **Setup read** paragraph after Market Setup to explain the session regime using breadth, volatility, rates, and commodity impulses
 - Intraday updates: only new, material developments above threshold, compact global risk block when relevant
 - Breaking alerts: deterministic classifier (breaking / high_priority / regular / ignore), storyline-key cooldown, one-shot follow-up state machine, flood control via rolling-hour cap
 - Weekend-aware formatting when cash equity markets are closed
@@ -29,6 +30,7 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 ### Delivery and rendering
 
 - Telegram and email delivery with per-channel, per-profile routing
+- Explicit channel outcome reporting in morning runs (`sent / skipped / failed`) with skip/failure reasons in logs
 - Optional LLM email renderer (OpenAI-compatible) with shadow mode for safe rollout, strict validation against deterministic payload, and automatic fallback
 - Static PNG chart cards: Market Snapshot, Macro Risk Strip, Top Holdings Performance, Sector Exposure vs Performance, Event-Linked Trend
 - HTML email with inline charts
@@ -219,6 +221,13 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
   - concise focus thesis
   - portfolio lens text linking regional developments back to likely holdings/sector implications
 - Region board is derived from saved coverage weights + home-region context, preserving deterministic behavior and local-first operation
+
+**Briefing Clarity + Delivery Trust (Phase 6.1)**
+- Symbol normalization for user-facing market setup copy (provider symbols like `^GSPC` stay internal by default)
+- Deterministic market-setup interpretation engine wired into both Telegram and Email briefing outputs
+- Improved global-news relevance notes with event-class-specific phrasing and in-brief deduplication
+- Audit logs now include recent delivery outcomes by message type + channel using persisted `SentMessage` records
+- Email failure troubleshooting is surfaced directly in morning-run logs with concrete next-step commands
 
 ### Intelligence pipeline
 
@@ -767,6 +776,7 @@ python -m app.cli simulation runs --profile default_user
 | 5.9 | Complete | Easy Setup onboarding wizard: 3-step novice flow that auto-fills policy, allocation, benchmark, CMA, risk preferences, and rebalancing defaults |
 | 6.0A | Complete | Beginner comprehension layer: centralized glossary + reusable question-mark help tooltips across complex portfolio analytics surfaces |
 | 6.0B | Complete | Regional Intelligence Board: briefing-root regional structure with deterministic region statuses, emphasis shares, and portfolio-impact lens copy |
+| 6.1 | Complete | Briefing clarity + delivery trust: deterministic setup-read paragraph, humanized setup symbol labels, deduped relevance notes, and explicit channel delivery outcomes in logs + Audit |
 | 5.7B | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---

@@ -74,41 +74,82 @@ def _resolve_llm_delivery_overrides(profile: UserProfile) -> tuple[bool | None, 
 
 def _get_messengers(settings: Settings, profile: UserProfile, *, message_type: str = ""):
     """Return configured messengers in priority order."""
-    messengers = []
-    channel = settings.normalized_delivery_channel
-    preferred_channels = set(profile.channels_for(message_type))
-    if message_type == "breaking":
-        # Breaking alerts are intentionally Telegram-only to avoid
-        # duplicate push surfaces and noisy email pings.
-        preferred_channels = {"telegram"}
-    if not preferred_channels:
-        preferred_channels = {"telegram"} if message_type == "breaking" else {"telegram", "email"}
-
-    include_telegram = channel in {"all", "telegram"} and "telegram" in preferred_channels
-    include_email = channel in {"all", "email"} and "email" in preferred_channels
-
-    if include_telegram:
-        tg = TelegramMessenger(settings)
-        if tg.is_configured() or settings.dry_run:
-            messengers.append(tg)
-
-    if include_email:
-        email = EmailMessenger(settings)
-        # Keep default behavior unchanged (only include configured email),
-        # but allow explicit email-only dry-run testing without credentials.
-        if email.is_configured() or (settings.dry_run and channel == "email"):
-            messengers.append(email)
-
+    plan = _delivery_channel_plan(settings=settings, profile=profile, message_type=message_type)
+    messengers = [item["messenger"] for item in plan if item.get("attempted") and item.get("messenger")]
     if not messengers:
         logger.warning(
             "No delivery channels active for this run (delivery_channel=%s, dry_run=%s)",
-            channel,
+            settings.normalized_delivery_channel,
             settings.dry_run,
         )
     return messengers
 
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _delivery_channel_plan(*, settings: Settings, profile: UserProfile, message_type: str) -> list[dict[str, object]]:
+    """Resolve channel attempt/skip decisions with explicit reasons."""
+    channel_override = settings.normalized_delivery_channel
+    preferred_channels = set(profile.channels_for(message_type))
+    if message_type == "breaking":
+        preferred_channels = {"telegram"}
+    if not preferred_channels:
+        preferred_channels = {"telegram"} if message_type == "breaking" else {"telegram", "email"}
+
+    plan: list[dict[str, object]] = []
+    for channel_name in ("telegram", "email"):
+        if channel_name not in preferred_channels:
+            plan.append(
+                {
+                    "channel": channel_name,
+                    "attempted": False,
+                    "status": "skipped",
+                    "reason": f"profile delivery for {message_type or 'default'} excludes {channel_name}",
+                    "messenger": None,
+                }
+            )
+            continue
+        if channel_override not in {"all", channel_name}:
+            plan.append(
+                {
+                    "channel": channel_name,
+                    "attempted": False,
+                    "status": "skipped",
+                    "reason": f"delivery_channel={channel_override} excludes {channel_name}",
+                    "messenger": None,
+                }
+            )
+            continue
+
+        messenger = TelegramMessenger(settings) if channel_name == "telegram" else EmailMessenger(settings)
+        is_configured = messenger.is_configured()
+        allow_dry_run_email_probe = bool(settings.dry_run and channel_override == "email" and channel_name == "email")
+        if is_configured or (channel_name == "telegram" and settings.dry_run) or allow_dry_run_email_probe:
+            plan.append(
+                {
+                    "channel": channel_name,
+                    "attempted": True,
+                    "status": "attempted",
+                    "reason": "delivery allowed",
+                    "messenger": messenger,
+                }
+            )
+            continue
+
+        reason = "not configured"
+        if channel_name == "email":
+            reason += " (set EMAIL_USER, EMAIL_PASSWORD, EMAIL_TO)"
+        plan.append(
+            {
+                "channel": channel_name,
+                "attempted": False,
+                "status": "skipped",
+                "reason": reason,
+                "messenger": None,
+            }
+        )
+    return plan
 
 
 def _print_terminal_output(messages: list[str], msg_type: str) -> None:
@@ -147,6 +188,7 @@ def _record_delivery(
     msg_type: str,
     success: bool,
     content_preview: str,
+    error_message: str | None = None,
     events: list | None = None,
     tracking_ids: list[str] | None = None,
 ) -> None:
@@ -181,6 +223,7 @@ def _record_delivery(
             content_hash=hashlib.sha256(content_preview.encode()).hexdigest()[:16],
             sent_at=datetime.now(timezone.utc),
             success=success,
+            error_message=(error_message or "")[:500] or None,
         )
         session.add(record)
 
@@ -315,6 +358,7 @@ def _deliver(
                     msg_type=msg_type,
                     success=success,
                     content_preview="\n".join(messages),
+                    error_message=None if success else str(getattr(messenger, "last_error", "") or "delivery returned unsuccessful status"),
                     events=events,
                     tracking_ids=tracking_ids,
                 )
@@ -358,6 +402,7 @@ def _deliver_rich_email(
                 msg_type=msg_type,
                 success=success,
                 content_preview=email_content.plain_text,
+                error_message=None if success else str(getattr(messenger, "last_error", "") or "email send returned unsuccessful status"),
                 events=events,
             )
     except Exception:
@@ -526,7 +571,8 @@ def run_morning_briefing(settings: Settings | None = None, *, respect_cadence: b
     messages = formatter.format_morning_briefing(briefing)
     email_content = EmailFormatter(profile.timezone).format_morning_briefing(briefing)
 
-    messengers = _get_messengers(settings, profile, message_type="morning")
+    delivery_plan = _delivery_channel_plan(settings=settings, profile=profile, message_type="morning")
+    messengers = [item["messenger"] for item in delivery_plan if item.get("attempted") and item.get("messenger")]
     display_events = []
     seen_tracking_ids = set()
     for evt in briefing.global_news + briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus + [
@@ -559,18 +605,36 @@ def run_morning_briefing(settings: Settings | None = None, *, respect_cadence: b
 
     telegram_messengers = [m for m in messengers if isinstance(m, TelegramMessenger)]
     email_messengers = [m for m in messengers if isinstance(m, EmailMessenger)]
+    channel_status: dict[str, str] = {}
+    channel_reason: dict[str, str] = {}
+    for item in delivery_plan:
+        channel = str(item.get("channel"))
+        if item.get("attempted"):
+            channel_status[channel] = "attempted"
+            channel_reason[channel] = str(item.get("reason") or "")
+        else:
+            channel_status[channel] = "skipped"
+            channel_reason[channel] = str(item.get("reason") or "")
 
     delivered_ok = False
     for messenger in telegram_messengers:
         _send_telegram_chart_preview(messenger, briefing.chart_assets, settings)
     if telegram_messengers:
-        delivered_ok = _deliver(
-            telegram_messengers,
-            messages,
-            "morning_brief",
-            display_events,
-            settings=settings,
-        ) or delivered_ok
+        for messenger in telegram_messengers:
+            telegram_ok = _deliver(
+                [messenger],
+                messages,
+                "morning_brief",
+                display_events,
+                settings=settings,
+            )
+            delivered_ok = telegram_ok or delivered_ok
+            channel_status["telegram"] = "sent" if telegram_ok else "failed"
+            channel_reason["telegram"] = (
+                "delivered"
+                if telegram_ok
+                else str(getattr(messenger, "last_error", "") or "telegram transport failed")
+            )
     if (
         settings.show_output
         and settings.normalized_delivery_channel != "telegram"
@@ -584,13 +648,33 @@ def run_morning_briefing(settings: Settings | None = None, *, respect_cadence: b
             "morning_email_preview",
         )
     for messenger in email_messengers:
-        delivered_ok = _deliver_rich_email(
+        email_ok = _deliver_rich_email(
             messenger,
             active_email_content,
             "morning_brief",
             display_events,
             settings=settings,
-        ) or delivered_ok
+        )
+        delivered_ok = email_ok or delivered_ok
+        channel_status["email"] = "sent" if email_ok else "failed"
+        channel_reason["email"] = (
+            "delivered"
+            if email_ok
+            else str(getattr(messenger, "last_error", "") or "email transport failed")
+        )
+        if not email_ok:
+            logger.warning(
+                "Email delivery failed. Next checks: run `python -m app.cli preflight` and "
+                "`python -m app.cli --show-output --email-only morning`."
+            )
+
+    logger.info(
+        "Morning delivery status | telegram=%s (%s) | email=%s (%s)",
+        channel_status.get("telegram", "skipped"),
+        channel_reason.get("telegram", "n/a"),
+        channel_status.get("email", "skipped"),
+        channel_reason.get("email", "n/a"),
+    )
 
     if respect_cadence and delivered_ok and not settings.dry_run:
         local_now = decision_engine.cadence.now_local()

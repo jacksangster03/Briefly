@@ -3913,6 +3913,22 @@
           <dd>Rebalancing: {{ analysis.rebalance_proposal.status_label if analysis.rebalance_proposal else "n/a" }}</dd>
         </dl>
       </div>
+      <div class="summary-grid" style="margin-top: 10px;">
+        <dl class="summary">
+          <dt>Recent Delivery Outcomes</dt>
+          {% for row in metadata.delivery_recent %}
+            <dd>
+              {{ row.message_type }} · {{ row.channel }}:
+              <strong>{{ row.status }}</strong>
+              ({{ row.sent_at_local }})
+            </dd>
+            <dd class="tiny">{{ row.reason }}</dd>
+          {% endfor %}
+          {% if not metadata.delivery_recent %}
+            <dd>No delivery records found yet.</dd>
+          {% endif %}
+        </dl>
+      </div>
     {% else %}
       <details class="dev-overrides-details" {% if workspace == "audit" and workspace_page == "overrides" %}open{% endif %}>
         <summary>Advanced Settings</summary>

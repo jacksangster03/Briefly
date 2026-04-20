@@ -51,6 +51,9 @@ class MorningBriefing(BaseModel):
     generated_at: datetime = Field(default_factory=datetime.now)
     session_mode: SessionMode = "weekday"
     market_setup: MarketSetup = Field(default_factory=MarketSetup)
+    market_setup_analysis: str = ""
+    market_setup_analysis_confidence: str = "low"
+    market_setup_signal_tags: list[str] = Field(default_factory=list)
     macro_context: list[MacroDataPoint] = Field(default_factory=list)
     global_news: list[NormalisedEvent] = Field(default_factory=list)
     top_themes: list[NormalisedEvent] = Field(default_factory=list)
