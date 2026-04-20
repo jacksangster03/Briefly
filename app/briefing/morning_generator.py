@@ -13,6 +13,9 @@ from app.data_sources.news_data import NewsDataService
 from app.briefing.chart_builder import MorningChartBuilder
 from app.briefing.global_news_selector import select_global_market_events
 from app.briefing.market_setup_interpreter import interpret_market_setup
+from app.briefing.portfolio_impact import build_portfolio_impact
+from app.briefing.regime_context import build_regime_context
+from app.briefing.regional_lens import build_regional_lens
 from app.briefing.theme_builder import build_top_themes
 from app.logger import get_logger
 from app.personalization.delivery_rules import load_alert_rules
@@ -300,6 +303,27 @@ class MorningBriefingGenerator:
         briefing.market_setup_analysis = setup_interpretation.narrative
         briefing.market_setup_analysis_confidence = setup_interpretation.confidence
         briefing.market_setup_signal_tags = setup_interpretation.tags
+        regional_lens, regional_skew = build_regional_lens(
+            index_quotes=briefing.market_setup.index_quotes,
+            global_news=briefing.global_news,
+        )
+        briefing.regional_lens = regional_lens
+        briefing.regional_skew_summary = regional_skew
+        impact_bullets, action_posture = build_portfolio_impact(
+            profile=self.profile,
+            global_news=briefing.global_news,
+            top_themes=briefing.top_themes,
+            portfolio_focus=briefing.portfolio_focus,
+            setup_tags=briefing.market_setup_signal_tags,
+        )
+        briefing.portfolio_impact_bullets = impact_bullets
+        briefing.portfolio_action_posture = action_posture
+        regime_context, alignment = build_regime_context(
+            profile_name=self.profile.name,
+            current_setup_tags=briefing.market_setup_signal_tags,
+        )
+        briefing.regime_context = regime_context
+        briefing.positioning_alignment = alignment
         self._dedupe_cross_section_events(briefing)
         if self._should_build_charts():
             briefing.chart_assets = MorningChartBuilder(

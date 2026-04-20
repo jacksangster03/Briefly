@@ -321,6 +321,8 @@ def build_market_relevance_note(
     """Generate a concise market-impact phrase for global sections."""
     text = _normalise_text(f"{event.title} {event.summary}")
     templates: list[str]
+    is_em_fx = any(term in text for term in ("fx", "currency", "dollar", "yuan", "yen", "euro", "devaluation"))
+    is_conflict = any(term in text for term in ("iran", "israel", "war", "conflict", "ceasefire", "missile", "naval"))
     if any(term in text for term in ("hormuz", "opec", "oil", "crude", "shipping", "tanker", "freight")):
         templates = [
             "Why market-relevant: energy chokepoints can quickly reprice inflation and transport-sensitive sectors.",
@@ -336,10 +338,15 @@ def build_market_relevance_note(
             "Why market-relevant: sanctions and trade controls can hit supply chains, earnings guidance, and FX.",
             "Why market-relevant: policy frictions can alter trade volumes, input costs, and cross-border risk appetite.",
         ]
-    elif any(term in text for term in ("iran", "israel", "war", "conflict", "ceasefire", "missile", "naval")):
+    elif is_conflict:
         templates = [
             "Why market-relevant: conflict headlines can shift energy risk premia and broad risk sentiment.",
             "Why market-relevant: geopolitical escalation/de-escalation can rapidly move commodities, rates, and defensives.",
+        ]
+    elif is_em_fx:
+        templates = [
+            "Why market-relevant: FX stress can tighten financial conditions and pressure EM-sensitive equities.",
+            "Why market-relevant: currency volatility can reprice funding costs, trade exposure, and regional risk appetite.",
         ]
     elif any(term in text for term in ("supply chain", "manufacturing", "imports", "exports", "factory")):
         templates = [

@@ -204,6 +204,32 @@ class TestTelegramFormatter:
         assert "Apple Inc. (AAPL)" in full
         assert "[portfolio]" in full
 
+    def test_morning_includes_regional_and_portfolio_impact_sections(self):
+        briefing = MorningBriefing(
+            regional_lens=[
+                {
+                    "region": "US",
+                    "direction": "up",
+                    "status": "lead",
+                    "driver": "rates and inflation repricing",
+                    "implication": "US participation supports broad risk appetite.",
+                }
+            ],
+            regional_skew_summary="Regional skew: US up, Europe mixed, Asia up.",
+            portfolio_impact_bullets=[
+                "Risk backdrop is supportive enough for growth-heavy exposures.",
+                "Most portfolio-linked names in today’s tape: NVDA, MSFT.",
+            ],
+            portfolio_action_posture="monitor_and_simulate",
+            regime_context="Regime context: broad continuation versus recent sessions.",
+            positioning_alignment="Positioning alignment: broadly aligned with a constructive regime.",
+        )
+        full = "\n".join(self.formatter.format_morning_briefing(briefing))
+        assert "REGIONAL LENS" in full
+        assert "PORTFOLIO IMPACT TODAY" in full
+        assert "REGIME CONTEXT" in full
+        assert "monitor and simulate" in full
+
     def test_breaking_alert_format(self):
         evt = NormalisedEvent(
             title="FDA approves Lilly obesity drug",
@@ -566,7 +592,7 @@ class _DummyMacroData:
 class TestMorningSectorSelection:
     def test_sector_scan_skips_macro_bleed_with_single_loose_ticker(self):
         generator = MorningBriefingGenerator(
-            settings=Settings(),
+            settings=Settings(enable_charts=False),
             profile=UserProfile(sector_weights={"semiconductors": 1.0}),
             universe=SectorUniverse(
                 sectors=[
@@ -707,3 +733,73 @@ class TestMorningCrossTypeSuppression:
         assert "Fed official signals one rate cut remains possible in 2026" in rendered_titles
         assert "US warns buyers of Iranian oil could face sanctions" not in rendered_titles
         assert "Oil tops $100 as shipping risk persists near Hormuz" not in rendered_titles
+
+
+class TestPhase63BriefingSections:
+    def test_generator_populates_regional_and_impact_fields(self, monkeypatch):
+        fresh = NormalisedEvent(
+            title="Iran reopens Strait of Hormuz",
+            summary="Energy shipping risk remains elevated.",
+            source="finnhub",
+            event_type="geopolitical",
+            final_score=0.84,
+            factual_confidence_score=0.83,
+            cluster_size=3,
+            already_sent=False,
+            update_status="new",
+            tickers=["XOM"],
+        )
+        monkeypatch.setattr(
+            "app.briefing.morning_generator.process_event_stream",
+            lambda *_args, **_kwargs: [fresh],
+        )
+
+        class _StubMarket:
+            def get_quotes(self, symbols):
+                rows = []
+                for symbol in symbols:
+                    if symbol == "^VIX":
+                        rows.append(QuoteData(symbol=symbol, display_name="VIX", current_price=19.5, change=2.0, change_percent=11.5))
+                    elif symbol == "CL=F":
+                        rows.append(QuoteData(symbol=symbol, display_name="WTI Crude Oil (CL1:COM)", current_price=82.0, change=4.9, change_percent=5.9))
+                    else:
+                        rows.append(QuoteData(symbol=symbol, display_name=symbol, current_price=100.0, change=1.2, change_percent=1.2))
+                return rows
+
+        class _StubMacro:
+            def get_morning_macro(self):
+                return [MacroDataPoint(series_id="UST10Y", name="US 10Y Treasury Yield", value=4.3, change=0.03)]
+
+            def get_treasury_yields(self):
+                return (
+                    MacroDataPoint(series_id="UST10Y", name="US 10Y Treasury Yield", value=4.3, change=0.03),
+                    MacroDataPoint(series_id="UST2Y", name="US 2Y Treasury Yield", value=3.8, change=0.02),
+                )
+
+        generator = MorningBriefingGenerator(
+            settings=Settings(enable_charts=False),
+            profile=UserProfile(
+                watchlist_primary=["XOM"],
+                delivery={"morning_channels": ["telegram"]},
+            ),
+            universe=SectorUniverse(
+                sectors=[],
+                indices=[
+                    InstrumentDef(symbol="^GSPC", display="S&P 500 (SPX)"),
+                    InstrumentDef(symbol="^STOXX50E", display="EURO STOXX 50"),
+                    InstrumentDef(symbol="^N225", display="Nikkei 225"),
+                    InstrumentDef(symbol="^VIX", display="VIX"),
+                ],
+                macro_instruments=[InstrumentDef(symbol="CL=F", display="WTI Crude Oil (CL1:COM)")],
+            ),
+            market_data=_StubMarket(),
+            news_data=_DummyNewsDataWithEvents([fresh]),
+            macro_data=_StubMacro(),
+        )
+        briefing = generator.generate()
+        assert briefing.regional_lens
+        assert briefing.regional_skew_summary.startswith("Regional skew:")
+        assert briefing.portfolio_impact_bullets
+        assert briefing.portfolio_action_posture
+        assert briefing.regime_context
+        assert briefing.positioning_alignment

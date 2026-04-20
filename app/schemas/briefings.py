@@ -55,6 +55,12 @@ class MorningBriefing(BaseModel):
     market_setup_analysis_confidence: str = "low"
     market_setup_signal_tags: list[str] = Field(default_factory=list)
     macro_context: list[MacroDataPoint] = Field(default_factory=list)
+    regional_lens: list[dict[str, str]] = Field(default_factory=list)
+    regional_skew_summary: str = ""
+    portfolio_impact_bullets: list[str] = Field(default_factory=list)
+    portfolio_action_posture: str = ""
+    regime_context: str = ""
+    positioning_alignment: str = ""
     global_news: list[NormalisedEvent] = Field(default_factory=list)
     top_themes: list[NormalisedEvent] = Field(default_factory=list)
     portfolio_focus: list[NormalisedEvent] = Field(default_factory=list)

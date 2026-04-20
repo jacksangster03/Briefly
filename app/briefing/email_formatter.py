@@ -86,6 +86,19 @@ class EmailFormatter:
         if market_block:
             parts.append(self._section("Market Setup", market_block))
 
+        regional_block = self._regional_lens_block(briefing.regional_lens, briefing.regional_skew_summary)
+        if regional_block:
+            parts.append(self._section("Regional Lens", regional_block))
+
+        impact_block = self._portfolio_impact_block(
+            briefing.portfolio_impact_bullets,
+            briefing.portfolio_action_posture,
+            briefing.regime_context,
+            briefing.positioning_alignment,
+        )
+        if impact_block:
+            parts.append(self._section("Portfolio Impact Today", impact_block))
+
         global_block = self._global_event_block(briefing.global_news, max_items=6)
         if global_block:
             parts.append(self._section("Global News & Geopolitics", global_block))
@@ -245,6 +258,63 @@ class EmailFormatter:
             )
             items.append(body)
         return "<ol style=\"padding-left:20px;margin:0;\">" + "".join(items) + "</ol>"
+
+    def _regional_lens_block(self, rows: list[dict[str, str]], skew_summary: str) -> str:
+        if not rows and not skew_summary:
+            return ""
+        parts = []
+        if skew_summary:
+            parts.append(
+                f"<div style=\"margin-bottom:10px;font-size:13px;color:#486581;line-height:1.5;\">{html.escape(skew_summary)}</div>"
+            )
+        lines = []
+        for row in rows[:7]:
+            lines.append(
+                "<li style=\"margin:0 0 10px 0;\">"
+                f"<strong>{html.escape(row.get('region', 'Region'))}</strong>: "
+                f"{html.escape(row.get('direction', 'mixed'))} ({html.escape(row.get('status', 'monitor'))})"
+                f" · Driver: {html.escape(row.get('driver', 'mixed macro'))}"
+                f" · {html.escape(row.get('implication', ''))}"
+                "</li>"
+            )
+        if lines:
+            parts.append("<ul style=\"padding-left:20px;margin:0;\">" + "".join(lines) + "</ul>")
+        return "".join(parts)
+
+    def _portfolio_impact_block(
+        self,
+        bullets: list[str],
+        posture: str,
+        regime_context: str,
+        positioning_alignment: str,
+    ) -> str:
+        if not bullets and not regime_context and not positioning_alignment:
+            return ""
+        parts = []
+        if posture:
+            parts.append(
+                f"<div style=\"margin-bottom:10px;font-size:13px;color:#334e68;\">"
+                f"<strong>Action posture:</strong> {html.escape(posture.replace('_', ' '))}"
+                "</div>"
+            )
+        if bullets:
+            parts.append(
+                "<ul style=\"padding-left:20px;margin:0 0 10px 0;\">"
+                + "".join(
+                    f"<li style=\"margin:0 0 8px 0;\">{html.escape(item)}</li>"
+                    for item in bullets[:3]
+                )
+                + "</ul>"
+            )
+        if regime_context:
+            parts.append(
+                f"<div style=\"margin-top:6px;font-size:13px;color:#486581;line-height:1.5;\">{html.escape(regime_context)}</div>"
+            )
+        if positioning_alignment:
+            parts.append(
+                f"<div style=\"margin-top:6px;font-size:13px;color:#486581;line-height:1.5;\">{html.escape(positioning_alignment)}</div>"
+            )
+        return "".join(parts)
 
     def _earnings_block(self, earnings, relevance: dict[str, str] | None) -> str:
         if not earnings:

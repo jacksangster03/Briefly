@@ -80,6 +80,19 @@ class TelegramFormatter:
         if macro:
             sections.append(macro)
 
+        regional = self._format_regional_lens(briefing.regional_lens, briefing.regional_skew_summary)
+        if regional:
+            sections.append(regional)
+
+        impact = self._format_portfolio_impact(
+            briefing.portfolio_impact_bullets,
+            briefing.portfolio_action_posture,
+            briefing.regime_context,
+            briefing.positioning_alignment,
+        )
+        if impact:
+            sections.append(impact)
+
         global_news = self._format_global_news(briefing.global_news)
         if global_news:
             sections.append(global_news)
@@ -299,6 +312,42 @@ class TelegramFormatter:
             )
             if meta:
                 lines.append(f"   <i>{' | '.join(meta)}</i>")
+        return "\n".join(lines)
+
+    def _format_regional_lens(self, rows: list[dict[str, str]], skew_summary: str) -> str:
+        if not rows and not skew_summary:
+            return ""
+        lines = [f"<b>{SECTION_HEADERS['regional_lens']}</b>"]
+        if skew_summary:
+            lines.append(skew_summary)
+        for row in rows[:7]:
+            lines.append(
+                f"- <b>{row.get('region', 'Region')}</b>: {row.get('direction', 'mixed')} "
+                f"({row.get('status', 'monitor')}) · Driver: {row.get('driver', 'mixed macro')} · "
+                f"{row.get('implication', '')}"
+            )
+        return "\n".join(lines)
+
+    def _format_portfolio_impact(
+        self,
+        bullets: list[str],
+        posture: str,
+        regime_context: str,
+        positioning_alignment: str,
+    ) -> str:
+        if not bullets and not regime_context and not positioning_alignment:
+            return ""
+        lines = [f"<b>{SECTION_HEADERS['portfolio_impact']}</b>"]
+        if posture:
+            lines.append(f"Action posture: {posture.replace('_', ' ')}")
+        for bullet in bullets[:3]:
+            lines.append(f"- {bullet}")
+        if regime_context:
+            lines.append("")
+            lines.append(f"<b>{SECTION_HEADERS['regime_context']}</b>")
+            lines.append(regime_context)
+        if positioning_alignment:
+            lines.append(positioning_alignment)
         return "\n".join(lines)
 
     def _format_themes_for_mode(

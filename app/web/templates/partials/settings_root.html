@@ -1397,6 +1397,16 @@
       {% endfor %}
     </div>
 
+    <div class="executive-strip" style="margin-top:10px;">
+      <strong>Portfolio Impact Preview</strong>
+      <p>{{ briefing_influence.summary }}</p>
+      <ul style="margin: 8px 0 0 18px;">
+        <li>{{ briefing_influence.section_drivers.portfolio_focus }}</li>
+        <li>{{ briefing_influence.section_drivers.sector_scan }}</li>
+        <li>{{ briefing_influence.section_drivers.global_news }}</li>
+      </ul>
+    </div>
+
     <div class="summary-grid" style="margin-top: 10px;">
       <a class="summary" href="/ui/briefing/watchlists?profile={{ state.profile }}" style="text-decoration:none;">
         <div class="kpi-label">Watchlists & Coverage</div>

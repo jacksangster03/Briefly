@@ -237,6 +237,14 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - Top Themes ranking now favors holdings/watchlist relevance and de-emphasizes low-signal filing stubs when not portfolio-linked
 - Watchlist section adds a compact mover/catalyst summary line before the detailed list
 
+**Regional Narrative + Portfolio Impact (Phase 6.3)**
+- Morning briefing now includes a deterministic **Regional Lens** section (US, Europe, Asia, plus conditional geopolitical spillover regions)
+- Added **Portfolio Impact Today** section with posture + top impact bullets derived from setup tags, holdings overlap, and briefing drivers
+- Added **Regime Context** + **Positioning Alignment** lines to frame continuation/divergence versus recent risk snapshots
+- Regional and impact blocks are rendered in both Telegram and Email outputs using concise, scan-friendly formatting
+- Briefing workspace root now includes a portfolio-impact preview strip beneath the regional board
+- Global-news “why market-relevant” now includes FX-stress templates to reduce repetition and improve channel specificity
+
 ### Intelligence pipeline
 
 - Finnhub + NewsAPI event processing with credibility scoring, personal relevance, and clustering
@@ -786,6 +794,7 @@ python -m app.cli simulation runs --profile default_user
 | 6.0B | Complete | Regional Intelligence Board: briefing-root regional structure with deterministic region statuses, emphasis shares, and portfolio-impact lens copy |
 | 6.1 | Complete | Briefing clarity + delivery trust: deterministic setup-read paragraph, humanized setup symbol labels, deduped relevance notes, and explicit channel delivery outcomes in logs + Audit |
 | 6.2 | Complete | Briefing signal upgrade: richer setup-read regime analysis, grouped + relevance-tagged earnings calendar, watchlist summary line, and stronger theme relevance prioritization |
+| 6.3 | Complete | Regional narrative + portfolio impact: new regional lens and portfolio-impact sections in briefs, regime context/alignment framing, and briefing-home impact preview |
 | 5.7B | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---
