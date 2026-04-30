@@ -151,6 +151,71 @@ UI_GLOSSARY: dict[str, dict[str, str]] = {
         "short_definition": "Percentile bands showing a range of simulated portfolio paths over time.",
         "why_it_matters": "Helps visualize uncertainty instead of relying on a single forecast path.",
     },
+    "avg_monthly_geom": {
+        "term": "Average Monthly Return (Geometric)",
+        "short_definition": "Compounded monthly return that, repeated each month, reproduces the total return.",
+        "why_it_matters": "Cleaner than the arithmetic mean because it accounts for compounding and is consistent with cumulative results.",
+    },
+    "beta": {
+        "term": "Beta",
+        "short_definition": "Sensitivity of portfolio returns to benchmark returns; covariance over benchmark variance.",
+        "why_it_matters": "Beta of 1 moves with the market, above 1 amplifies it, below 1 dampens it. Drives systematic risk and CAPM expected return.",
+    },
+    "r_squared": {
+        "term": "R-Squared",
+        "short_definition": "Share of portfolio return variation explained by the benchmark.",
+        "why_it_matters": "High R-squared means beta and alpha are reliable; low R-squared means the portfolio drifts away from the benchmark and CAPM-based metrics are noisy.",
+    },
+    "treynor_ratio": {
+        "term": "Treynor Ratio",
+        "short_definition": "Excess return over the risk-free rate per unit of beta (systematic risk).",
+        "why_it_matters": "Like Sharpe but penalises only systematic risk. Useful when comparing well-diversified portfolios where idiosyncratic risk should already be diversified away.",
+    },
+    "jensens_alpha": {
+        "term": "Jensen's Alpha",
+        "short_definition": "Return earned above what CAPM predicted, given the portfolio's beta and the benchmark return.",
+        "why_it_matters": "Direct measure of skill or factor tilt: positive alpha is unexplained outperformance, negative alpha is unexplained drag.",
+    },
+    "probability_of_loss": {
+        "term": "Probability of Loss",
+        "short_definition": "Share of monthly periods where the portfolio return was negative.",
+        "why_it_matters": "Frames downside risk as a frequency rather than a single drawdown number. Easier to reason about behaviourally.",
+    },
+    "average_loss": {
+        "term": "Average Loss",
+        "short_definition": "Mean monthly return across only the months that ended negative.",
+        "why_it_matters": "Tells you what a typical losing month looks like, so you can sanity-check whether you can stomach the recurrence rate.",
+    },
+    "downside_risk": {
+        "term": "Downside Risk",
+        "short_definition": "Annualised volatility computed only from returns below the risk-free rate.",
+        "why_it_matters": "Penalises only bad volatility, the input behind Sortino and a fairer risk measure for asymmetric strategies.",
+    },
+    "probability_of_underperformance": {
+        "term": "Probability of Underperformance",
+        "short_definition": "Share of monthly periods where the portfolio underperformed the benchmark.",
+        "why_it_matters": "Tracks how often, not just by how much, you fell behind the benchmark. Cadence matters for IPS reviews.",
+    },
+    "average_underperformance": {
+        "term": "Average Underperformance",
+        "short_definition": "Mean monthly active return across only the months that underperformed the benchmark.",
+        "why_it_matters": "Quantifies the typical size of a bad month relative to the benchmark, separate from how often it happens.",
+    },
+    "probability_of_outperformance": {
+        "term": "Probability of Outperformance",
+        "short_definition": "Share of monthly periods where the portfolio outperformed the benchmark.",
+        "why_it_matters": "Counterpart to underperformance probability. Together they show whether outperformance is consistent or sporadic.",
+    },
+    "average_outperformance": {
+        "term": "Average Outperformance",
+        "short_definition": "Mean monthly active return across only the months that beat the benchmark.",
+        "why_it_matters": "Shows the typical size of a winning month, useful for understanding the risk and reward asymmetry of the strategy.",
+    },
+    "bull_bear_active": {
+        "term": "Bull / Bear Conditional Active Return",
+        "short_definition": "Average active return separately in months where the benchmark was up (bull) versus down (bear).",
+        "why_it_matters": "Distinguishes a portfolio that adds value when markets rally from one that defends in drawdowns. Asymmetric capture is a key IPS reporting concept.",
+    },
 }
 
 REGIONAL_INTELLIGENCE_BUCKETS: list[dict[str, Any]] = [

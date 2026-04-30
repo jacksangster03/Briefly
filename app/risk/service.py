@@ -10,6 +10,12 @@ from typing import Any
 from app.db.models import BenchmarkPriceCache, RiskMetricsSnapshot
 from app.db.session import get_session
 from app.logger import get_logger
+from app.risk.advanced_metrics import (
+    classify_alpha,
+    classify_beta,
+    classify_r_squared,
+    compute_advanced_metrics,
+)
 
 logger = get_logger("risk")
 
@@ -514,6 +520,58 @@ def compute_risk_analytics(
         ),
         "rolling": rolling,
     }
+
+    advanced = compute_advanced_metrics(port_rets, bench_rets, risk_free_rate_pct)
+    if advanced.get("available"):
+        disp = advanced.get("display", {})
+        block["advanced_metrics"] = {
+            "available": True,
+            "n_observations": advanced["n_observations"],
+            "n_months": advanced["n_months"],
+            "bull_months": advanced["bull_months"],
+            "bear_months": advanced["bear_months"],
+            "avg_monthly_geom_pct": advanced["avg_monthly_geom_pct"],
+            "avg_monthly_geom_display": disp["avg_monthly_geom"],
+            "annualised_return_pct": advanced["annualised_return_pct"],
+            "benchmark_annualised_return_pct": advanced["benchmark_annualised_return_pct"],
+            "beta": advanced["beta"],
+            "beta_display": disp["beta"],
+            "beta_label": classify_beta(advanced["beta"]),
+            "r_squared": advanced["r_squared"],
+            "r_squared_display": disp["r_squared"],
+            "r_squared_label": classify_r_squared(advanced["r_squared"]),
+            "correlation": advanced["correlation"],
+            "treynor_ratio": advanced["treynor_ratio"],
+            "treynor_display": disp["treynor_ratio"],
+            "jensens_alpha_pct": advanced["jensens_alpha_pct"],
+            "jensens_alpha_display": disp["jensens_alpha"],
+            "alpha_label": classify_alpha(advanced["jensens_alpha_pct"]),
+            "capm_expected_return_pct": advanced["capm_expected_return_pct"],
+            "capm_expected_return_display": disp["capm_expected_return"],
+            "probability_of_loss_pct": advanced["probability_of_loss_pct"],
+            "probability_of_loss_display": disp["probability_of_loss"],
+            "average_loss_pct": advanced["average_loss_pct"],
+            "average_loss_display": disp["average_loss"],
+            "downside_risk_pct": advanced["downside_risk_pct"],
+            "downside_risk_display": disp["downside_risk"],
+            "probability_of_underperformance_pct": advanced["probability_of_underperformance_pct"],
+            "probability_of_underperformance_display": disp["probability_of_underperformance"],
+            "average_underperformance_pct": advanced["average_underperformance_pct"],
+            "average_underperformance_display": disp["average_underperformance"],
+            "probability_of_outperformance_pct": advanced["probability_of_outperformance_pct"],
+            "probability_of_outperformance_display": disp["probability_of_outperformance"],
+            "average_outperformance_pct": advanced["average_outperformance_pct"],
+            "average_outperformance_display": disp["average_outperformance"],
+            "average_bull_active_pct": advanced["average_bull_active_pct"],
+            "average_bull_active_display": disp["average_bull_active"],
+            "average_bear_active_pct": advanced["average_bear_active_pct"],
+            "average_bear_active_display": disp["average_bear_active"],
+        }
+    else:
+        block["advanced_metrics"] = {
+            "available": False,
+            "reason": advanced.get("reason", "Insufficient data."),
+        }
 
     _persist_snapshot(
         profile_name=profile_name,

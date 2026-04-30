@@ -586,5 +586,57 @@ def news(ctx, query):
         click.echo(f"  [{evt.source}] {evt.title[:100]}{tickers}")
 
 
+@cli.command("portfolio-snapshot")
+@click.option("--profile", "profile_name", default="default_user", help="Profile to render.")
+@click.option("--lookback-days", type=int, default=252, help="Lookback window in trading days.")
+@click.option("--force", is_flag=True, default=False, help="Bypass cache and recompute.")
+@click.option("--plain", is_flag=True, default=False, help="Plain-text output (no HTML tags).")
+@click.option("--json", "json_out", is_flag=True, default=False, help="Emit raw advanced_metrics block as JSON.")
+@click.pass_context
+def portfolio_snapshot(ctx, profile_name: str, lookback_days: int, force: bool, plain: bool, json_out: bool):
+    """Render the Phase 5.9 Portfolio Performance Snapshot for a profile.
+
+    Pulls live risk analytics and the 22-metric advanced workbench, then prints a
+    Telegram/email-shaped summary block. Use --plain for terminal viewing, --json
+    for piping into other tools.
+    """
+    init_db()
+    from app.briefing.portfolio_performance import (
+        format_portfolio_performance_plain,
+        format_portfolio_performance_snapshot,
+    )
+    from app.portfolio.holdings_store import load_holdings_for_profile
+    from app.benchmark.service import load_benchmark_config
+    from app.policy.service import load_policy
+    from app.risk.service import compute_risk_analytics
+
+    holdings = load_holdings_for_profile(profile_name) or []
+    benchmark = load_benchmark_config(profile_name)
+    policy = load_policy(profile_name)
+
+    block = compute_risk_analytics(
+        profile_name=profile_name,
+        holdings=[h.model_dump() if hasattr(h, "model_dump") else dict(h) for h in holdings],
+        benchmark_config=benchmark.model_dump() if benchmark and hasattr(benchmark, "model_dump") else (dict(benchmark) if benchmark else None),
+        policy=policy.model_dump() if policy and hasattr(policy, "model_dump") else (dict(policy) if policy else None),
+        lookback_days=lookback_days,
+        force_refresh=force,
+    )
+
+    if json_out:
+        click.echo(json.dumps(block.get("advanced_metrics", {}), indent=2, default=str))
+        return
+
+    if plain:
+        text = format_portfolio_performance_plain(block)
+    else:
+        text = format_portfolio_performance_snapshot(block)
+
+    if not text:
+        click.echo("Portfolio snapshot unavailable. Configure a benchmark and weighted holdings, then retry.")
+        ctx.exit(1)
+    click.echo(text)
+
+
 if __name__ == "__main__":
     cli()

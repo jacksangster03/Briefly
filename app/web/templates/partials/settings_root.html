@@ -2377,6 +2377,164 @@
       </div>
     </div>
 
+    {% set advanced = risk_analytics.advanced_metrics %}
+    {% if advanced and advanced.available %}
+    <div class="chart-card wide" style="margin-top: 14px;">
+      <p class="chart-title">Advanced Performance Analytics</p>
+      <p class="muted" style="margin: 4px 0 14px; font-size: 0.85rem;">
+        Twenty-two-metric workbench. Hover any <span class="help-tip-btn" style="display:inline-flex;width:14px;height:14px;font-size:9px;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--border);">?</span> for definition and why it matters. Computed on {{ advanced.n_observations }} daily observations / {{ advanced.n_months }} monthly buckets ({{ advanced.bull_months }} bull, {{ advanced.bear_months }} bear).
+      </p>
+
+      <h3 style="margin: 12px 0 6px; font-size: 0.95rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;">Return profile</h3>
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">Total Return</div>
+          <div class="kpi-value" style="color: {{ 'var(--success)' if risk_analytics.total_return_pct >= 0 else 'var(--error)' }};">{{ risk_analytics.total_return_display }}</div>
+          <div class="kpi-note">{{ risk_analytics.lookback_label }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Avg Monthly Return (Geometric) {{ help_tip("avg_monthly_geom") }}</div>
+          <div class="kpi-value" style="color: {{ 'var(--success)' if advanced.avg_monthly_geom_pct >= 0 else 'var(--error)' }};">{{ advanced.avg_monthly_geom_display }}</div>
+          <div class="kpi-note">Compounded</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Annualised Return</div>
+          <div class="kpi-value">{{ "%+.2f%%" | format(advanced.annualised_return_pct) }}</div>
+          <div class="kpi-note">Bench: {{ "%+.2f%%" | format(advanced.benchmark_annualised_return_pct) }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Volatility (Annualised)</div>
+          <div class="kpi-value">{{ risk_analytics.volatility_display }}</div>
+          <div class="kpi-note">Bench: {{ risk_analytics.benchmark_volatility_display }}</div>
+        </div>
+      </div>
+
+      <h3 style="margin: 16px 0 6px; font-size: 0.95rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;">CAPM &amp; systematic risk</h3>
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">Beta {{ help_tip("beta") }}</div>
+          <div class="kpi-value">{{ advanced.beta_display }}</div>
+          <div class="kpi-note">{{ advanced.beta_label }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">R-Squared {{ help_tip("r_squared") }}</div>
+          <div class="kpi-value">{{ advanced.r_squared_display }}</div>
+          <div class="kpi-note">{{ advanced.r_squared_label }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Treynor Ratio {{ help_tip("treynor_ratio") }}</div>
+          <div class="kpi-value">{{ advanced.treynor_display }}</div>
+          <div class="kpi-note">Excess return / Beta</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Jensen's Alpha {{ help_tip("jensens_alpha") }}</div>
+          <div class="kpi-value" style="color: {{ 'var(--success)' if advanced.jensens_alpha_pct >= 0 else 'var(--error)' }};">{{ advanced.jensens_alpha_display }}</div>
+          <div class="kpi-note">{{ advanced.alpha_label }} | CAPM expected: {{ advanced.capm_expected_return_display }}</div>
+        </div>
+      </div>
+
+      <h3 style="margin: 16px 0 6px; font-size: 0.95rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;">Risk-adjusted return</h3>
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">Sharpe Ratio</div>
+          <div class="kpi-value">{{ risk_analytics.sharpe_display }}</div>
+          <div class="kpi-note">{{ risk_analytics.sharpe_label }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Sortino Ratio</div>
+          <div class="kpi-value">{{ risk_analytics.sortino_display }}</div>
+          <div class="kpi-note">Downside-only</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Information Ratio {{ help_tip("information_ratio") }}</div>
+          <div class="kpi-value">{{ risk_analytics.information_ratio_display }}</div>
+          <div class="kpi-note">{{ risk_analytics.ir_label }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Tracking Error {{ help_tip("tracking_error") }}</div>
+          <div class="kpi-value">{{ risk_analytics.tracking_error_display }}</div>
+          <div class="kpi-note">Active return dispersion</div>
+        </div>
+      </div>
+
+      <h3 style="margin: 16px 0 6px; font-size: 0.95rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;">Loss profile</h3>
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">Maximum Drawdown {{ help_tip("max_drawdown") }}</div>
+          <div class="kpi-value" style="color: var(--error);">{{ risk_analytics.max_drawdown_display }}</div>
+          <div class="kpi-note">Bench: {{ risk_analytics.benchmark_max_drawdown_display }}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Probability of Loss {{ help_tip("probability_of_loss") }}</div>
+          <div class="kpi-value">{{ advanced.probability_of_loss_display }}</div>
+          <div class="kpi-note">Per month</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Average Loss {{ help_tip("average_loss") }}</div>
+          <div class="kpi-value" style="color: var(--error);">{{ advanced.average_loss_display }}</div>
+          <div class="kpi-note">Avg negative month</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Downside Risk {{ help_tip("downside_risk") }}</div>
+          <div class="kpi-value">{{ advanced.downside_risk_display }}</div>
+          <div class="kpi-note">Annualised, semi-deviation</div>
+        </div>
+      </div>
+
+      <h3 style="margin: 16px 0 6px; font-size: 0.95rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;">Active return profile</h3>
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">Probability of Underperformance {{ help_tip("probability_of_underperformance") }}</div>
+          <div class="kpi-value">{{ advanced.probability_of_underperformance_display }}</div>
+          <div class="kpi-note">Months below benchmark</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Average Underperformance {{ help_tip("average_underperformance") }}</div>
+          <div class="kpi-value" style="color: var(--error);">{{ advanced.average_underperformance_display }}</div>
+          <div class="kpi-note">Active return | underperformed</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Probability of Outperformance {{ help_tip("probability_of_outperformance") }}</div>
+          <div class="kpi-value">{{ advanced.probability_of_outperformance_display }}</div>
+          <div class="kpi-note">Months above benchmark</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Average Outperformance {{ help_tip("average_outperformance") }}</div>
+          <div class="kpi-value" style="color: var(--success);">{{ advanced.average_outperformance_display }}</div>
+          <div class="kpi-note">Active return | outperformed</div>
+        </div>
+      </div>
+
+      <h3 style="margin: 16px 0 6px; font-size: 0.95rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em;">Capture asymmetry {{ help_tip("bull_bear_active") }}</h3>
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-label">Bull-Market Active Return</div>
+          <div class="kpi-value" style="color: {{ 'var(--success)' if advanced.average_bull_active_pct >= 0 else 'var(--error)' }};">{{ advanced.average_bull_active_display }}</div>
+          <div class="kpi-note">{{ advanced.bull_months }} bull months · benchmark up</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Bear-Market Active Return</div>
+          <div class="kpi-value" style="color: {{ 'var(--success)' if advanced.average_bear_active_pct >= 0 else 'var(--error)' }};">{{ advanced.average_bear_active_display }}</div>
+          <div class="kpi-note">{{ advanced.bear_months }} bear months · benchmark down</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Active Return (Annualised)</div>
+          <div class="kpi-value" style="color: {{ 'var(--success)' if risk_analytics.active_return_pct >= 0 else 'var(--error)' }};">{{ risk_analytics.active_return_display }}</div>
+          <div class="kpi-note">Portfolio minus benchmark</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Correlation</div>
+          <div class="kpi-value">{{ "%.3f" | format(advanced.correlation) }}</div>
+          <div class="kpi-note">vs benchmark, daily</div>
+        </div>
+      </div>
+    </div>
+    {% elif advanced and not advanced.available %}
+    <div class="muted" style="margin-top: 12px; font-size: 0.85rem;">
+      Advanced metrics unavailable: {{ advanced.reason }}
+    </div>
+    {% endif %}
+
     {% if risk_analytics.rolling and risk_analytics.rolling['30d'] %}
     <div class="chart-card wide" style="margin-top: 8px;">
       <p class="chart-title">Rolling 30-Day Returns (last 10 observations)</p>
