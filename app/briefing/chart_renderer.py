@@ -349,11 +349,11 @@ class ChartRenderer:
         points = list(spec.get("series") or [])
         if not points:
             return None
-        labels = [str(row.get("name") or row.get("symbol") or "") for row in points]
+        labels = [self._compact_impulse_label(str(row.get("name") or row.get("symbol") or "")) for row in points]
         values = [float(row.get("impulse") or 0.0) for row in points]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
 
-        fig, ax = plt.subplots(figsize=(8.4, 4.6), dpi=150)
+        fig, ax = plt.subplots(figsize=(8.8, 4.9), dpi=150)
         fig.patch.set_facecolor(BG)
         ax.set_facecolor(BG)
         y_pos = list(range(len(labels)))
@@ -369,21 +369,29 @@ class ChartRenderer:
         ax.tick_params(axis="x", colors=TEXT)
         for spine in ax.spines.values():
             spine.set_visible(False)
+
+        min_value = min(values) if values else -1.0
+        max_value = max(values) if values else 1.0
+        x_pad = max(0.8, (max_value - min_value) * 0.08)
+        ax.set_xlim(min(min_value - x_pad, -0.5), max(max_value + x_pad, 0.5))
+
         for idx, row in enumerate(points):
             unit = str(row.get("unit") or "pct")
             value = float(row.get("impulse") or 0.0)
             suffix = "bp" if unit == "bps" else "%"
+            x_text = value + (0.12 if value < 0 else 0.08)
             ax.text(
-                value + (0.08 if value >= 0 else -0.08),
+                x_text,
                 idx,
                 f"{value:+.2f}{suffix}",
                 va="center",
-                ha="left" if value >= 0 else "right",
+                ha="left",
                 fontsize=8.5,
                 color=TEXT,
                 weight="bold",
+                bbox={"facecolor": BG, "edgecolor": "none", "pad": 0.6},
             )
-        fig.tight_layout()
+        fig.subplots_adjust(left=0.32, right=0.97, top=0.88, bottom=0.18)
         return self._to_asset(
             fig,
             key="cross_asset_impulse_strip",
@@ -391,6 +399,22 @@ class ChartRenderer:
             caption=str(spec.get("caption") or ""),
             filename="cross-asset-impulses.png",
         )
+
+    @staticmethod
+    def _compact_impulse_label(label: str) -> str:
+        base = (label or "").strip()
+        lower = base.lower()
+        if "treasury yield" in lower and "10y" in lower:
+            return "US 10Y Yield"
+        if "wti crude" in lower:
+            return "WTI Crude"
+        if "gold" in lower:
+            return "Gold"
+        if "curve" in lower:
+            return "10Y-2Y Curve"
+        if "(" in base:
+            base = base.split("(", 1)[0].strip()
+        return base
 
     def render_holdings_excess_from_spec(self, spec: dict) -> ChartAsset | None:
         rows = list(spec.get("series") or [])
