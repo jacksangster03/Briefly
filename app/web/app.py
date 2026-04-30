@@ -16,6 +16,10 @@ from pydantic import BaseModel, Field
 from app.db.session import init_db
 from app.logger import get_logger
 from app.settings import Settings, get_settings
+from app.briefing.chart_builder import MorningChartBuilder
+from app.data_sources.macro_data import MacroDataService
+from app.data_sources.market_data import MarketDataService
+from app.schemas.briefings import MarketSetup, MorningBriefing
 from app.allocation.service import (
     build_actual_allocation,
     default_allocation_targets,
@@ -23,6 +27,7 @@ from app.allocation.service import (
     merge_targets_with_catalog,
 )
 from app.web.control_plane_service import (
+    _load_profile_defaults,
     apply_preference_updates,
     build_profile_state,
     import_holdings_from_upload,
@@ -39,6 +44,7 @@ from app.web.control_plane_service import (
     save_risk_config,
     search_followables,
 )
+from app.universe.sector_universe import load_sector_universe
 from app.onboarding.easy_setup import EasySetupInputs, apply_plan, build_plan, default_inputs
 
 logger = get_logger("web")
@@ -70,6 +76,7 @@ _ALL_SECTIONS = [
     "section-coverage",
     "section-delivery",
     "section-morning",
+    "section-briefing-morning-charts",
     "section-audit",
     "section-audit-home",
 ]
@@ -98,6 +105,12 @@ _PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
         "workspace": "briefing",
         "workspace_page": "morning",
         "visible_sections": ["section-morning"],
+    },
+    "briefing_morning_charts": {
+        "global_nav": "briefing",
+        "workspace": "briefing",
+        "workspace_page": "morning_charts",
+        "visible_sections": ["section-briefing-morning-charts"],
     },
     "portfolio_home": {
         "global_nav": "portfolio",
@@ -336,6 +349,26 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             request,
             profile=normalized_profile,
             page_key="briefing_morning",
+        )
+
+    @app.get("/ui/briefing/morning/charts", response_class=HTMLResponse, include_in_schema=False)
+    def ui_briefing_morning_charts(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings(request), normalized_profile)
+        preview = _build_morning_chart_preview(
+            settings=_settings(request),
+            profile=normalized_profile,
+        )
+        state.setdefault("metadata", {})["morning_chart_preview"] = preview
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            page_key="briefing_morning_charts",
+            state=state,
+            extra_context={"morning_chart_preview": preview},
         )
 
     @app.get("/ui/portfolio", response_class=HTMLResponse, include_in_schema=False)
@@ -1367,6 +1400,14 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         normalized_profile = _normalize_profile(profile)
         return {"history": load_attribution_history(normalized_profile, limit=limit)}
 
+    @app.get("/api/v1/profile/{profile}/briefing/morning/charts")
+    def api_morning_charts(profile: str):
+        normalized_profile = _normalize_profile(profile)
+        return _build_morning_chart_preview(
+            settings=_settings_from_app(app),
+            profile=normalized_profile,
+        )
+
     @app.post("/api/v1/profile/{profile}/simulation/run")
     def api_run_simulation(profile: str, payload: SimulationRunRequest):
         from app.simulation.service import parse_simulation_config, run_simulation
@@ -1763,6 +1804,48 @@ def _simulation_payload_from_form(form) -> dict[str, Any]:
             "correlation_stress": str(form.get("simulation_correlation_stress", "")).strip(),
         },
         "holdings": holdings,
+    }
+
+
+def _build_morning_chart_preview(*, settings: Settings, profile: str) -> dict[str, Any]:
+    """Build deterministic morning-chart bundle for web preview/API."""
+    normalized_profile = _normalize_profile(profile)
+    user_profile = _load_profile_defaults(settings, normalized_profile)
+    universe = load_sector_universe(settings)
+    market_svc = MarketDataService(settings)
+    macro_svc = MacroDataService(settings)
+
+    setup = MarketSetup()
+    if universe.all_index_symbols:
+        index_quotes = market_svc.get_quotes(universe.all_index_symbols)
+        index_name_map = {item.symbol: item.display for item in universe.indices}
+        for quote in index_quotes:
+            quote.display_name = index_name_map.get(quote.symbol, quote.display_name or quote.symbol)
+        setup.index_quotes = index_quotes
+    if universe.all_macro_symbols:
+        macro_quotes = market_svc.get_quotes(universe.all_macro_symbols)
+        macro_name_map = {item.symbol: item.display for item in universe.macro_instruments}
+        for quote in macro_quotes:
+            quote.display_name = macro_name_map.get(quote.symbol, quote.display_name or quote.symbol)
+        setup.macro_quotes = macro_quotes
+
+    briefing = MorningBriefing(
+        market_setup=setup,
+        macro_context=macro_svc.get_morning_macro(),
+        watchlist_quotes=market_svc.get_quotes(user_profile.watchlist_primary[:8]) if user_profile.watchlist_primary else [],
+        portfolio_quotes=market_svc.get_quotes(user_profile.portfolio_symbols[:8]) if user_profile.portfolio_symbols else [],
+    )
+
+    assets = MorningChartBuilder(profile=user_profile, market_data=market_svc).build(briefing)
+    return {
+        "profile": normalized_profile,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "bundle": briefing.morning_chart_bundle or {},
+        "selection": briefing.morning_chart_selection or [],
+        "assets": [
+            {"key": asset.key, "title": asset.title, "caption": asset.caption}
+            for asset in assets
+        ],
     }
 
 

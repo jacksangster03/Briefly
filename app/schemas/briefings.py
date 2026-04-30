@@ -70,6 +70,8 @@ class MorningBriefing(BaseModel):
     watchlist_events: list[NormalisedEvent] = Field(default_factory=list)
     watchlist_quotes: list[QuoteData] = Field(default_factory=list)
     portfolio_quotes: list[QuoteData] = Field(default_factory=list)
+    morning_chart_bundle: dict = Field(default_factory=dict)
+    morning_chart_selection: list[dict[str, str]] = Field(default_factory=list)
     chart_assets: list[ChartAsset] = Field(default_factory=list)
     event_count: int = 0
     events_fetched: int = 0

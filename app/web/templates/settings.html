@@ -260,6 +260,7 @@
           "briefing_watchlists": "Watchlists & Coverage",
           "briefing_delivery": "Delivery",
           "briefing_morning": "Morning Composition",
+          "briefing_morning_charts": "Morning Charts",
           "audit_home": "Overview",
           "audit_history": "History",
           "audit_overrides": "Overrides",
@@ -273,7 +274,7 @@
           {% elif workspace == "audit" %}
             Advanced source-of-truth and low-level override inspection for local operations.
           {% else %}
-            Configure watchlists, coverage priorities, delivery routing, and morning composition in a dedicated briefing workspace.
+            Configure watchlists, coverage priorities, delivery routing, morning composition, and deterministic chart previews in a dedicated briefing workspace.
           {% endif %}
         </p>
         <div class="breadcrumb-row" aria-label="Breadcrumb">
@@ -857,6 +858,175 @@
         }
       }
 
+      function renderMorningCharts(bundle, root = document) {
+        const globalTarget = root.querySelector("#morning-global-relative-chart");
+        const impulseTarget = root.querySelector("#morning-cross-asset-chart");
+        const holdingsTarget = root.querySelector("#morning-holdings-chart");
+        const sectorTarget = root.querySelector("#morning-sector-chart");
+        const eventTarget = root.querySelector("#morning-event-chart");
+        const targets = [globalTarget, impulseTarget, holdingsTarget, sectorTarget, eventTarget].filter(Boolean);
+        if (!targets.length) return;
+        targets.forEach((target) => _renderChartState(target, "info", "Rendering chart..."));
+        if (typeof window.Plotly === "undefined") {
+          targets.forEach((target) => _renderChartState(target, "error", "Chart failed to render. Numeric results are still available."));
+          return;
+        }
+
+        const charts = {};
+        ((bundle || {}).charts || []).forEach((row) => {
+          charts[String(row.chart_key || "")] = row;
+        });
+
+        const renderUnavailable = (target, spec, fallback) => {
+          _renderChartState(target, "info", (spec && spec.reason_if_hidden) || fallback);
+        };
+
+        try {
+          const global = charts.global_relative_performance;
+          if (!global || !global.available) {
+            renderUnavailable(globalTarget, global, "Global relative-performance chart unavailable.");
+          } else {
+            const traces = (global.series || []).map((row, idx) => ({
+              x: row.x_5d || [],
+              y: row.y_5d || [],
+              type: "scatter",
+              mode: "lines",
+              name: row.name || row.symbol || `Series ${idx + 1}`,
+              line: { width: idx === 0 ? 2.8 : 1.7 },
+            }));
+            window.Plotly.newPlot(
+              globalTarget,
+              traces,
+              _plotLayout({
+                xaxis: { title: "Period" },
+                yaxis: { title: "Rebased (100)", separatethousands: true },
+                hovermode: "x unified",
+              }),
+              _plotConfig()
+            );
+          }
+
+          const impulse = charts.cross_asset_impulse_strip;
+          if (!impulse || !impulse.available) {
+            renderUnavailable(impulseTarget, impulse, "Cross-asset impulse chart unavailable.");
+          } else {
+            const labels = (impulse.series || []).map((row) => row.name || row.symbol || "");
+            const values = (impulse.series || []).map((row) => Number(row.impulse || 0));
+            window.Plotly.newPlot(
+              impulseTarget,
+              [
+                {
+                  x: values,
+                  y: labels,
+                  type: "scatter",
+                  mode: "markers",
+                  marker: {
+                    size: 11,
+                    color: values.map((v) => (v >= 0 ? "#1faa6f" : "#ea5455")),
+                  },
+                  name: "Impulse",
+                  hovertemplate: "%{y}: %{x:.2f}<extra></extra>",
+                },
+              ],
+              _plotLayout({
+                xaxis: { title: "Impulse", zeroline: true, zerolinecolor: "#607086" },
+                yaxis: { automargin: true },
+                margin: { l: 160, r: 20, t: 24, b: 44 },
+              }),
+              _plotConfig()
+            );
+          }
+
+          const holdings = charts.holdings_excess_performance;
+          if (!holdings || !holdings.available) {
+            renderUnavailable(holdingsTarget, holdings, "Holdings excess-performance chart unavailable.");
+          } else {
+            const labels = (holdings.series || []).map((row) => row.name || row.symbol || "");
+            const excess = (holdings.series || []).map((row) => Number(row.excess_pct || 0));
+            window.Plotly.newPlot(
+              holdingsTarget,
+              [
+                {
+                  x: excess,
+                  y: labels,
+                  type: "bar",
+                  orientation: "h",
+                  marker: { color: excess.map((v) => (v >= 0 ? "#1faa6f" : "#ea5455")) },
+                },
+              ],
+              _plotLayout({
+                xaxis: { title: "Excess Return (%)" },
+                yaxis: { automargin: true },
+                margin: { l: 140, r: 20, t: 24, b: 44 },
+              }),
+              _plotConfig()
+            );
+          }
+
+          const sector = charts.sector_exposure_quadrant;
+          if (!sector || !sector.available) {
+            renderUnavailable(sectorTarget, sector, "Sector quadrant chart unavailable.");
+          } else {
+            const xVals = (sector.series || []).map((row) => Number(row.x_exposure || 0));
+            const yVals = (sector.series || []).map((row) => Number(row.y_change_pct || 0));
+            const labels = (sector.series || []).map((row) => row.name || row.sector_key || "");
+            window.Plotly.newPlot(
+              sectorTarget,
+              [
+                {
+                  x: xVals,
+                  y: yVals,
+                  text: labels,
+                  mode: "markers+text",
+                  type: "scatter",
+                  textposition: "top center",
+                  marker: {
+                    size: 12,
+                    color: yVals.map((v) => (v >= 0 ? "#1faa6f" : "#ea5455")),
+                  },
+                  hovertemplate: "%{text}<br>Exposure %{x:.2f}%<br>Move %{y:.2f}%<extra></extra>",
+                },
+              ],
+              _plotLayout({
+                xaxis: { title: "Exposure (%)", zeroline: true },
+                yaxis: { title: "Move (%)", zeroline: true },
+                showlegend: false,
+              }),
+              _plotConfig()
+            );
+          }
+
+          const eventSpec = charts.event_linked_annotated_trend;
+          if (!eventSpec || !eventSpec.available) {
+            renderUnavailable(eventTarget, eventSpec, "Event-linked trend unavailable.");
+          } else {
+            const row = (eventSpec.series || [])[0] || {};
+            window.Plotly.newPlot(
+              eventTarget,
+              [
+                {
+                  x: row.x || [],
+                  y: row.y || [],
+                  type: "scatter",
+                  mode: "lines",
+                  line: { width: 2.4, color: "#4c78a8" },
+                  name: row.name || row.symbol || "Focus",
+                },
+              ],
+              _plotLayout({
+                xaxis: { title: "Period" },
+                yaxis: { title: "Price", separatethousands: true },
+                hovermode: "x unified",
+              }),
+              _plotConfig()
+            );
+          }
+        } catch (err) {
+          console.error("Morning charts render failed", err);
+          targets.forEach((target) => _renderChartState(target, "error", "Chart failed to render. Numeric results are still available."));
+        }
+      }
+
       function initSimulationCharts(root = document) {
         const dataNode = root.querySelector("#simulation-chart-data");
         if (!dataNode) return;
@@ -869,6 +1039,20 @@
           return;
         }
         renderSimulationCharts(payload, root);
+      }
+
+      function initMorningCharts(root = document) {
+        const dataNode = root.querySelector("#morning-chart-data");
+        if (!dataNode) return;
+        let payload;
+        try {
+          payload = JSON.parse(dataNode.textContent || "{}");
+        } catch (err) {
+          console.error("Invalid morning chart payload", err);
+          renderMorningCharts(null, root);
+          return;
+        }
+        renderMorningCharts(payload, root);
       }
 
       function bindSimulationStaleIndicator(root = document) {
@@ -898,6 +1082,7 @@
         bindUnsavedChangesGuard(document);
         initHoldingsEditor();
         initSimulationCharts(document);
+        initMorningCharts(document);
         bindSimulationStaleIndicator(document);
         const explicitSection = (document.body.dataset.initialSection || "").trim();
         syncPageHiddenInputs(document);
@@ -914,6 +1099,7 @@
           bindUnsavedChangesGuard(target);
           initHoldingsEditor();
           initSimulationCharts(target);
+          initMorningCharts(target);
           bindSimulationStaleIndicator(target);
           syncPageHiddenInputs(document);
           clearDirty();
@@ -924,6 +1110,7 @@
         const target = event.detail && event.detail.target;
         if (target && target.id === "settings-root") {
           initSimulationCharts(target);
+          initMorningCharts(target);
           bindSimulationStaleIndicator(target);
         }
       });

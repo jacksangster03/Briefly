@@ -49,8 +49,9 @@
 {% set simulation_method_options = simulation_ctx.method_options if simulation_ctx.method_options is defined else [] %}
 {% set simulation_count_presets = simulation_ctx.simulation_count_presets if simulation_ctx.simulation_count_presets is defined else {} %}
 {% set simulation_horizon_presets = simulation_ctx.horizon_presets if simulation_ctx.horizon_presets is defined else {} %}
+{% set morning_chart_preview = morning_chart_preview if morning_chart_preview is defined else (metadata.morning_chart_preview if metadata.morning_chart_preview is defined else {"bundle": {}, "selection": [], "assets": []}) %}
 {% set visible_sections = visible_sections if visible_sections is defined else [
-  "section-easy-setup","section-briefing-home","section-overview","section-analyzer","section-policy","section-allocation","section-risk","section-cma","section-scenarios","section-simulation","section-rebalancing","section-attribution","section-benchmark","section-holdings","section-coverage","section-delivery","section-morning","section-audit-home","section-audit"
+  "section-easy-setup","section-briefing-home","section-overview","section-analyzer","section-policy","section-allocation","section-risk","section-cma","section-scenarios","section-simulation","section-rebalancing","section-attribution","section-benchmark","section-holdings","section-coverage","section-delivery","section-morning","section-briefing-morning-charts","section-audit-home","section-audit"
 ] %}
 {% set workspace = workspace if workspace is defined else "briefing" %}
 {% set workspace_page = workspace_page if workspace_page is defined else "home" %}
@@ -1419,6 +1420,10 @@
       <a class="summary" href="/ui/briefing/morning?profile={{ state.profile }}" style="text-decoration:none;">
         <div class="kpi-label">Morning Composition</div>
         <div>Toggle morning brief sections and save composition layout.</div>
+      </a>
+      <a class="summary" href="/ui/briefing/morning/charts?profile={{ state.profile }}" style="text-decoration:none;">
+        <div class="kpi-label">Morning Charts</div>
+        <div>Preview deterministic chart bundle and promoted visuals.</div>
       </a>
     </div>
   </section>
@@ -4008,6 +4013,46 @@
         <button type="submit">Save Morning Sections</button>
       </div>
     </form>
+  </section>
+  {% endif %}
+
+  {% if "section-briefing-morning-charts" in visible_sections %}
+  <section class="card" id="section-briefing-morning-charts" data-module-section="section-briefing-morning-charts">
+    <h2>Briefing / Morning Charts</h2>
+    <p class="muted">Deterministic market visuals preview. Chart selection, variants, and promotion are rule-based.</p>
+    <div class="executive-strip">
+      <strong>Deterministic Bundle Summary</strong>
+      <p>{{ morning_chart_preview.bundle.summary if morning_chart_preview.bundle is defined else "No chart bundle available." }}</p>
+      <div class="hero-chip-row">
+        {% for tag in (morning_chart_preview.bundle.regime_tags if morning_chart_preview.bundle is defined and morning_chart_preview.bundle.regime_tags is defined else []) %}
+          <span class="hero-chip">{{ tag }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    <p class="muted" style="margin-top:10px;">Charts reflect the latest preview run below.</p>
+    <div class="chart-grid" style="margin-top:10px;">
+      <div class="chart-card wide">
+        <p class="chart-title">Global Equity Leadership</p>
+        <div id="morning-global-relative-chart" style="min-height:320px;"></div>
+      </div>
+      <div class="chart-card wide">
+        <p class="chart-title">Cross-Asset Impulses</p>
+        <div id="morning-cross-asset-chart" style="min-height:300px;"></div>
+      </div>
+      <div class="chart-card">
+        <p class="chart-title">Holdings vs Benchmark</p>
+        <div id="morning-holdings-chart" style="min-height:280px;"></div>
+      </div>
+      <div class="chart-card">
+        <p class="chart-title">Sector Quadrant</p>
+        <div id="morning-sector-chart" style="min-height:280px;"></div>
+      </div>
+      <div class="chart-card wide">
+        <p class="chart-title">Event-Linked Trend</p>
+        <div id="morning-event-chart" style="min-height:280px;"></div>
+      </div>
+    </div>
+    <script id="morning-chart-data" type="application/json">{{ (morning_chart_preview.bundle if morning_chart_preview.bundle is defined else {}) | tojson }}</script>
   </section>
   {% endif %}
 

@@ -35,6 +35,22 @@ TEXT = "#102A43"
 class ChartRenderer:
     """Render simple static PNG chart cards."""
 
+    def render_from_spec(self, spec: dict) -> ChartAsset | None:
+        key = str(spec.get("chart_key") or "").strip().lower()
+        if not key or not bool(spec.get("available")):
+            return None
+        if key == "global_relative_performance":
+            return self.render_global_relative_from_spec(spec)
+        if key == "cross_asset_impulse_strip":
+            return self.render_cross_asset_impulse_from_spec(spec)
+        if key == "holdings_excess_performance":
+            return self.render_holdings_excess_from_spec(spec)
+        if key == "sector_exposure_quadrant":
+            return self.render_sector_quadrant_from_spec(spec)
+        if key == "event_linked_annotated_trend":
+            return self.render_event_linked_from_spec(spec)
+        return None
+
     def render_market_snapshot(self, quotes: list[QuoteData]) -> ChartAsset | None:
         if not quotes:
             return None
@@ -283,6 +299,214 @@ class ChartRenderer:
             title=f"{symbol_label} Trend",
             caption="Recent price trend for the most relevant portfolio-linked symbol in this briefing.",
             filename="focus-symbol.png",
+        )
+
+    def render_global_relative_from_spec(self, spec: dict) -> ChartAsset | None:
+        series = list(spec.get("series") or [])
+        if not series:
+            return None
+        fig, ax = plt.subplots(figsize=(8.6, 4.8), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        palette = ["#335c81", "#4c78a8", "#1f9d8a", "#f59f00", "#bf616a", "#7b8aa6", "#6c5ce7", "#16a085"]
+        for idx, row in enumerate(series):
+            x = row.get("x_5d") or []
+            y = row.get("y_5d") or []
+            if not x or not y:
+                continue
+            name = str(row.get("name") or row.get("symbol") or f"Series {idx + 1}")
+            color = palette[idx % len(palette)]
+            linewidth = 2.2 if idx == 0 else 1.7
+            ax.plot(x, y, color=color, linewidth=linewidth)
+            ax.text(
+                x[-1] + 0.08,
+                y[-1],
+                name,
+                color=color,
+                fontsize=8.6,
+                va="center",
+            )
+
+        ax.grid(axis="y", color=GRID, linewidth=0.8, alpha=0.78)
+        ax.set_title(str(spec.get("title") or "Global Equity Leadership"), loc="left", fontsize=15, weight="bold", color=TEXT)
+        ax.set_xlabel("Period", color=TEXT)
+        ax.set_ylabel("Rebased (100)", color=TEXT)
+        ax.tick_params(axis="x", colors=TEXT)
+        ax.tick_params(axis="y", colors=TEXT)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.margins(x=0.12)
+        fig.tight_layout()
+        return self._to_asset(
+            fig,
+            key="global_relative_performance",
+            title=str(spec.get("title") or "Global Equity Leadership"),
+            caption=str(spec.get("caption") or ""),
+            filename="global-relative-performance.png",
+        )
+
+    def render_cross_asset_impulse_from_spec(self, spec: dict) -> ChartAsset | None:
+        points = list(spec.get("series") or [])
+        if not points:
+            return None
+        labels = [str(row.get("name") or row.get("symbol") or "") for row in points]
+        values = [float(row.get("impulse") or 0.0) for row in points]
+        colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
+
+        fig, ax = plt.subplots(figsize=(8.4, 4.6), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        y_pos = list(range(len(labels)))
+        ax.axvline(0, color=GRID, linewidth=1.2)
+        ax.hlines(y=y_pos, xmin=[0 for _ in values], xmax=values, color=colors, linewidth=2.2, alpha=0.84)
+        ax.scatter(values, y_pos, color=colors, s=74, zorder=3)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, color=TEXT)
+        ax.invert_yaxis()
+        ax.set_xlabel("Impulse (mixed units; see labels)", color=TEXT)
+        ax.set_title(str(spec.get("title") or "Cross-Asset Impulses"), loc="left", fontsize=15, weight="bold", color=TEXT)
+        ax.grid(axis="x", color=GRID, linewidth=0.8, alpha=0.75)
+        ax.tick_params(axis="x", colors=TEXT)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        for idx, row in enumerate(points):
+            unit = str(row.get("unit") or "pct")
+            value = float(row.get("impulse") or 0.0)
+            suffix = "bp" if unit == "bps" else "%"
+            ax.text(
+                value + (0.08 if value >= 0 else -0.08),
+                idx,
+                f"{value:+.2f}{suffix}",
+                va="center",
+                ha="left" if value >= 0 else "right",
+                fontsize=8.5,
+                color=TEXT,
+                weight="bold",
+            )
+        fig.tight_layout()
+        return self._to_asset(
+            fig,
+            key="cross_asset_impulse_strip",
+            title=str(spec.get("title") or "Cross-Asset Impulses"),
+            caption=str(spec.get("caption") or ""),
+            filename="cross-asset-impulses.png",
+        )
+
+    def render_holdings_excess_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        labels = [str(row.get("name") or row.get("symbol") or "") for row in rows]
+        excess = [float(row.get("excess_pct") or 0.0) for row in rows]
+        colors = [POSITIVE if value >= 0 else NEGATIVE for value in excess]
+
+        fig, ax = plt.subplots(figsize=(8.4, 4.8), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        y_pos = list(range(len(labels)))
+        ax.axvline(0, color=GRID, linewidth=1.2)
+        ax.hlines(y=y_pos, xmin=[0 for _ in excess], xmax=excess, color=colors, linewidth=2.4, alpha=0.84)
+        ax.scatter(excess, y_pos, color=colors, s=82, zorder=3)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, color=TEXT)
+        ax.invert_yaxis()
+        ax.set_xlabel("Excess Return vs Benchmark (%)", color=TEXT)
+        ax.set_title(str(spec.get("title") or "Portfolio Movers vs Benchmark"), loc="left", fontsize=15, weight="bold", color=TEXT)
+        ax.grid(axis="x", color=GRID, linewidth=0.8, alpha=0.75)
+        ax.tick_params(axis="x", colors=TEXT)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        for idx, value in enumerate(excess):
+            ax.text(
+                value + (0.08 if value >= 0 else -0.08),
+                idx,
+                f"{value:+.2f}%",
+                va="center",
+                ha="left" if value >= 0 else "right",
+                fontsize=8.5,
+                color=TEXT,
+                weight="bold",
+            )
+        fig.tight_layout()
+        return self._to_asset(
+            fig,
+            key="holdings_excess_performance",
+            title=str(spec.get("title") or "Portfolio Movers vs Benchmark"),
+            caption=str(spec.get("caption") or ""),
+            filename="holdings-excess-performance.png",
+        )
+
+    def render_sector_quadrant_from_spec(self, spec: dict) -> ChartAsset | None:
+        points = list(spec.get("series") or [])
+        if not points:
+            return None
+
+        x_vals = [float(row.get("x_exposure") or 0.0) for row in points]
+        y_vals = [float(row.get("y_change_pct") or 0.0) for row in points]
+        labels = [str(row.get("name") or row.get("sector_key") or "") for row in points]
+        colors = [POSITIVE if value >= 0 else NEGATIVE for value in y_vals]
+
+        fig, ax = plt.subplots(figsize=(8.4, 4.8), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        ax.axhline(0, color=GRID, linewidth=1.0)
+        ax.axvline(0, color=GRID, linewidth=1.0)
+        ax.scatter(x_vals, y_vals, color=colors, s=82, alpha=0.88)
+        for x_val, y_val, label in zip(x_vals, y_vals, labels):
+            ax.text(x_val + 0.3, y_val + (0.05 if y_val >= 0 else -0.05), label, fontsize=8.2, color=TEXT)
+        ax.set_title(str(spec.get("title") or "Sector Exposure vs Move"), loc="left", fontsize=15, weight="bold", color=TEXT)
+        ax.set_xlabel("Exposure (%)", color=TEXT)
+        ax.set_ylabel("Sector Move (%)", color=TEXT)
+        ax.grid(color=GRID, linewidth=0.7, alpha=0.45)
+        ax.tick_params(axis="x", colors=TEXT)
+        ax.tick_params(axis="y", colors=TEXT)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        fig.tight_layout()
+        return self._to_asset(
+            fig,
+            key="sector_exposure_quadrant",
+            title=str(spec.get("title") or "Sector Exposure vs Move"),
+            caption=str(spec.get("caption") or ""),
+            filename="sector-exposure-quadrant.png",
+        )
+
+    def render_event_linked_from_spec(self, spec: dict) -> ChartAsset | None:
+        series = list(spec.get("series") or [])
+        if not series:
+            return None
+        row = series[0]
+        x = row.get("x") or []
+        y = row.get("y") or []
+        if not x or not y:
+            return None
+        label = str(row.get("name") or row.get("symbol") or "Focus Symbol")
+
+        fig, ax = plt.subplots(figsize=(8.4, 4.8), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        line_color = NEUTRAL if y[-1] >= y[0] else NEGATIVE
+        ax.plot(x, y, color=line_color, linewidth=2.3)
+        ax.fill_between(x, y, min(y), color=line_color, alpha=0.11)
+        for ann in (spec.get("annotations") or []):
+            if ann.get("label") == "event_window_start":
+                x_mark = int(ann.get("x") or 0)
+                ax.axvline(x_mark, color="#7b8aa6", linewidth=1.0, linestyle="--", alpha=0.8)
+        ax.set_title(str(spec.get("title") or f"{label} Event-Linked Trend"), loc="left", fontsize=15, weight="bold", color=TEXT)
+        ax.set_xlabel("Session", color=TEXT)
+        ax.set_ylabel("Price", color=TEXT)
+        ax.grid(axis="y", color=GRID, linewidth=0.8, alpha=0.75)
+        ax.tick_params(axis="x", colors=TEXT)
+        ax.tick_params(axis="y", colors=TEXT)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        fig.tight_layout()
+        return self._to_asset(
+            fig,
+            key="event_linked_annotated_trend",
+            title=str(spec.get("title") or f"{label} Event-Linked Trend"),
+            caption=str(spec.get("caption") or ""),
+            filename="event-linked-annotated-trend.png",
         )
 
     @staticmethod

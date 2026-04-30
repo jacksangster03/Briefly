@@ -32,7 +32,8 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 - Telegram and email delivery with per-channel, per-profile routing
 - Explicit channel outcome reporting in morning runs (`sent / skipped / failed`) with skip/failure reasons in logs
 - Optional LLM email renderer (OpenAI-compatible) with shadow mode for safe rollout, strict validation against deterministic payload, and automatic fallback
-- Static PNG chart cards: Market Snapshot, Macro Risk Strip, Top Holdings Performance, Sector Exposure vs Performance, Event-Linked Trend
+- Deterministic morning visuals engine with chart contract + promotion policy (LLM does not choose chart types/series/scales)
+- Email PNG cards generated from deterministic specs (Plotly web preview + Matplotlib email rendering)
 - HTML email with inline charts
 
 ### Portfolio workbench (Phases 4.7–5.8)
@@ -244,6 +245,24 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - Regional and impact blocks are rendered in both Telegram and Email outputs using concise, scan-friendly formatting
 - Briefing workspace root now includes a portfolio-impact preview strip beneath the regional board
 - Global-news “why market-relevant” now includes FX-stress templates to reduce repetition and improve channel specificity
+
+**Deterministic Morning Visuals Engine (Phase 6.4)**
+- Added deterministic morning chart subsystem and contract:
+  - `chart_key`, `variant`, `available`, `priority`, `reason_if_hidden`, `series`, `annotations`, `meta`, `email_dimensions`
+- Added rule-based regime tags + chart promotion policy (`hero`, `support`, optional portfolio/event charts)
+- Replaced bar-first core cards with deterministic specs:
+  - `global_relative_performance` (rebased multi-line leadership panel)
+  - `cross_asset_impulse_strip` (centered impulse strip)
+  - `holdings_excess_performance` (ranked excess-move panel)
+  - `sector_exposure_quadrant` (exposure vs move scatter)
+  - `event_linked_annotated_trend` (annotated trend view)
+- `MorningBriefing` now carries:
+  - `morning_chart_bundle`
+  - `morning_chart_selection`
+- New chart preview surfaces:
+  - `GET /ui/briefing/morning/charts?profile=...`
+  - `GET /api/v1/profile/{profile}/briefing/morning/charts`
+- LLM boundary tightened: renderer receives deterministic chart summaries/tags for prose only and cannot control chart design decisions
 
 ### Intelligence pipeline
 

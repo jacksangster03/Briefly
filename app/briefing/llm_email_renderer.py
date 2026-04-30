@@ -16,6 +16,7 @@ from typing import Any
 
 import requests
 
+from app.briefing.morning_charts import chart_summary_lines
 from app.logger import get_logger
 from app.schemas.briefings import MorningBriefing
 from app.schemas.delivery import ChartAsset, EmailRenderResult
@@ -208,6 +209,8 @@ class LLMEmailRenderer:
             "generated_at_local": briefing.generated_at.isoformat(),
             "market_setup_lines": market_lines[:10],
             "macro_context_lines": macro_lines[:6],
+            "chart_regime_tags": list((briefing.morning_chart_bundle or {}).get("regime_tags") or []),
+            "chart_summaries": chart_summary_lines(briefing.morning_chart_bundle or {}, limit=5),
             "events": event_rows,
             "portfolio_focus_ids": [
                 event.cluster_id or event.content_hash or event.event_id
@@ -255,6 +258,8 @@ class LLMEmailRenderer:
                             "You are editing a market-intelligence morning email. "
                             "Use only the supplied payload facts. "
                             "Never invent events, tickers, numbers, or URLs. "
+                            "Do not invent or modify chart type, chart scale, chart series, or chart annotations. "
+                            "Charts are deterministic and already selected upstream. "
                             "Return strict JSON with keys: subject (string), body (string), source_urls (array of strings). "
                             "Body should be concise, readable on mobile, and under max_body_chars."
                         ),

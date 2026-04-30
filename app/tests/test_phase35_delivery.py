@@ -118,16 +118,13 @@ def test_morning_chart_builder_builds_multiple_assets():
     )
 
     charts = MorningChartBuilder(profile=profile, market_data=StubMarketData()).build(briefing)
-    assert len(charts) == 5
-    assert {chart.key for chart in charts}.issuperset(
-        {
-            "market_snapshot",
-            "macro_risk_strip",
-            "top_holdings_performance",
-            "sector_exposure_performance",
-            "event_linked_trend",
-        }
-    )
+    assert len(charts) >= 3
+    chart_keys = {chart.key for chart in charts}
+    assert "global_relative_performance" in chart_keys
+    assert "cross_asset_impulse_strip" in chart_keys
+    assert "holdings_excess_performance" in chart_keys
+    assert briefing.morning_chart_bundle
+    assert briefing.morning_chart_selection
 
 
 def test_email_formatter_embeds_inline_chart_cids():
