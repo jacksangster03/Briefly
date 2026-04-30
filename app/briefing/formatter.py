@@ -196,32 +196,38 @@ class TelegramFormatter:
         session_mode = session_mode_for(generated_local)
         reference_label = "Friday prior close" if session_mode in {"saturday", "sunday"} else "prior close"
 
-        tier_header = {
-            "breaking": SECTION_HEADERS["breaking_title"],
-            "high_priority": "HIGH PRIORITY",
-            "regular": "MARKET ALERT",
-            "ignore": "MARKET ALERT",
-        }.get(classification.tier, SECTION_HEADERS["breaking_title"])
+        is_followup = getattr(evt, "event_type", None) == "followup"
+
+        if is_followup:
+            tier_header = "UPDATE"
+        else:
+            tier_header = {
+                "breaking": SECTION_HEADERS["breaking_title"],
+                "high_priority": "HIGH PRIORITY",
+                "regular": "MARKET ALERT",
+                "ignore": "MARKET ALERT",
+            }.get(classification.tier, SECTION_HEADERS["breaking_title"])
 
         sections = [
             f"<b>{tier_header}</b>",
             f"<b>{evt.title}</b>",
         ]
 
-        summary_clean = self._strip_cluster_suffix((evt.summary or "").strip())
-        if summary_clean and not self._summary_duplicates_title(summary_clean, evt.title):
-            sections.append(truncate(summary_clean, 500))
+        if not is_followup:
+            summary_clean = self._strip_cluster_suffix((evt.summary or "").strip())
+            if summary_clean and not self._summary_duplicates_title(summary_clean, evt.title):
+                sections.append(truncate(summary_clean, 500))
 
         if alert.reason:
             sections.append(f"<i>Why it matters:</i> {alert.reason}")
 
-        if classification.watch_assets:
-            sections.append(f"<i>Watch:</i> {', '.join(classification.watch_assets[:5])}")
-
-        if classification.confirm_signals:
-            sections.append(f"<i>Confirm:</i> {classification.confirm_signals[0]}")
-        if classification.invalidate_signals:
-            sections.append(f"<i>Invalidate:</i> {classification.invalidate_signals[0]}")
+        if not is_followup:
+            if classification.watch_assets:
+                sections.append(f"<i>Watch:</i> {', '.join(classification.watch_assets[:5])}")
+            if classification.confirm_signals:
+                sections.append(f"<i>Confirm:</i> {classification.confirm_signals[0]}")
+            if classification.invalidate_signals:
+                sections.append(f"<i>Invalidate:</i> {classification.invalidate_signals[0]}")
 
         meta = []
         if company_label:
