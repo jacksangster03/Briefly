@@ -8,7 +8,7 @@ from typing import Any
 from app.benchmark.service import load_benchmark_config
 from app.logger import get_logger
 from app.portfolio.service import load_active_holdings
-from app.risk.service import _build_portfolio_returns, _fetch_prices
+from app.risk.service import build_portfolio_returns, fetch_prices
 
 logger = get_logger("tearsheet")
 
@@ -62,8 +62,8 @@ def _build_return_series(profile_name: str, lookback_days: int) -> dict[str, Any
     if benchmark_symbol not in symbols:
         symbols.append(benchmark_symbol)
 
-    prices = _fetch_prices(symbols, lookback_days)
-    dates, port_rets, bench_rets, _completeness = _build_portfolio_returns(
+    prices = fetch_prices(symbols, lookback_days)
+    dates, port_rets, bench_rets, _completeness = build_portfolio_returns(
         prices=prices,
         weights=weights,
         benchmark_symbol=benchmark_symbol,

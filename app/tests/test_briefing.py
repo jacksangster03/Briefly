@@ -588,6 +588,12 @@ class _DummyMacroData:
     def get_treasury_yields(self):
         return None, None
 
+    def get_ecb_snapshot(self):
+        return []
+
+    def get_eurostat_snapshot(self):
+        return []
+
 
 class TestMorningSectorSelection:
     def test_sector_scan_skips_macro_bleed_with_single_loose_ticker(self):
@@ -775,6 +781,12 @@ class TestPhase63BriefingSections:
                     MacroDataPoint(series_id="UST10Y", name="US 10Y Treasury Yield", value=4.3, change=0.03),
                     MacroDataPoint(series_id="UST2Y", name="US 2Y Treasury Yield", value=3.8, change=0.02),
                 )
+
+            def get_ecb_snapshot(self):
+                return []
+
+            def get_eurostat_snapshot(self):
+                return []
 
         generator = MorningBriefingGenerator(
             settings=Settings(enable_charts=False),

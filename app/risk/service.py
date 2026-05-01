@@ -126,7 +126,7 @@ def _mean(values: list[float]) -> float:
     return sum(values) / len(values)
 
 
-def _fetch_prices(
+def fetch_prices(
     symbols: list[str],
     lookback_days: int,
 ) -> dict[str, dict[datetime.date, float]]:
@@ -190,7 +190,7 @@ def _fetch_prices(
     return result
 
 
-def _build_portfolio_returns(
+def build_portfolio_returns(
     prices: dict[str, dict[datetime.date, float]],
     weights: dict[str, float],
     benchmark_symbol: str,
@@ -438,14 +438,14 @@ def compute_risk_analytics(
     holding_symbols = list({str(h["symbol"]).upper() for h in weighted_holdings})
     all_symbols = holding_symbols + ([benchmark_symbol] if benchmark_symbol not in holding_symbols else [])
 
-    prices = _fetch_prices(all_symbols, lookback_days)
+    prices = fetch_prices(all_symbols, lookback_days)
 
     weights_raw = {}
     for h in weighted_holdings:
         sym = str(h["symbol"]).upper()
         weights_raw[sym] = float(h.get("weight_pct") or 0.0)
 
-    dates, port_rets, bench_rets, completeness = _build_portfolio_returns(
+    dates, port_rets, bench_rets, completeness = build_portfolio_returns(
         prices, weights_raw, benchmark_symbol
     )
 

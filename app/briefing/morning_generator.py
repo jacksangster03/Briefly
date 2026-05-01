@@ -248,14 +248,21 @@ def enrich_earnings_from_yfinance(events: list[EarningsEvent]) -> list[EarningsE
     if not symbols:
         return events
 
-    yf_data: dict[str, object] = {}
-    for symbol in symbols:
+    def _fetch_one(symbol: str):
         try:
-            ticker = yf.Ticker(symbol)
-            df = ticker.earnings_dates
-            yf_data[symbol] = df if df is not None and not df.empty else None
+            df = yf.Ticker(symbol).earnings_dates
+            return symbol, df if df is not None and not df.empty else None
         except Exception:
-            yf_data[symbol] = None
+            return symbol, None
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    yf_data: dict[str, object] = {}
+    max_workers = min(8, len(symbols))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch_one, sym): sym for sym in symbols}
+        for future in as_completed(futures):
+            sym, df = future.result()
+            yf_data[sym] = df
 
     for event in events:
         df = yf_data.get(event.symbol)
@@ -317,8 +324,10 @@ class MorningBriefingGenerator:
         # 1. Market setup (quotes for indices + macro instruments)
         briefing.market_setup = self._build_market_setup()
 
-        # 2. Macro context from FRED
+        # 2. Macro context: FRED core + ECB/Eurostat when configured
         briefing.macro_context = self.macro_svc.get_morning_macro()
+        briefing.macro_context.extend(self.macro_svc.get_ecb_snapshot())
+        briefing.macro_context.extend(self.macro_svc.get_eurostat_snapshot())
         ten_y, two_y = self.macro_svc.get_treasury_yields()
         briefing.market_setup.treasury_10y = ten_y
         briefing.market_setup.treasury_2y = two_y

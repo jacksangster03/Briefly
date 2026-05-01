@@ -90,6 +90,24 @@ class AlpacaProvider(BaseProvider):
         bars_response = client.get_stock_bars(req)
         return list(bars_response.get(symbol, []))
 
+    def _bar_to_quote(self, symbol: str, bar, prev_close: float) -> QuoteData:
+        price = float(bar.close)
+        change = price - prev_close
+        pct = (change / prev_close * 100) if prev_close else 0.0
+        return QuoteData(
+            symbol=symbol,
+            current_price=round(price, 2),
+            change=round(change, 2),
+            change_percent=round(pct, 2),
+            high=round(float(bar.high), 2),
+            low=round(float(bar.low), 2),
+            open=round(float(bar.open), 2),
+            previous_close=round(float(prev_close), 2),
+            volume=float(bar.volume),
+            timestamp=bar.timestamp,
+            source="alpaca",
+        )
+
     def get_quote(self, symbol: str) -> QuoteData | None:
         if not self.is_configured():
             return None
@@ -99,22 +117,7 @@ class AlpacaProvider(BaseProvider):
                 return None
             bar = bars[-1]
             prev_close = float(bars[-2].close) if len(bars) >= 2 else float(bar.close)
-            price = float(bar.close)
-            change = price - prev_close
-            pct = (change / prev_close * 100) if prev_close else 0.0
-            return QuoteData(
-                symbol=symbol,
-                current_price=round(price, 2),
-                change=round(change, 2),
-                change_percent=round(pct, 2),
-                high=round(float(bar.high), 2),
-                low=round(float(bar.low), 2),
-                open=round(float(bar.open), 2),
-                previous_close=round(float(prev_close), 2),
-                volume=float(bar.volume) if hasattr(bar, "volume") else None,
-                timestamp=bar.timestamp if hasattr(bar, "timestamp") else datetime.now(timezone.utc),
-                source="alpaca",
-            )
+            return self._bar_to_quote(symbol, bar, prev_close)
         except Exception as exc:
             logger.warning("Alpaca quote failed for %s: %s", symbol, exc)
             return None
@@ -141,22 +144,7 @@ class AlpacaProvider(BaseProvider):
                 continue
             bar = bars[-1]
             prev_close = float(bars[-2].close) if len(bars) >= 2 else float(bar.close)
-            price = float(bar.close)
-            change = price - prev_close
-            pct = (change / prev_close * 100) if prev_close else 0.0
-            results.append(QuoteData(
-                symbol=sym,
-                current_price=round(price, 2),
-                change=round(change, 2),
-                change_percent=round(pct, 2),
-                high=round(float(bar.high), 2),
-                low=round(float(bar.low), 2),
-                open=round(float(bar.open), 2),
-                previous_close=round(float(prev_close), 2),
-                volume=float(bar.volume) if hasattr(bar, "volume") else None,
-                timestamp=bar.timestamp if hasattr(bar, "timestamp") else datetime.now(timezone.utc),
-                source="alpaca",
-            ))
+            results.append(self._bar_to_quote(sym, bar, prev_close))
         return results
 
     def get_quotes(self, symbols: list[str]) -> list[QuoteData]:

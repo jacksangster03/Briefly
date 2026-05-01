@@ -264,7 +264,7 @@ class SECProvider(BaseProvider):
     @staticmethod
     def _is_material_hit(form_type: str, description: str) -> bool:
         form = form_type.upper().strip()
-        if form in {"8-K", "8-K/A", "4"}:
+        if form in {"8-K", "8-K/A", "4", "4/A"}:
             return True
         if not description:
             return form in {"10-K", "10-Q"}

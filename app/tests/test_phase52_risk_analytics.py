@@ -122,10 +122,10 @@ def client(test_settings):
 # ── Pure math unit tests ───────────────────────────────────────────────────────
 
 def test_portfolio_returns_weighted_correctly():
-    from app.risk.service import _build_portfolio_returns
+    from app.risk.service import build_portfolio_returns
 
     prices = _make_prices_map()
-    dates, port_rets, bench_rets, completeness = _build_portfolio_returns(prices, WEIGHTS, "SPY")
+    dates, port_rets, bench_rets, completeness = build_portfolio_returns(prices, WEIGHTS, "SPY")
 
     assert len(dates) == 4
 
@@ -232,13 +232,13 @@ def test_no_benchmark_returns_unavailable_block():
 
 
 def test_missing_holding_reduces_completeness():
-    from app.risk.service import _build_portfolio_returns
+    from app.risk.service import build_portfolio_returns
 
     prices = _make_prices_map()
     prices_incomplete = {k: v for k, v in prices.items() if k != "MSFT"}
 
     weights = {"AAPL": 0.6, "MSFT": 0.4}
-    dates, port_rets, bench_rets, completeness = _build_portfolio_returns(
+    dates, port_rets, bench_rets, completeness = build_portfolio_returns(
         prices_incomplete, weights, "SPY"
     )
 
@@ -297,7 +297,7 @@ def _setup_holdings_and_benchmark(client: TestClient) -> None:
 
 def test_get_risk_api_returns_200(client):
     _setup_holdings_and_benchmark(client)
-    with patch("app.risk.service._fetch_prices", side_effect=_mock_fetch_prices):
+    with patch("app.risk.service.fetch_prices", side_effect=_mock_fetch_prices):
         response = client.get("/api/v1/profile/default_user/risk")
     assert response.status_code == 200
     payload = response.json()
@@ -314,7 +314,7 @@ def test_get_risk_api_available_false_no_benchmark(client):
 
 def test_post_risk_refresh_returns_200(client):
     _setup_holdings_and_benchmark(client)
-    with patch("app.risk.service._fetch_prices", side_effect=_mock_fetch_prices):
+    with patch("app.risk.service.fetch_prices", side_effect=_mock_fetch_prices):
         response = client.post("/api/v1/profile/default_user/risk/refresh")
     assert response.status_code == 200
     payload = response.json()
@@ -339,7 +339,7 @@ def test_htmx_save_risk_config_persists(client):
 
 def test_htmx_refresh_risk_renders_page(client):
     _setup_holdings_and_benchmark(client)
-    with patch("app.risk.service._fetch_prices", side_effect=_mock_fetch_prices):
+    with patch("app.risk.service.fetch_prices", side_effect=_mock_fetch_prices):
         response = client.post(
             "/ui/profile/default_user/refresh/risk",
             headers={"HX-Request": "true"},
