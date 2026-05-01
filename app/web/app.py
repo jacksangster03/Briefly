@@ -19,6 +19,7 @@ from app.settings import Settings, get_settings
 from app.briefing.chart_builder import MorningChartBuilder
 from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
+from app.risk.tearsheet import build_tearsheet_html
 from app.schemas.briefings import MarketSetup, MorningBriefing
 from app.allocation.service import (
     build_actual_allocation,
@@ -370,6 +371,25 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             state=state,
             extra_context={"morning_chart_preview": preview},
         )
+
+    @app.get("/ui/tearsheet", response_class=HTMLResponse, include_in_schema=False)
+    def ui_tearsheet(
+        request: Request,
+        profile: str = Query(default="default_user"),
+        lookback_days: int = Query(default=252, ge=63, le=756),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        html = build_tearsheet_html(normalized_profile, lookback_days=lookback_days)
+        if not html:
+            return HTMLResponse(
+                status_code=404,
+                content=(
+                    "<html><body><h2>Tearsheet unavailable</h2>"
+                    "<p>Configure benchmark + weighted holdings and ensure sufficient price history.</p>"
+                    "</body></html>"
+                ),
+            )
+        return HTMLResponse(content=html)
 
     @app.get("/ui/portfolio", response_class=HTMLResponse, include_in_schema=False)
     def ui_portfolio_home(
