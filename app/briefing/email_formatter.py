@@ -1,40 +1,38 @@
-"""Email-oriented formatting with inline charts for richer morning delivery."""
+"""Email rendering.
+
+The Telegram formatter is the single source of truth for brief content.
+Email wraps that text in styled section cards and stacks chart assets at
+the top so charts are the only thing email adds beyond what Telegram
+already delivers.
+"""
 
 from __future__ import annotations
 
 import html
 import re
-from datetime import timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.briefing.global_news_selector import build_market_relevance_note
 from app.briefing.formatter import TelegramFormatter
 from app.schemas.briefings import MorningBriefing
 from app.schemas.delivery import EmailRenderResult
-from app.schemas.events import NormalisedEvent, QuoteData
-from app.universe.ticker_metadata import format_company_ticker, format_company_ticker_list
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_BOLD_HEADER_RE = re.compile(r"^<b>([^<]+)</b>\s*$")
 
 
 class EmailFormatter:
-    """Render a richer email body while keeping selection logic shared."""
+    """Render an email body that mirrors the Telegram brief plus charts."""
 
     def __init__(self, timezone_name: str = "UTC"):
         self.telegram_formatter = TelegramFormatter(timezone_name)
-        try:
-            self.local_tz = ZoneInfo(timezone_name)
-        except ZoneInfoNotFoundError:
-            self.local_tz = ZoneInfo("UTC")
 
     def format_morning_briefing(self, briefing: MorningBriefing) -> EmailRenderResult:
+        messages = self.telegram_formatter.format_morning_briefing(briefing)
+        full_html = "\n\n".join(messages)
         subject = self._subject(briefing)
-        plain_text = self._plain_text(briefing)
-        html_body = self._html_body(briefing)
         return EmailRenderResult(
             subject=subject,
-            plain_text=plain_text,
-            html_body=html_body,
+            plain_text=_HTML_TAG_RE.sub("", full_html),
+            html_body=self._html_body(briefing, full_html, subject),
             inline_assets=briefing.chart_assets,
         )
 
@@ -44,353 +42,67 @@ class EmailFormatter:
             return f"Weekend Briefing | {date_str}"
         return f"Morning Briefing | {date_str}"
 
-    def _plain_text(self, briefing: MorningBriefing) -> str:
-        messages = self.telegram_formatter.format_morning_briefing(briefing)
-        return "\n\n".join(_HTML_TAG_RE.sub("", msg) for msg in messages)
-
-    def _html_body(self, briefing: MorningBriefing) -> str:
-        title = self._subject(briefing)
+    def _html_body(self, briefing: MorningBriefing, full_html: str, subject: str) -> str:
+        is_weekend = briefing.session_mode in {"saturday", "sunday"}
         lead = (
-            "Weekend mode is active, so this note emphasizes Friday close context, portfolio relevance, and what to watch into the next reopen."
-            if briefing.session_mode in {"saturday", "sunday"}
-            else "A concise market-intelligence note built from the highest-signal developments in the latest cycle."
+            "Weekend mode: Friday close context, portfolio relevance, and what to watch into the next reopen."
+            if is_weekend
+            else "Highest-signal developments from the latest cycle, with charts up top."
         )
 
         parts = [
             "<html><body style=\"margin:0;padding:0;background:#eef3f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#102a43;\">",
             "<div style=\"max-width:820px;margin:0 auto;padding:24px;\">",
             "<div style=\"background:#0f172a;color:#f8fafc;border-radius:18px;padding:24px 28px;\">",
-            f"<div style=\"font-size:28px;font-weight:700;line-height:1.2;\">{html.escape(title)}</div>",
+            f"<div style=\"font-size:28px;font-weight:700;line-height:1.2;\">{html.escape(subject)}</div>",
             f"<div style=\"margin-top:10px;font-size:15px;line-height:1.6;color:#dbeafe;\">{html.escape(lead)}</div>",
             "</div>",
         ]
 
         if briefing.chart_assets:
-            parts.append("<div style=\"margin-top:18px;display:grid;gap:18px;\">")
-            for asset in briefing.chart_assets:
-                parts.append(
-                    "<div style=\"background:#ffffff;border:1px solid #d8e2ed;border-radius:18px;padding:18px;\">"
-                    f"<div style=\"font-size:18px;font-weight:700;color:#102a43;margin-bottom:8px;\">{html.escape(asset.title)}</div>"
-                    f"<img src=\"cid:{html.escape(asset.content_id)}\" alt=\"{html.escape(asset.title)}\" "
-                    "style=\"display:block;width:100%;max-width:760px;border-radius:14px;\">"
-                    f"<div style=\"margin-top:10px;font-size:13px;line-height:1.5;color:#486581;\">{html.escape(asset.caption)}</div>"
-                    "</div>"
-                )
-            parts.append("</div>")
+            parts.append(self._chart_cards(briefing))
 
-        market_block = self._market_setup_block(
-            briefing.market_setup.index_quotes,
-            briefing.market_setup.macro_quotes,
-            briefing.market_setup_analysis,
-        )
-        if market_block:
-            parts.append(self._section("Market Setup", market_block))
+        parts.append(self._brief_as_cards(full_html))
 
-        regional_block = self._regional_lens_block(briefing.regional_lens, briefing.regional_skew_summary)
-        if regional_block:
-            parts.append(self._section("Regional Lens", regional_block))
-
-        impact_block = self._portfolio_impact_block(
-            briefing.portfolio_impact_bullets,
-            briefing.portfolio_action_posture,
-            briefing.regime_context,
-            briefing.positioning_alignment,
-        )
-        if impact_block:
-            parts.append(self._section("Portfolio Impact Today", impact_block))
-
-        global_block = self._global_event_block(briefing.global_news, max_items=6)
-        if global_block:
-            parts.append(self._section("Global News & Geopolitics", global_block))
-
-        portfolio_block = self._event_block(briefing.portfolio_focus, max_items=5)
-        if portfolio_block:
-            parts.append(self._section("Portfolio Focus", portfolio_block))
-
-        theme_title = "Weekend Developments" if briefing.session_mode in {"saturday", "sunday"} else "Top Themes"
-        themes_block = self._event_block(briefing.top_themes, max_items=5, ordered=True)
-        if themes_block:
-            parts.append(self._section(theme_title, themes_block))
-
-        watchlist_block = self._watchlist_block(briefing.watchlist_quotes, briefing.watchlist_events)
-        if watchlist_block:
-            parts.append(self._section("Watchlist", watchlist_block))
-
-        earnings_block = self._earnings_block(briefing.earnings_calendar, briefing.earnings_relevance)
-        if earnings_block:
-            parts.append(self._section("Earnings Calendar", earnings_block))
-
-        footer = (
-            f"{briefing.events_fetched} fetched | "
-            f"{briefing.events_after_dedup} unique | "
-            f"{briefing.events_sent} surfaced"
-        )
-        parts.append(
-            f"<div style=\"margin:22px 0 6px 0;font-size:12px;color:#829ab1;\">{html.escape(footer)}</div>"
-        )
         parts.append("</div></body></html>")
         return "".join(parts)
 
-    def _market_setup_block(
-        self,
-        indices: list[QuoteData],
-        macro_quotes: list[QuoteData],
-        setup_analysis: str = "",
-    ) -> str:
-        selected_quotes = indices[:4] + macro_quotes[:4]
-        rows = []
-        for quote in selected_quotes:
-            sign = "+" if quote.change_percent >= 0 else ""
-            label = self.telegram_formatter._friendly_instrument_label(quote.display_name or quote.symbol, quote.symbol)
-            rows.append(
-                "<tr>"
-                f"<td style=\"padding:8px 10px;border-bottom:1px solid #e6edf5;\">{html.escape(label)}</td>"
-                f"<td style=\"padding:8px 10px;border-bottom:1px solid #e6edf5;text-align:right;\">{quote.current_price:,.2f}</td>"
-                f"<td style=\"padding:8px 10px;border-bottom:1px solid #e6edf5;text-align:right;color:{'#0f9d58' if quote.change_percent >= 0 else '#d93025'};\">{sign}{quote.change_percent:.2f}%</td>"
-                "</tr>"
-            )
-        if not rows:
-            return ""
-        table = (
-            "<table style=\"width:100%;border-collapse:collapse;font-size:14px;\">"
-            + "".join(rows)
-            + "</table>"
-        )
-        freshness = self._quotes_freshness_summary(selected_quotes)
-        if freshness:
-            table += (
-                f"<div style=\"margin-top:8px;font-size:12px;color:#829ab1;\">{html.escape(freshness)}</div>"
-            )
-        if setup_analysis:
-            table += (
-                "<div style=\"margin-top:12px;padding:10px 12px;border-radius:10px;background:#f6f9fc;"
-                "font-size:13px;line-height:1.55;color:#334e68;\">"
-                f"<strong>Setup read:</strong> {html.escape(setup_analysis)}"
+    def _chart_cards(self, briefing: MorningBriefing) -> str:
+        cards = ["<div style=\"margin-top:18px;display:grid;gap:18px;\">"]
+        for asset in briefing.chart_assets:
+            cards.append(
+                "<div style=\"background:#ffffff;border:1px solid #d8e2ed;border-radius:18px;padding:18px;\">"
+                f"<div style=\"font-size:18px;font-weight:700;color:#102a43;margin-bottom:8px;\">{html.escape(asset.title)}</div>"
+                f"<img src=\"cid:{html.escape(asset.content_id)}\" alt=\"{html.escape(asset.title)}\" "
+                "style=\"display:block;width:100%;max-width:760px;border-radius:14px;\">"
+                f"<div style=\"margin-top:10px;font-size:13px;line-height:1.5;color:#486581;\">{html.escape(asset.caption)}</div>"
                 "</div>"
             )
-        return table
+        cards.append("</div>")
+        return "".join(cards)
 
-    def _event_block(
-        self,
-        events: list[NormalisedEvent],
-        *,
-        max_items: int,
-        ordered: bool = False,
-    ) -> str:
-        if not events:
-            return ""
-        items = []
-        tag = "ol" if ordered else "ul"
-        for event in events[:max_items]:
-            summary = ""
-            if event.summary and not self.telegram_formatter._summary_duplicates_title(event.summary, event.title):
-                summary = self.telegram_formatter._strip_cluster_suffix(event.summary)
-            meta = self._event_meta(event)
-            body = (
-                f"<li style=\"margin:0 0 12px 0;\">"
-                f"<div style=\"font-weight:700;color:#102a43;\">{html.escape(event.title)}</div>"
-                + (
-                    f"<div style=\"margin-top:4px;color:#486581;line-height:1.55;\">{html.escape(summary[:220])}</div>"
-                    if summary
-                    else ""
-                )
-                + (
-                    f"<div style=\"margin-top:4px;font-size:12px;color:#829ab1;\">{html.escape(meta)}</div>"
-                    if meta
-                    else ""
-                )
-                + "</li>"
-            )
-            items.append(body)
-        return f"<{tag} style=\"padding-left:20px;margin:0;\">" + "".join(items) + f"</{tag}>"
+    def _brief_as_cards(self, full_html: str) -> str:
+        sections = [s.strip() for s in full_html.split("\n\n") if s.strip()]
+        return "".join(self._section_card(s) for s in sections)
 
-    def _watchlist_block(self, quotes: list[QuoteData], events: list[NormalisedEvent]) -> str:
-        parts = []
-        if quotes:
-            compact = []
-            for quote in quotes[:8]:
-                sign = "+" if quote.change_percent >= 0 else ""
-                compact.append(f"{quote.display_name or quote.symbol} {sign}{quote.change_percent:.2f}%")
-            parts.append(
-                f"<div style=\"margin-bottom:12px;font-size:14px;color:#334e68;\">{' | '.join(html.escape(x) for x in compact)}</div>"
-            )
-            summary = self.telegram_formatter._watchlist_summary_line(quotes, events)
-            if summary:
-                parts.append(
-                    f"<div style=\"margin:-4px 0 12px 0;font-size:13px;color:#486581;line-height:1.5;\">{html.escape(summary)}</div>"
-                )
-            freshness = self._quotes_freshness_summary(quotes)
-            if freshness:
-                parts.append(
-                    f"<div style=\"margin:-6px 0 12px 0;font-size:12px;color:#829ab1;\">{html.escape(freshness)}</div>"
-                )
-        event_block = self._event_block(events, max_items=5)
-        if event_block:
-            parts.append(event_block)
-        return "".join(parts)
-
-    def _global_event_block(self, events: list[NormalisedEvent], *, max_items: int) -> str:
-        if not events:
-            return ""
-        items = []
-        used_notes: set[str] = set()
-        for event in events[:max_items]:
-            summary = ""
-            if event.summary and not self.telegram_formatter._summary_duplicates_title(event.summary, event.title):
-                summary = self.telegram_formatter._strip_cluster_suffix(event.summary)
-            note = build_market_relevance_note(event, used_notes=used_notes)
-            meta = self._event_meta(event)
-            body = (
-                "<li style=\"margin:0 0 12px 0;\">"
-                f"<div style=\"font-weight:700;color:#102a43;\">{html.escape(event.title)}</div>"
-                + (
-                    f"<div style=\"margin-top:4px;color:#486581;line-height:1.55;\">{html.escape(summary[:220])}</div>"
-                    if summary
-                    else ""
-                )
-                + f"<div style=\"margin-top:4px;font-size:12px;color:#627d98;\">{html.escape(note)}</div>"
-                + (
-                    f"<div style=\"margin-top:4px;font-size:12px;color:#829ab1;\">{html.escape(meta)}</div>"
-                    if meta
-                    else ""
-                )
-                + "</li>"
-            )
-            items.append(body)
-        return "<ol style=\"padding-left:20px;margin:0;\">" + "".join(items) + "</ol>"
-
-    def _regional_lens_block(self, rows: list[dict[str, str]], skew_summary: str) -> str:
-        if not rows and not skew_summary:
-            return ""
-        parts = []
-        if skew_summary:
-            parts.append(
-                f"<div style=\"margin-bottom:10px;font-size:13px;color:#486581;line-height:1.5;\">{html.escape(skew_summary)}</div>"
-            )
-        lines = []
-        for row in rows[:7]:
-            lines.append(
-                "<li style=\"margin:0 0 10px 0;\">"
-                f"<strong>{html.escape(row.get('region', 'Region'))}</strong>: "
-                f"{html.escape(row.get('direction', 'mixed'))} ({html.escape(row.get('status', 'monitor'))})"
-                f" · Driver: {html.escape(row.get('driver', 'mixed macro'))}"
-                f" · {html.escape(row.get('implication', ''))}"
-                "</li>"
-            )
-        if lines:
-            parts.append("<ul style=\"padding-left:20px;margin:0;\">" + "".join(lines) + "</ul>")
-        return "".join(parts)
-
-    def _portfolio_impact_block(
-        self,
-        bullets: list[str],
-        posture: str,
-        regime_context: str,
-        positioning_alignment: str,
-    ) -> str:
-        if not bullets and not regime_context and not positioning_alignment:
-            return ""
-        parts = []
-        if posture:
-            parts.append(
-                f"<div style=\"margin-bottom:10px;font-size:13px;color:#334e68;\">"
-                f"<strong>Action posture:</strong> {html.escape(posture.replace('_', ' '))}"
+    def _section_card(self, section_html: str) -> str:
+        lines = section_html.split("\n")
+        first = lines[0] if lines else ""
+        header_match = _BOLD_HEADER_RE.match(first)
+        if header_match and len(lines) > 1:
+            header_text = header_match.group(1)
+            body = "<br>".join(line for line in lines[1:] if line is not None)
+            return (
+                "<div style=\"margin-top:18px;background:#ffffff;border:1px solid #d8e2ed;"
+                "border-radius:18px;padding:20px 22px;font-size:14px;color:#102a43;line-height:1.6;\">"
+                f"<div style=\"font-size:16px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#0f172a;margin-bottom:10px;\">{html.escape(header_text)}</div>"
+                f"{body}"
                 "</div>"
             )
-        if bullets:
-            parts.append(
-                "<ul style=\"padding-left:20px;margin:0 0 10px 0;\">"
-                + "".join(
-                    f"<li style=\"margin:0 0 8px 0;\">{html.escape(item)}</li>"
-                    for item in bullets[:3]
-                )
-                + "</ul>"
-            )
-        if regime_context:
-            parts.append(
-                f"<div style=\"margin-top:6px;font-size:13px;color:#486581;line-height:1.5;\">{html.escape(regime_context)}</div>"
-            )
-        if positioning_alignment:
-            parts.append(
-                f"<div style=\"margin-top:6px;font-size:13px;color:#486581;line-height:1.5;\">{html.escape(positioning_alignment)}</div>"
-            )
-        return "".join(parts)
-
-    def _earnings_block(self, earnings, relevance: dict[str, str] | None) -> str:
-        if not earnings:
-            return ""
-        relevance = relevance or {}
-        grouped = self.telegram_formatter._group_earnings(earnings[:10])
-        total = sum(len(items) for items in grouped.values())
-        relevant = sum(1 for item in earnings[:10] if str(item.symbol or "").upper() in relevance)
-        parts = [
-            (
-                "<div style=\"margin-bottom:10px;font-size:13px;color:#486581;\">"
-                f"Upcoming: {total} earnings ({relevant} portfolio/watchlist relevant)."
-                "</div>"
-            )
-        ]
-        for label in ("Today", "Tomorrow", "This Week"):
-            bucket = grouped.get(label, [])
-            if not bucket:
-                continue
-            rows = [f"<div style=\"font-weight:700;color:#102a43;margin:8px 0 6px 0;\">{html.escape(label)}</div>"]
-            for item in bucket:
-                base_name = (item.company_name or "").strip() or format_company_ticker(item.symbol)
-                if "(" not in base_name:
-                    display = f"{base_name} ({item.symbol})"
-                else:
-                    display = base_name
-                tag = relevance.get(str(item.symbol or "").upper(), "")
-                suffix = f" [{tag}]" if tag else ""
-                rows.append(
-                    f"<div style=\"font-size:13px;color:#334e68;line-height:1.45;\">"
-                    f"{html.escape(display)} — {html.escape(item.fiscal_quarter or '')}{html.escape(suffix)}"
-                    "</div>"
-                )
-            parts.append("".join(rows))
-        return "".join(parts)
-
-    def _event_meta(self, event: NormalisedEvent) -> str:
-        meta = []
-        company = format_company_ticker_list(event.tickers)
-        if company:
-            meta.append(company)
-        if event.published_at:
-            dt = event.published_at
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            meta.append(dt.astimezone(self.local_tz).strftime("%H:%M %Z"))
-        if event.cluster_size > 1:
-            meta.append(f"{event.cluster_size} reports")
-        return " | ".join(meta)
-
-    @staticmethod
-    def _section(title: str, body: str) -> str:
+        body = "<br>".join(lines)
         return (
-            "<div style=\"margin-top:18px;background:#ffffff;border:1px solid #d8e2ed;border-radius:18px;padding:20px 22px;\">"
-            f"<div style=\"font-size:18px;font-weight:700;color:#102a43;margin-bottom:12px;\">{html.escape(title)}</div>"
+            "<div style=\"margin-top:18px;background:#ffffff;border:1px solid #d8e2ed;"
+            "border-radius:18px;padding:20px 22px;font-size:14px;color:#102a43;line-height:1.6;\">"
             f"{body}"
             "</div>"
         )
-
-    def _quotes_freshness_summary(self, quotes: list[QuoteData]) -> str:
-        if not quotes:
-            return ""
-        latest = max(quotes, key=lambda quote: self._coerce_utc_ts(quote.timestamp))
-        latest_local = self._coerce_utc_ts(latest.timestamp).astimezone(self.local_tz).strftime("%H:%M %Z")
-        source_counts: dict[str, int] = {}
-        for quote in quotes:
-            source = (quote.source or "unknown").lower()
-            source_counts[source] = source_counts.get(source, 0) + 1
-        source_summary = ", ".join(
-            f"{source}({count})"
-            for source, count in sorted(source_counts.items(), key=lambda item: item[0])
-        )
-        return f"Quotes as of {latest_local} | sources: {source_summary}"
-
-    @staticmethod
-    def _coerce_utc_ts(dt):
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
