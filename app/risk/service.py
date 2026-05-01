@@ -16,6 +16,7 @@ from app.risk.advanced_metrics import (
     classify_r_squared,
     compute_advanced_metrics,
 )
+from app.settings import get_settings
 
 logger = get_logger("risk")
 
@@ -572,6 +573,14 @@ def compute_risk_analytics(
             "available": False,
             "reason": advanced.get("reason", "Insufficient data."),
         }
+
+    settings = get_settings()
+    garch_block: dict[str, Any] = {"available": False, "reason": "disabled"}
+    if getattr(settings, "enable_garch", False):
+        from app.risk.garch import compute_garch_metrics
+
+        garch_block = compute_garch_metrics(port_rets)
+    block["garch"] = garch_block
 
     _persist_snapshot(
         profile_name=profile_name,
