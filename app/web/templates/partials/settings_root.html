@@ -3096,6 +3096,8 @@
             <option value="drift_threshold" {{ 'selected' if rc.method == 'drift_threshold' }}>Drift Threshold</option>
             <option value="calendar"        {{ 'selected' if rc.method == 'calendar' }}>Calendar</option>
             <option value="hybrid"          {{ 'selected' if rc.method == 'hybrid' }}>Hybrid (Drift + Calendar)</option>
+            <option value="hrp"             {{ 'selected' if rc.method == 'hrp' }}>Optimised: HRP</option>
+            <option value="min_cvar"        {{ 'selected' if rc.method == 'min_cvar' }}>Optimised: Min CVaR</option>
           </select>
         </label>
         <label>

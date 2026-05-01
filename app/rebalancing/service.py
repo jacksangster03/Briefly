@@ -117,6 +117,16 @@ def compute_rebalance_proposal(
         return _unavailable("All asset classes are unconfigured. Add allocation targets in the Allocation tab.")
 
     trades = _build_trade_list(allocation_drift_rows, config, holdings)
+    method = str(config.get("method", "drift_threshold")).strip().lower()
+    if method in {"hrp", "min_cvar"}:
+        optimised = _build_optimised_trade_list(
+            method=method,
+            holdings=holdings,
+            drift_rows=allocation_drift_rows,
+            config=config,
+        )
+        if optimised:
+            trades = optimised
     turnover = _compute_turnover(trades)
     cost = _estimate_cost(turnover, config.get("transaction_cost_bps", 10.0), config.get("portfolio_value"))
     status = _determine_status(trades, config)
@@ -264,6 +274,161 @@ def _build_trade_list(
         })
 
     return trades
+
+
+def _build_optimised_trade_list(
+    method: str,
+    holdings: list[dict[str, Any]],
+    drift_rows: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> list[dict[str, Any]] | None:
+    symbols = _extract_symbols(holdings)
+    if len(symbols) < 2:
+        return None
+
+    returns_df = _fetch_returns_for_symbols(symbols)
+    if returns_df is None or returns_df.empty:
+        return None
+
+    try:
+        from app.rebalancing.optimiser import optimise_weights
+
+        target_weights = optimise_weights(returns_df, method=method)
+    except Exception as exc:
+        logger.warning("Optimiser method '%s' failed, using drift fallback: %s", method, exc)
+        return None
+
+    return _build_symbol_trade_list(
+        holdings=holdings,
+        target_weights=target_weights,
+        drift_rows=drift_rows,
+        config=config,
+    )
+
+
+def _extract_symbols(holdings: list[dict[str, Any]]) -> list[str]:
+    symbols: list[str] = []
+    seen: set[str] = set()
+    for row in holdings:
+        s = str(row.get("symbol", "")).strip().upper()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        symbols.append(s)
+    return symbols
+
+
+def _fetch_returns_for_symbols(symbols: list[str], period: str = "1y"):
+    try:
+        import yfinance as yf
+    except Exception:
+        logger.warning("yfinance unavailable; optimiser methods disabled")
+        return None
+
+    try:
+        data = yf.download(
+            symbols,
+            period=period,
+            interval="1d",
+            auto_adjust=True,
+            progress=False,
+            group_by="column",
+            threads=True,
+        )
+    except Exception as exc:
+        logger.warning("Failed to download returns for optimiser: %s", exc)
+        return None
+
+    if data is None or getattr(data, "empty", True):
+        return None
+
+    close = data.get("Close")
+    if close is None:
+        close = data
+    if getattr(close, "ndim", 1) == 1 and len(symbols) == 1:
+        close = close.to_frame(name=symbols[0])
+
+    returns = close.pct_change().dropna(how="all")
+    if returns is None or returns.empty:
+        return None
+    return returns
+
+
+def _build_symbol_trade_list(
+    holdings: list[dict[str, Any]],
+    target_weights: dict[str, float],
+    drift_rows: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    min_trade = float(config.get("min_trade_pct", 0.5) or 0.5)
+    portfolio_value = config.get("portfolio_value")
+    trade_rows: list[dict[str, Any]] = []
+
+    status_by_asset = {str(r.get("asset_class")): str(r.get("status")) for r in drift_rows}
+    tolerance_floor = {
+        "within_band": "medium",
+        "above_band": "high",
+        "below_band": "high",
+    }
+
+    for h in holdings:
+        symbol = str(h.get("symbol", "")).strip().upper()
+        if not symbol:
+            continue
+        current_pct = float(h.get("weight_pct") or 0.0)
+        target_pct = float(target_weights.get(symbol, 0.0)) * 100.0
+        delta = target_pct - current_pct
+        asset_class = _infer_asset_class(symbol)
+        label = symbol
+        drift = current_pct - target_pct
+
+        if abs(delta) < min_trade:
+            trade_rows.append(_skipped_trade(
+                asset_class=asset_class,
+                label=label,
+                actual=current_pct,
+                target=target_pct,
+                min_pct=None,
+                max_pct=None,
+                drift=drift,
+                reason=f"Trade size {abs(delta):.1f}pp is below minimum {min_trade:.1f}pp",
+            ))
+            continue
+
+        direction = "buy" if delta > 0 else "sell"
+        priority = "high" if abs(delta) >= max(min_trade * 2, 2.0) else "medium"
+        policy_hint = tolerance_floor.get(status_by_asset.get(asset_class, ""), "medium")
+        if policy_hint == "high":
+            priority = "high"
+
+        trade_rows.append({
+            "asset_class": asset_class,
+            "label": label,
+            "direction": direction,
+            "current_pct": current_pct,
+            "target_pct": round(target_pct, 2),
+            "min_pct": None,
+            "max_pct": None,
+            "trade_pct": round(abs(delta), 2),
+            "trade_direction_pct": round(delta, 2),
+            "drift_pct": round(drift, 2),
+            "priority": priority,
+            "status": "optimised",
+            "skipped": False,
+            "skip_reason": None,
+            "current_display": _fmt_pct(current_pct),
+            "target_display": _fmt_pct(target_pct),
+            "trade_display": f"+{abs(delta):.1f}pp" if direction == "buy" else f"-{abs(delta):.1f}pp",
+            "trade_value_display": _trade_value_display(abs(delta), portfolio_value),
+            "holdings": [{
+                "symbol": symbol,
+                "weight_pct": current_pct,
+                "action": "add" if direction == "buy" else "trim",
+                "weight_display": _fmt_pct(current_pct),
+            }],
+        })
+
+    return trade_rows
 
 
 def _compute_turnover(trades: list[dict[str, Any]]) -> float:
