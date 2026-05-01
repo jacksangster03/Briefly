@@ -1,7 +1,7 @@
-"""Deterministic morning chart contract + selection engine.
+"""Deterministic morning chart contract + promotion engine.
 
-Phase 6.4 introduces a data-first chart pipeline where chart decisions are
-computed from deterministic rules, then rendered for web/email separately.
+This module is the single source of truth for morning chart decisions.
+Renderers consume these specs but do not decide visual hierarchy.
 """
 
 from __future__ import annotations
@@ -17,11 +17,15 @@ from app.schemas.events import MacroDataPoint, PricePoint, QuoteData
 
 US_INDEX_KEYS = ("spx", "s&p 500", "nasdaq", "dow", "russell")
 EU_INDEX_KEYS = ("stoxx", "ftse", "dax", "cac", "ibex")
-ASIA_INDEX_KEYS = ("nikkei", "hang seng")
+ASIA_INDEX_KEYS = ("nikkei", "hang seng", "hsi", "kospi")
 
-OIL_KEYS = ("wti", "crude", "cl1:com")
-GOLD_KEYS = ("gold", "gc1:com")
+OIL_KEYS = ("wti", "crude", "cl1:com", "cl=f")
+GOLD_KEYS = ("gold", "gc1:com", "gc=f")
 VIX_KEYS = ("vix",)
+SMALL_CAP_KEYS = ("russell", "rut")
+LARGE_CAP_KEYS = ("spx", "s&p 500", "dow")
+GROWTH_KEYS = ("nasdaq", "ixic")
+DEFENSIVE_KEYS = ("dow",)
 
 
 @dataclass
@@ -39,8 +43,12 @@ def build_morning_chart_bundle(
     profile: UserProfile,
     market_data_service: Any,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
-    """Build deterministic chart specs + selected chart roles."""
-    normalized = _normalize_inputs(briefing.market_setup.index_quotes, briefing.market_setup.macro_quotes, briefing.macro_context)
+    """Build deterministic chart specs + selected roles."""
+    normalized = _normalize_inputs(
+        briefing.market_setup.index_quotes,
+        briefing.market_setup.macro_quotes,
+        briefing.macro_context,
+    )
     regime_tags = _derive_regime_tags(normalized)
     candidates = _build_candidates(
         briefing=briefing,
@@ -56,6 +64,14 @@ def build_morning_chart_bundle(
         "charts": [item.spec for item in candidates],
         "selected": selected,
         "summary": _bundle_summary(normalized, regime_tags),
+        "meta": {
+            "profile_name": profile.name,
+            "timezone": profile.timezone,
+            "delivery_mode": "deterministic",
+            "llm_email_enabled": bool(profile.delivery.get("llm_email_morning", True)),
+            "llm_shadow_mode": bool(profile.delivery.get("llm_shadow_mode", True)),
+            "data_confidence": _confidence_label(normalized),
+        },
     }
     return bundle, selected
 
@@ -72,7 +88,7 @@ def selected_chart_specs(bundle: dict[str, Any]) -> list[dict[str, Any]]:
     return specs
 
 
-def chart_summary_lines(bundle: dict[str, Any], *, limit: int = 4) -> list[str]:
+def chart_summary_lines(bundle: dict[str, Any], *, limit: int = 6) -> list[str]:
     charts = {str(row.get("chart_key")): row for row in (bundle.get("charts") or [])}
     lines: list[str] = []
     for selected in (bundle.get("selected") or [])[: max(1, limit)]:
@@ -99,23 +115,38 @@ def _normalize_inputs(
     us = _avg_change(index_quotes, US_INDEX_KEYS)
     eu = _avg_change(index_quotes, EU_INDEX_KEYS)
     asia = _avg_change(index_quotes, ASIA_INDEX_KEYS)
+    total = len(index_quotes)
     positives = [quote for quote in index_quotes if float(quote.change_percent or 0.0) > 0]
-    breadth = len(positives) / max(1, len(index_quotes))
+    breadth = len(positives) / max(1, total)
+
     vix = _find_quote(index_quotes + macro_quotes, VIX_KEYS)
     oil = _find_quote(macro_quotes, OIL_KEYS)
     gold = _find_quote(macro_quotes, GOLD_KEYS)
     ten_y = _find_macro(macro_context, "10Y")
     two_y = _find_macro(macro_context, "2Y")
     spread = _find_macro(macro_context, "SPREAD")
+
+    small_large = _avg_change(index_quotes, SMALL_CAP_KEYS) - _avg_change(index_quotes, LARGE_CAP_KEYS)
+    growth_defensive = _avg_change(index_quotes, GROWTH_KEYS) - _avg_change(index_quotes, DEFENSIVE_KEYS)
+    dispersion = max(0.0, max(us, eu, asia) - min(us, eu, asia))
+
     return {
         "us_avg": us,
         "eu_avg": eu,
         "asia_avg": asia,
         "breadth": breadth,
+        "total_indices": total,
+        "up_indices": len(positives),
+        "dispersion": dispersion,
+        "small_vs_large": small_large,
+        "growth_vs_defensive": growth_defensive,
         "vix_level": float(vix.current_price) if vix else None,
         "vix_delta_pct": float(vix.change_percent) if vix else None,
         "oil_delta_pct": float(oil.change_percent) if oil else None,
         "gold_delta_pct": float(gold.change_percent) if gold else None,
+        "ten_y_level": float(ten_y.value) if ten_y else None,
+        "two_y_level": float(two_y.value) if two_y else None,
+        "spread_level": float(spread.value) if spread else None,
         "ten_y_change": float(ten_y.change) if ten_y and ten_y.change is not None else None,
         "two_y_change": float(two_y.change) if two_y and two_y.change is not None else None,
         "curve_change": float(spread.change) if spread and spread.change is not None else None,
@@ -131,7 +162,6 @@ def _derive_regime_tags(metrics: dict[str, Any]) -> list[str]:
     vix_delta = metrics.get("vix_delta_pct")
     oil_delta = metrics.get("oil_delta_pct")
     ten_y = metrics.get("ten_y_change")
-    curve_change = metrics.get("curve_change")
 
     if breadth >= 0.62 and us > 0 and eu > -0.2:
         tags.append("risk_on")
@@ -143,7 +173,7 @@ def _derive_regime_tags(metrics: dict[str, Any]) -> list[str]:
         tags.append("oil_shock")
     if abs(us - eu) >= 0.9:
         tags.append("regional_split")
-    if abs(us - eu) >= 0.7 or abs(us - float(metrics.get("asia_avg") or 0.0)) >= 0.7:
+    if abs(float(metrics.get("small_vs_large") or 0.0)) >= 0.6:
         tags.append("breadth_divergence")
     if not tags:
         tags.append("mixed")
@@ -160,68 +190,114 @@ def _build_candidates(
 ) -> list[ChartCandidate]:
     specs: list[ChartCandidate] = []
 
-    global_relative = _global_relative_spec(
-        index_quotes=briefing.market_setup.index_quotes,
-        market_data_service=market_data_service,
-    )
     specs.append(
         ChartCandidate(
             chart_key="global_relative_performance",
             category="hero",
             priority=_priority_global_relative(normalized, regime_tags),
-            spec=global_relative,
+            spec=_global_relative_spec(
+                index_quotes=briefing.market_setup.index_quotes,
+                market_data_service=market_data_service,
+            ),
             reason="Cross-region leadership and path divergence.",
         )
     )
 
-    impulse = _cross_asset_impulse_spec(
-        macro_quotes=briefing.market_setup.macro_quotes,
-        macro_context=briefing.macro_context,
-        market_data_service=market_data_service,
-    )
     specs.append(
         ChartCandidate(
             chart_key="cross_asset_impulse_strip",
             category="support",
             priority=_priority_impulse(normalized, regime_tags),
-            spec=impulse,
-            reason="Rates, FX, and commodities impulse context.",
+            spec=_cross_asset_impulse_spec(
+                macro_quotes=briefing.market_setup.macro_quotes,
+                macro_context=briefing.macro_context,
+                market_data_service=market_data_service,
+            ),
+            reason="Rates, commodities, and macro impulse context.",
         )
     )
 
-    holdings = _holdings_excess_spec(
-        holdings_quotes=briefing.portfolio_quotes or briefing.watchlist_quotes,
-        benchmark_reference=float(normalized.get("us_avg") or 0.0),
-    )
     specs.append(
         ChartCandidate(
             chart_key="holdings_excess_performance",
             category="portfolio",
-            priority=0.73 + (0.1 if briefing.portfolio_quotes else 0.0),
-            spec=holdings,
+            priority=0.73 + (0.12 if briefing.portfolio_quotes else 0.0),
+            spec=_holdings_excess_spec(
+                holdings_quotes=briefing.portfolio_quotes or briefing.watchlist_quotes,
+                benchmark_reference=float(normalized.get("us_avg") or 0.0),
+                profile=profile,
+            ),
             reason="Portfolio-linked winners and laggards versus broad market.",
         )
     )
 
-    sector = _sector_quadrant_spec(briefing, profile)
     specs.append(
         ChartCandidate(
             chart_key="sector_exposure_quadrant",
             category="support",
-            priority=0.66,
-            spec=sector,
-            reason="Exposure-weight context for sector winners/losers.",
+            priority=0.67 + (0.06 if abs(float(normalized.get("growth_vs_defensive") or 0.0)) > 0.6 else 0.0),
+            spec=_sector_quadrant_spec(briefing, profile),
+            reason="Exposure-weight context for sector winners and laggards.",
         )
     )
 
-    event = _event_linked_spec(briefing, market_data_service)
     specs.append(
         ChartCandidate(
             chart_key="event_linked_annotated_trend",
             category="event",
             priority=0.62 + (0.08 if "oil_shock" in regime_tags else 0.0),
-            spec=event,
-            reason="Top event-linked symbol trend with deterministic marker.",
+            spec=_event_linked_spec(briefing, market_data_service),
+            reason="Deterministic event-linked trend for the top portfolio symbol.",
+        )
+    )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="breadth_leadership_panel",
+            category="support",
+            priority=0.7 + min(0.12, float(normalized.get("dispersion") or 0.0) * 0.05),
+            spec=_breadth_leadership_spec(normalized),
+            reason="Breadth and leadership factors identify tape quality quickly.",
+        )
+    )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="rates_curve_micro_panel",
+            category="micro",
+            priority=0.66 + (0.06 if "rates_led" in regime_tags else 0.0),
+            spec=_rates_curve_micro_spec(normalized),
+            reason="Rates impulse and curve shift in one compact card.",
+        )
+    )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="volatility_regime_card",
+            category="micro",
+            priority=0.66 + (0.07 if "defensive" in regime_tags else 0.0),
+            spec=_volatility_regime_spec(normalized),
+            reason="Volatility regime sets risk appetite context.",
+        )
+    )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="portfolio_concentration_risk_card",
+            category="micro",
+            priority=0.64 + (0.07 if profile.portfolio_holdings else 0.0),
+            spec=_concentration_risk_spec(profile),
+            reason="Concentration and risk stance should stay visible every morning.",
+        )
+    )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="earnings_relevance_strip",
+            category="micro",
+            priority=0.63 + (0.07 if briefing.earnings_calendar else 0.0),
+            spec=_earnings_relevance_spec(briefing),
+            reason="Near-term earnings load and portfolio overlap context.",
         )
     )
 
@@ -232,49 +308,34 @@ def _build_candidates(
 
 
 def _select_candidates(candidates: list[ChartCandidate]) -> list[dict[str, str]]:
-    available = [item for item in candidates if bool(item.spec.get("available"))]
-    ordered = available or candidates
-    if not ordered:
-        return []
+    by_key = {item.chart_key: item for item in candidates}
     selected: list[dict[str, str]] = []
-    hero = ordered[0]
-    selected.append(
-        {
-            "chart_key": hero.chart_key,
-            "role": "hero",
-            "reason": hero.reason,
-        }
-    )
 
-    supports = [item for item in ordered[1:] if item.chart_key != hero.chart_key][:2]
-    for item in supports:
-        selected.append(
-            {
-                "chart_key": item.chart_key,
-                "role": "support",
-                "reason": item.reason,
-            }
-        )
+    available = [item for item in candidates if bool(item.spec.get("available"))]
+    hero = next((item for item in available if item.category == "hero"), None) or (available[0] if available else None)
+    if hero:
+        selected.append({"chart_key": hero.chart_key, "role": "hero", "reason": hero.reason})
 
-    portfolio = next((item for item in ordered if item.category == "portfolio" and item.chart_key not in {row["chart_key"] for row in selected}), None)
-    if portfolio:
-        selected.append(
-            {
-                "chart_key": portfolio.chart_key,
-                "role": "optional_portfolio",
-                "reason": portfolio.reason,
-            }
-        )
+    supports = [item for item in available if item.category == "support" and item.chart_key != (hero.chart_key if hero else "")]
+    for item in supports[:2]:
+        selected.append({"chart_key": item.chart_key, "role": "support", "reason": item.reason})
 
-    event = next((item for item in ordered if item.category == "event" and item.chart_key not in {row["chart_key"] for row in selected}), None)
-    if event:
-        selected.append(
-            {
-                "chart_key": event.chart_key,
-                "role": "optional_event",
-                "reason": event.reason,
-            }
-        )
+    portfolio = next((item for item in available if item.category == "portfolio"), None)
+    if portfolio and portfolio.chart_key not in {row["chart_key"] for row in selected}:
+        selected.append({"chart_key": portfolio.chart_key, "role": "optional_portfolio", "reason": portfolio.reason})
+
+    event = next((item for item in available if item.category == "event"), None)
+    if event and event.chart_key not in {row["chart_key"] for row in selected}:
+        selected.append({"chart_key": event.chart_key, "role": "optional_event", "reason": event.reason})
+
+    micro = [item for item in available if item.category == "micro" and item.chart_key not in {row["chart_key"] for row in selected}]
+    for idx, item in enumerate(micro[:2], start=1):
+        selected.append({"chart_key": item.chart_key, "role": f"micro_{idx}", "reason": item.reason})
+
+    if not selected:
+        fallback = next(iter(by_key.values()), None)
+        if fallback:
+            selected.append({"chart_key": fallback.chart_key, "role": "hero", "reason": "Fallback due to missing availability."})
 
     return selected
 
@@ -283,33 +344,38 @@ def _bundle_summary(normalized: dict[str, Any], regime_tags: list[str]) -> str:
     breadth = float(normalized.get("breadth") or 0.0) * 100.0
     us = float(normalized.get("us_avg") or 0.0)
     eu = float(normalized.get("eu_avg") or 0.0)
+    asia = float(normalized.get("asia_avg") or 0.0)
     oil = normalized.get("oil_delta_pct")
+    vix = normalized.get("vix_level")
     oil_text = f"{oil:+.2f}%" if oil is not None else "n/a"
+    vix_text = f"{vix:.2f}" if vix is not None else "n/a"
     return (
-        f"Regime tags: {', '.join(regime_tags)} | breadth {breadth:.0f}% positive | "
-        f"US {us:+.2f}% vs Europe {eu:+.2f}% | WTI {oil_text}"
+        f"Regime: {', '.join(regime_tags)} | breadth {breadth:.0f}% up | "
+        f"US {us:+.2f}% / Europe {eu:+.2f}% / Asia {asia:+.2f}% | "
+        f"VIX {vix_text} | WTI {oil_text}"
     )
 
 
-def _global_relative_spec(
-    *,
-    index_quotes: list[QuoteData],
-    market_data_service: Any,
-) -> dict[str, Any]:
-    selected = [quote for quote in index_quotes if "vix" not in (quote.display_name or quote.symbol).lower()][:8]
+def _global_relative_spec(*, index_quotes: list[QuoteData], market_data_service: Any) -> dict[str, Any]:
+    selected = [quote for quote in index_quotes if "vix" not in (quote.display_name or quote.symbol).lower()][:10]
     series: list[dict[str, Any]] = []
     missing: list[str] = []
     for quote in selected:
         history = market_data_service.get_price_history(quote.symbol, period="3mo", interval="1d") or []
         rebased_5 = _rebased(history, points=5)
         rebased_20 = _rebased(history, points=20)
+        rebased_1 = _rebased(history, points=2)
         if not rebased_5:
             missing.append(quote.display_name or quote.symbol)
             continue
+        family = _region_family(quote)
         series.append(
             {
                 "name": quote.display_name or quote.symbol,
                 "symbol": quote.symbol,
+                "family": family,
+                "x_1d": list(range(len(rebased_1))),
+                "y_1d": rebased_1,
                 "x_5d": list(range(len(rebased_5))),
                 "y_5d": rebased_5,
                 "x_20d": list(range(len(rebased_20))) if rebased_20 else [],
@@ -323,7 +389,7 @@ def _global_relative_spec(
         "available": available,
         "reason_if_hidden": None if available else "History unavailable for global index comparison.",
         "title": "Global Equity Leadership",
-        "caption": "Rebased path comparison highlights cross-region leadership and divergence.",
+        "caption": "Rebased path comparison across US, Europe, and Asia with endpoint hierarchy.",
         "series": series,
         "annotations": [],
         "meta": {
@@ -331,28 +397,23 @@ def _global_relative_spec(
             "supported_windows": ["1d", "5d", "20d"],
             "missing": missing,
         },
-        "email_dimensions": {"width": 8.6, "height": 4.8},
+        "email_dimensions": {"width": 8.8, "height": 4.9},
     }
 
 
-def _cross_asset_impulse_spec(
-    *,
-    macro_quotes: list[QuoteData],
-    macro_context: list[MacroDataPoint],
-    market_data_service: Any,
-) -> dict[str, Any]:
+def _cross_asset_impulse_spec(*, macro_quotes: list[QuoteData], macro_context: list[MacroDataPoint], market_data_service: Any) -> dict[str, Any]:
     points: list[dict[str, Any]] = []
-    for quote in macro_quotes[:8]:
+    for quote in macro_quotes[:10]:
         label = quote.display_name or quote.symbol
         symbol = quote.symbol
-        if "treasury yield" in label.lower() or symbol.upper() == "^TNX":
+        if "yield" in label.lower() or symbol.upper() in {"^TNX", "^IRX"}:
             impulse = float(quote.change or 0.0) * 100.0
             unit = "bps"
         else:
             impulse = float(quote.change_percent or 0.0)
             unit = "pct"
         history = market_data_service.get_price_history(symbol, period="1mo", interval="1d") or []
-        spark = _pct_path(history, points=6)
+        spark = _pct_path(history, points=7)
         points.append(
             {
                 "name": label,
@@ -384,17 +445,14 @@ def _cross_asset_impulse_spec(
         "series": points,
         "annotations": [{"label": "zero_line", "value": 0}],
         "meta": {"impulse_units": {"pct": "percent", "bps": "basis points"}},
-        "email_dimensions": {"width": 8.4, "height": 4.6},
+        "email_dimensions": {"width": 8.8, "height": 4.7},
     }
 
 
-def _holdings_excess_spec(
-    *,
-    holdings_quotes: list[QuoteData],
-    benchmark_reference: float,
-) -> dict[str, Any]:
+def _holdings_excess_spec(*, holdings_quotes: list[QuoteData], benchmark_reference: float, profile: UserProfile) -> dict[str, Any]:
+    profile_symbols = set(profile.portfolio_symbols)
     rows: list[dict[str, Any]] = []
-    for quote in sorted(holdings_quotes, key=lambda row: float(row.change_percent or 0.0), reverse=True)[:8]:
+    for quote in sorted(holdings_quotes, key=lambda row: float(row.change_percent or 0.0), reverse=True)[:10]:
         change = float(quote.change_percent or 0.0)
         rows.append(
             {
@@ -402,36 +460,38 @@ def _holdings_excess_spec(
                 "symbol": quote.symbol,
                 "change_pct": round(change, 4),
                 "excess_pct": round(change - benchmark_reference, 4),
+                "relevance_tag": "portfolio" if quote.symbol in profile_symbols else "watchlist",
             }
         )
     available = bool(rows)
     return {
         "chart_key": "holdings_excess_performance",
-        "variant": "lollipop_excess",
+        "variant": "dumbbell_excess",
         "available": available,
         "reason_if_hidden": None if available else "No holdings/watchlist quotes available.",
         "title": "Portfolio Movers vs Benchmark",
-        "caption": "Ranked holding moves with excess return versus broad market reference.",
+        "caption": "Absolute move and excess return versus benchmark reference.",
         "series": rows,
         "annotations": [],
         "meta": {"benchmark_reference_pct": round(benchmark_reference, 4)},
-        "email_dimensions": {"width": 8.4, "height": 4.8},
+        "email_dimensions": {"width": 8.8, "height": 5.0},
     }
 
 
 def _sector_quadrant_spec(briefing: MorningBriefing, profile: UserProfile) -> dict[str, Any]:
     points: list[dict[str, Any]] = []
     sector_weight_map = {key.lower(): value for key, value in profile.portfolio_sector_weights.items()}
-    # Sector weights are sourced from profile context in chart builder and passed via snapshot rows.
-    for snapshot in briefing.sector_scan[:10]:
+    for snapshot in briefing.sector_scan[:12]:
         if snapshot.etf_quote is None:
             continue
+        exposure = float(sector_weight_map.get(snapshot.sector_key.lower(), 0.0) * 100.0)
         points.append(
             {
                 "name": snapshot.display_name,
                 "sector_key": snapshot.sector_key,
-                "x_exposure": round(float(sector_weight_map.get(snapshot.sector_key.lower(), 0.0) * 100.0), 4),
+                "x_exposure": round(exposure, 4),
                 "y_change_pct": round(float(snapshot.etf_quote.change_percent or 0.0), 4),
+                "bubble_size": max(8.0, min(34.0, exposure * 1.2)),
             }
         )
     available = bool(points)
@@ -445,7 +505,7 @@ def _sector_quadrant_spec(briefing: MorningBriefing, profile: UserProfile) -> di
         "series": points,
         "annotations": [{"label": "origin", "x": 0, "y": 0}],
         "meta": {},
-        "email_dimensions": {"width": 8.4, "height": 4.8},
+        "email_dimensions": {"width": 8.8, "height": 4.9},
     }
 
 
@@ -462,11 +522,11 @@ def _event_linked_spec(briefing: MorningBriefing, market_data_service: Any) -> d
             "series": [],
             "annotations": [],
             "meta": {},
-            "email_dimensions": {"width": 8.4, "height": 4.8},
+            "email_dimensions": {"width": 8.8, "height": 4.9},
         }
 
     history = market_data_service.get_price_history(focus_symbol, period="3mo", interval="1d") or []
-    if len(history) < 4:
+    if len(history) < 5:
         return {
             "chart_key": "event_linked_annotated_trend",
             "variant": "30d",
@@ -477,7 +537,7 @@ def _event_linked_spec(briefing: MorningBriefing, market_data_service: Any) -> d
             "series": [],
             "annotations": [],
             "meta": {"symbol": focus_symbol},
-            "email_dimensions": {"width": 8.4, "height": 4.8},
+            "email_dimensions": {"width": 8.8, "height": 4.9},
         }
     path = history[-30:]
     x = [idx for idx, _ in enumerate(path)]
@@ -489,21 +549,145 @@ def _event_linked_spec(briefing: MorningBriefing, market_data_service: Any) -> d
         "available": True,
         "reason_if_hidden": None,
         "title": f"{focus_symbol} Event-Linked Trend",
-        "caption": "Annotated window for the most portfolio-relevant current catalyst symbol.",
-        "series": [
-            {
-                "name": focus_symbol,
-                "symbol": focus_symbol,
-                "x": x,
-                "y": y,
-            }
-        ],
+        "caption": "Latest trend with deterministic event-window marker.",
+        "series": [{"name": focus_symbol, "symbol": focus_symbol, "x": x, "y": y}],
         "annotations": [
             {"label": "event_window_start", "x": marker},
             {"label": "latest", "x": len(path) - 1},
         ],
         "meta": {"symbol": focus_symbol},
-        "email_dimensions": {"width": 8.4, "height": 4.8},
+        "email_dimensions": {"width": 8.8, "height": 4.9},
+    }
+
+
+def _breadth_leadership_spec(metrics: dict[str, Any]) -> dict[str, Any]:
+    total = int(metrics.get("total_indices") or 0)
+    up = int(metrics.get("up_indices") or 0)
+    breadth_pct = float(metrics.get("breadth") or 0.0) * 100.0
+    rows = [
+        {"name": "Breadth % Up", "value": round(breadth_pct, 3), "unit": "pct"},
+        {"name": "US Avg Move", "value": round(float(metrics.get("us_avg") or 0.0), 3), "unit": "pct"},
+        {"name": "Europe Avg Move", "value": round(float(metrics.get("eu_avg") or 0.0), 3), "unit": "pct"},
+        {"name": "Asia Avg Move", "value": round(float(metrics.get("asia_avg") or 0.0), 3), "unit": "pct"},
+        {"name": "Small-Large", "value": round(float(metrics.get("small_vs_large") or 0.0), 3), "unit": "pct"},
+        {"name": "Growth-Defensive", "value": round(float(metrics.get("growth_vs_defensive") or 0.0), 3), "unit": "pct"},
+    ]
+    available = total > 0
+    return {
+        "chart_key": "breadth_leadership_panel",
+        "variant": "daily_cross_section",
+        "available": available,
+        "reason_if_hidden": None if available else "Index breadth inputs unavailable.",
+        "title": "Breadth & Leadership",
+        "caption": f"{up}/{total} tracked benchmarks are positive; leadership factors shown versus 0-line.",
+        "series": rows,
+        "annotations": [{"label": "zero_line", "value": 0}],
+        "meta": {"up_count": up, "total_count": total},
+        "email_dimensions": {"width": 8.8, "height": 4.4},
+    }
+
+
+def _rates_curve_micro_spec(metrics: dict[str, Any]) -> dict[str, Any]:
+    ten = metrics.get("ten_y_level")
+    two = metrics.get("two_y_level")
+    spread = metrics.get("spread_level")
+    rows = [
+        {"name": "US 2Y", "level": two, "impulse": _as_bps(metrics.get("two_y_change"))},
+        {"name": "US 10Y", "level": ten, "impulse": _as_bps(metrics.get("ten_y_change"))},
+        {"name": "10Y-2Y", "level": spread, "impulse": _as_bps(metrics.get("curve_change"))},
+    ]
+    available = any(row["level"] is not None for row in rows)
+    return {
+        "chart_key": "rates_curve_micro_panel",
+        "variant": "curve_impulse",
+        "available": available,
+        "reason_if_hidden": None if available else "Rates and curve inputs unavailable.",
+        "title": "Rates & Curve",
+        "caption": "2Y/10Y levels and daily basis-point impulse.",
+        "series": rows,
+        "annotations": [],
+        "meta": {},
+        "email_dimensions": {"width": 8.0, "height": 2.9},
+    }
+
+
+def _volatility_regime_spec(metrics: dict[str, Any]) -> dict[str, Any]:
+    vix_level = metrics.get("vix_level")
+    vix_delta = metrics.get("vix_delta_pct")
+    if vix_level is None:
+        regime = "unavailable"
+    elif vix_level < 15:
+        regime = "calm"
+    elif vix_level < 20:
+        regime = "normal"
+    elif vix_level < 27:
+        regime = "elevated"
+    else:
+        regime = "stress"
+    available = vix_level is not None
+    return {
+        "chart_key": "volatility_regime_card",
+        "variant": "vix_regime",
+        "available": available,
+        "reason_if_hidden": None if available else "VIX quote unavailable.",
+        "title": "Volatility Regime",
+        "caption": "Current implied-volatility bucket with daily change context.",
+        "series": [
+            {"name": "VIX Level", "value": vix_level, "unit": "index"},
+            {"name": "VIX Delta", "value": vix_delta, "unit": "pct"},
+        ],
+        "annotations": [{"label": "regime", "value": regime}],
+        "meta": {"regime": regime},
+        "email_dimensions": {"width": 8.0, "height": 2.9},
+    }
+
+
+def _concentration_risk_spec(profile: UserProfile) -> dict[str, Any]:
+    weights = sorted([float(p.weight_pct or 0.0) for p in profile.portfolio_holdings if p.weight_pct is not None], reverse=True)
+    top5 = sum(weights[:5]) if weights else 0.0
+    largest = weights[0] if weights else 0.0
+    count = len(weights)
+    available = count > 0
+    risk_state = "concentrated" if top5 >= 70 else ("balanced" if top5 <= 45 else "moderate")
+    return {
+        "chart_key": "portfolio_concentration_risk_card",
+        "variant": "top5_concentration",
+        "available": available,
+        "reason_if_hidden": None if available else "Portfolio holdings weights unavailable.",
+        "title": "Portfolio Concentration",
+        "caption": "Top-weight concentration and single-name risk posture.",
+        "series": [
+            {"name": "Top 5 Weight", "value": top5, "unit": "pct"},
+            {"name": "Largest Position", "value": largest, "unit": "pct"},
+            {"name": "Active Holdings", "value": count, "unit": "count"},
+        ],
+        "annotations": [{"label": "risk_state", "value": risk_state}],
+        "meta": {"risk_state": risk_state},
+        "email_dimensions": {"width": 8.0, "height": 2.9},
+    }
+
+
+def _earnings_relevance_spec(briefing: MorningBriefing) -> dict[str, Any]:
+    rel = briefing.earnings_relevance or {}
+    series = [
+        {"name": "Today", "value": float(rel.get("today", 0.0) or 0.0), "unit": "count"},
+        {"name": "Tomorrow", "value": float(rel.get("tomorrow", 0.0) or 0.0), "unit": "count"},
+        {"name": "This Week", "value": float(rel.get("this_week", 0.0) or 0.0), "unit": "count"},
+        {"name": "Portfolio Overlap", "value": float(rel.get("portfolio_overlap", 0.0) or 0.0), "unit": "count"},
+        {"name": "Watchlist Overlap", "value": float(rel.get("watchlist_overlap", 0.0) or 0.0), "unit": "count"},
+    ]
+    available = bool(briefing.earnings_calendar) or any(row["value"] > 0 for row in series)
+    return {
+        "chart_key": "earnings_relevance_strip",
+        "variant": "calendar_overlap",
+        "available": available,
+        "reason_if_hidden": None if available else "No upcoming earnings relevance data available.",
+        "title": "Earnings Relevance",
+        "caption": "Upcoming earnings load with portfolio/watchlist overlap.",
+        "series": series,
+        "annotations": [],
+        "meta": {},
+        "email_dimensions": {"width": 8.0, "height": 2.9},
     }
 
 
@@ -585,3 +769,37 @@ def _pick_focus_symbol(briefing: MorningBriefing) -> str:
     if briefing.watchlist_quotes:
         return briefing.watchlist_quotes[0].symbol
     return ""
+
+
+def _region_family(quote: QuoteData) -> str:
+    label = (quote.display_name or quote.symbol).lower()
+    if any(key in label for key in US_INDEX_KEYS):
+        return "us"
+    if any(key in label for key in EU_INDEX_KEYS):
+        return "europe"
+    if any(key in label for key in ASIA_INDEX_KEYS):
+        return "asia"
+    return "other"
+
+
+def _as_bps(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(float(value) * 100.0, 4)
+
+
+def _confidence_label(metrics: dict[str, Any]) -> str:
+    score = 0
+    if metrics.get("total_indices"):
+        score += 1
+    if metrics.get("vix_level") is not None:
+        score += 1
+    if metrics.get("ten_y_level") is not None:
+        score += 1
+    if metrics.get("oil_delta_pct") is not None:
+        score += 1
+    if score >= 4:
+        return "high"
+    if score >= 2:
+        return "medium"
+    return "low"

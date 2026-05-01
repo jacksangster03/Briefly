@@ -14,6 +14,7 @@ from app.briefing.morning_charts import build_morning_chart_bundle
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MarketSetup, MorningBriefing
 from app.schemas.events import MacroDataPoint, PricePoint, QuoteData, SectorSnapshot
+from app.schemas.portfolio import PortfolioHolding
 from app.settings import Settings
 from app.web.app import create_web_app
 
@@ -43,6 +44,13 @@ def _sample_profile() -> UserProfile:
         name="default_user",
         timezone="Europe/Madrid",
         portfolio_sector_weights={"technology": 0.45, "healthcare": 0.25},
+        portfolio_holdings=[
+            PortfolioHolding(profile_name="default_user", symbol="NVDA", weight_pct=30.0, bucket="core"),
+            PortfolioHolding(profile_name="default_user", symbol="MSFT", weight_pct=20.0, bucket="core"),
+            PortfolioHolding(profile_name="default_user", symbol="AAPL", weight_pct=15.0, bucket="core"),
+            PortfolioHolding(profile_name="default_user", symbol="AMZN", weight_pct=10.0, bucket="satellite"),
+            PortfolioHolding(profile_name="default_user", symbol="GOOGL", weight_pct=8.0, bucket="satellite"),
+        ],
     )
 
 
@@ -70,6 +78,13 @@ def _sample_briefing() -> MorningBriefing:
             QuoteData(symbol="NVDA", display_name="Nvidia", current_price=905, change=20.0, change_percent=2.3),
             QuoteData(symbol="MSFT", display_name="Microsoft", current_price=418, change=2.0, change_percent=0.5),
         ],
+        earnings_relevance={
+            "today": "2",
+            "tomorrow": "3",
+            "this_week": "7",
+            "portfolio_overlap": "2",
+            "watchlist_overlap": "4",
+        },
         sector_scan=[
             SectorSnapshot(
                 sector_key="technology",
@@ -101,6 +116,13 @@ def test_morning_chart_bundle_contract_has_required_fields():
         assert "email_dimensions" in chart
     assert selected
     assert any(row["role"] == "hero" for row in selected)
+    assert any(row["role"].startswith("micro_") for row in selected)
+    chart_keys = {row["chart_key"] for row in bundle["charts"]}
+    assert "breadth_leadership_panel" in chart_keys
+    assert "rates_curve_micro_panel" in chart_keys
+    assert "volatility_regime_card" in chart_keys
+    assert "portfolio_concentration_risk_card" in chart_keys
+    assert "earnings_relevance_strip" in chart_keys
 
 
 def test_morning_chart_bundle_unavailable_when_history_missing():
@@ -112,6 +134,8 @@ def test_morning_chart_bundle_unavailable_when_history_missing():
     chart_map = {row["chart_key"]: row for row in bundle["charts"]}
     assert chart_map["global_relative_performance"]["available"] is False
     assert chart_map["global_relative_performance"]["reason_if_hidden"]
+    assert chart_map["volatility_regime_card"]["available"] is False
+    assert chart_map["volatility_regime_card"]["reason_if_hidden"]
 
 
 def test_chart_builder_populates_bundle_and_assets():
@@ -157,6 +181,11 @@ def test_briefing_morning_charts_route_renders_preview(monkeypatch, validation_t
     assert response.status_code == 200
     assert "Briefing / Morning Charts" in response.text
     assert "morning-global-relative-chart" in response.text
+    assert "morning-breadth-chart" in response.text
+    assert "morning-rates-micro-chart" in response.text
+    assert "morning-volatility-chart" in response.text
+    assert "morning-concentration-chart" in response.text
+    assert "morning-earnings-chart" in response.text
     assert "morning-chart-data" in response.text
 
 

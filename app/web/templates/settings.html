@@ -864,7 +864,23 @@
         const holdingsTarget = root.querySelector("#morning-holdings-chart");
         const sectorTarget = root.querySelector("#morning-sector-chart");
         const eventTarget = root.querySelector("#morning-event-chart");
-        const targets = [globalTarget, impulseTarget, holdingsTarget, sectorTarget, eventTarget].filter(Boolean);
+        const breadthTarget = root.querySelector("#morning-breadth-chart");
+        const ratesMicroTarget = root.querySelector("#morning-rates-micro-chart");
+        const volatilityTarget = root.querySelector("#morning-volatility-chart");
+        const concentrationTarget = root.querySelector("#morning-concentration-chart");
+        const earningsTarget = root.querySelector("#morning-earnings-chart");
+        const targets = [
+          globalTarget,
+          impulseTarget,
+          holdingsTarget,
+          sectorTarget,
+          eventTarget,
+          breadthTarget,
+          ratesMicroTarget,
+          volatilityTarget,
+          concentrationTarget,
+          earningsTarget
+        ].filter(Boolean);
         if (!targets.length) return;
         targets.forEach((target) => _renderChartState(target, "info", "Rendering chart..."));
         if (typeof window.Plotly === "undefined") {
@@ -886,14 +902,22 @@
           if (!global || !global.available) {
             renderUnavailable(globalTarget, global, "Global relative-performance chart unavailable.");
           } else {
-            const traces = (global.series || []).map((row, idx) => ({
-              x: row.x_5d || [],
-              y: row.y_5d || [],
-              type: "scatter",
-              mode: "lines",
-              name: row.name || row.symbol || `Series ${idx + 1}`,
-              line: { width: idx === 0 ? 2.8 : 1.7 },
-            }));
+            const familyPalette = { us: "#275DAD", europe: "#2A9D8F", asia: "#F4A259", other: "#7C88A6" };
+            const traces = (global.series || []).map((row, idx) => {
+              const family = String(row.family || "other");
+              const color = familyPalette[family] || familyPalette.other;
+              return {
+                x: row.x_5d || [],
+                y: row.y_5d || [],
+                type: "scatter",
+                mode: "lines",
+                name: row.name || row.symbol || `Series ${idx + 1}`,
+                line: {
+                  width: family === "us" ? 2.8 : 1.8,
+                  color: color,
+                },
+              };
+            });
             window.Plotly.newPlot(
               globalTarget,
               traces,
@@ -943,21 +967,42 @@
           } else {
             const labels = (holdings.series || []).map((row) => row.name || row.symbol || "");
             const excess = (holdings.series || []).map((row) => Number(row.excess_pct || 0));
+            const absolute = (holdings.series || []).map((row) => Number(row.change_pct || 0));
             window.Plotly.newPlot(
               holdingsTarget,
               [
                 {
                   x: excess,
                   y: labels,
-                  type: "bar",
-                  orientation: "h",
-                  marker: { color: excess.map((v) => (v >= 0 ? "#1faa6f" : "#ea5455")) },
+                  type: "scatter",
+                  mode: "markers",
+                  marker: { size: 11, color: excess.map((v) => (v >= 0 ? "#1faa6f" : "#ea5455")) },
+                  name: "Excess vs Benchmark",
+                  hovertemplate: "%{y}<br>Excess %{x:.2f}%<extra></extra>",
                 },
+                {
+                  x: absolute,
+                  y: labels,
+                  type: "scatter",
+                  mode: "markers",
+                  marker: { size: 7, color: "#607086" },
+                  name: "Absolute Move",
+                  hovertemplate: "%{y}<br>Absolute %{x:.2f}%<extra></extra>",
+                },
+                {
+                  x: labels.map(() => 0),
+                  y: labels,
+                  type: "scatter",
+                  mode: "markers",
+                  marker: { size: 1, opacity: 0 },
+                  showlegend: false,
+                  hoverinfo: "skip",
+                }
               ],
               _plotLayout({
-                xaxis: { title: "Excess Return (%)" },
+                xaxis: { title: "Return (%)", zeroline: true, zerolinecolor: "#607086" },
                 yaxis: { automargin: true },
-                margin: { l: 140, r: 20, t: 24, b: 44 },
+                margin: { l: 160, r: 20, t: 24, b: 44 },
               }),
               _plotConfig()
             );
@@ -970,6 +1015,7 @@
             const xVals = (sector.series || []).map((row) => Number(row.x_exposure || 0));
             const yVals = (sector.series || []).map((row) => Number(row.y_change_pct || 0));
             const labels = (sector.series || []).map((row) => row.name || row.sector_key || "");
+            const bubble = (sector.series || []).map((row) => Number(row.bubble_size || 12));
             window.Plotly.newPlot(
               sectorTarget,
               [
@@ -981,15 +1027,16 @@
                   type: "scatter",
                   textposition: "top center",
                   marker: {
-                    size: 12,
+                    size: bubble,
                     color: yVals.map((v) => (v >= 0 ? "#1faa6f" : "#ea5455")),
+                    line: { width: 1, color: "#506781" }
                   },
                   hovertemplate: "%{text}<br>Exposure %{x:.2f}%<br>Move %{y:.2f}%<extra></extra>",
                 },
               ],
               _plotLayout({
-                xaxis: { title: "Exposure (%)", zeroline: true },
-                yaxis: { title: "Move (%)", zeroline: true },
+                xaxis: { title: "Exposure (%)", zeroline: true, zerolinecolor: "#607086" },
+                yaxis: { title: "Move (%)", zeroline: true, zerolinecolor: "#607086" },
                 showlegend: false,
               }),
               _plotConfig()
@@ -1001,6 +1048,20 @@
             renderUnavailable(eventTarget, eventSpec, "Event-linked trend unavailable.");
           } else {
             const row = (eventSpec.series || [])[0] || {};
+            const shapes = [];
+            (eventSpec.annotations || []).forEach((ann) => {
+              if (ann.label === "event_window_start") {
+                shapes.push({
+                  type: "line",
+                  x0: ann.x,
+                  y0: 0,
+                  x1: ann.x,
+                  y1: 1,
+                  yref: "paper",
+                  line: { color: "#6c7f99", dash: "dot", width: 1.2 },
+                });
+              }
+            });
             window.Plotly.newPlot(
               eventTarget,
               [
@@ -1017,6 +1078,135 @@
                 xaxis: { title: "Period" },
                 yaxis: { title: "Price", separatethousands: true },
                 hovermode: "x unified",
+                shapes: shapes,
+              }),
+              _plotConfig()
+            );
+          }
+
+          const breadth = charts.breadth_leadership_panel;
+          if (!breadth || !breadth.available) {
+            renderUnavailable(breadthTarget, breadth, "Breadth & leadership panel unavailable.");
+          } else {
+            const labels = (breadth.series || []).map((row) => row.name || "");
+            const values = (breadth.series || []).map((row) => Number(row.value || 0));
+            window.Plotly.newPlot(
+              breadthTarget,
+              [
+                {
+                  x: values,
+                  y: labels,
+                  type: "bar",
+                  orientation: "h",
+                  marker: { color: values.map((v) => (v >= 0 ? "#1faa6f" : "#ea5455")) },
+                },
+              ],
+              _plotLayout({
+                xaxis: { title: "Signal", zeroline: true, zerolinecolor: "#607086" },
+                yaxis: { automargin: true },
+                margin: { l: 140, r: 20, t: 24, b: 44 },
+              }),
+              _plotConfig()
+            );
+          }
+
+          const ratesMicro = charts.rates_curve_micro_panel;
+          if (!ratesMicro || !ratesMicro.available) {
+            renderUnavailable(ratesMicroTarget, ratesMicro, "Rates micro panel unavailable.");
+          } else {
+            const labels = (ratesMicro.series || []).map((row) => row.name || "");
+            const impulses = (ratesMicro.series || []).map((row) => Number(row.impulse || 0));
+            window.Plotly.newPlot(
+              ratesMicroTarget,
+              [
+                {
+                  x: labels,
+                  y: impulses,
+                  type: "bar",
+                  marker: {
+                    color: impulses.map((v) => (v >= 0 ? "#1faa6f" : "#ea5455")),
+                  },
+                  hovertemplate: "%{x}<br>Impulse %{y:.2f}bp<extra></extra>",
+                },
+              ],
+              _plotLayout({
+                xaxis: { automargin: true },
+                yaxis: { title: "Impulse (bp)", zeroline: true, zerolinecolor: "#607086" },
+                showlegend: false,
+                margin: { l: 52, r: 16, t: 24, b: 52 },
+              }),
+              _plotConfig()
+            );
+          }
+
+          const volatility = charts.volatility_regime_card;
+          if (!volatility || !volatility.available) {
+            renderUnavailable(volatilityTarget, volatility, "Volatility regime card unavailable.");
+          } else {
+            const rows = volatility.series || [];
+            const names = rows.map((row) => row.name || "");
+            const vals = rows.map((row) => Number(row.value || 0));
+            window.Plotly.newPlot(
+              volatilityTarget,
+              [
+                {
+                  x: names,
+                  y: vals,
+                  type: "bar",
+                  marker: { color: ["#4c78a8", "#f59f00"] },
+                },
+              ],
+              _plotLayout({
+                yaxis: { title: "Value", zeroline: true, zerolinecolor: "#607086" },
+                margin: { l: 52, r: 16, t: 24, b: 52 },
+              }),
+              _plotConfig()
+            );
+          }
+
+          const concentration = charts.portfolio_concentration_risk_card;
+          if (!concentration || !concentration.available) {
+            renderUnavailable(concentrationTarget, concentration, "Portfolio concentration card unavailable.");
+          } else {
+            const labels = (concentration.series || []).map((row) => row.name || "");
+            const values = (concentration.series || []).map((row) => Number(row.value || 0));
+            window.Plotly.newPlot(
+              concentrationTarget,
+              [
+                {
+                  x: labels,
+                  y: values,
+                  type: "bar",
+                  marker: { color: ["#4c78a8", "#ea5455", "#607086"] },
+                },
+              ],
+              _plotLayout({
+                yaxis: { title: "Value", zeroline: true, zerolinecolor: "#607086" },
+                margin: { l: 52, r: 16, t: 24, b: 62 },
+              }),
+              _plotConfig()
+            );
+          }
+
+          const earnings = charts.earnings_relevance_strip;
+          if (!earnings || !earnings.available) {
+            renderUnavailable(earningsTarget, earnings, "Earnings relevance strip unavailable.");
+          } else {
+            const labels = (earnings.series || []).map((row) => row.name || "");
+            const values = (earnings.series || []).map((row) => Number(row.value || 0));
+            window.Plotly.newPlot(
+              earningsTarget,
+              [
+                {
+                  x: labels,
+                  y: values,
+                  type: "bar",
+                  marker: { color: "#4c78a8" },
+                },
+              ],
+              _plotLayout({
+                yaxis: { title: "Count", rangemode: "tozero" },
+                margin: { l: 52, r: 16, t: 24, b: 62 },
               }),
               _plotConfig()
             );

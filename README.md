@@ -249,19 +249,29 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 **Deterministic Morning Visuals Engine (Phase 6.4)**
 - Added deterministic morning chart subsystem and contract:
   - `chart_key`, `variant`, `available`, `priority`, `reason_if_hidden`, `series`, `annotations`, `meta`, `email_dimensions`
-- Added rule-based regime tags + chart promotion policy (`hero`, `support`, optional portfolio/event charts)
+- Added rule-based regime tags + chart promotion policy (`hero`, `support`, optional portfolio/event, plus always-on microcards when available)
 - Replaced bar-first core cards with deterministic specs:
   - `global_relative_performance` (rebased multi-line leadership panel)
   - `cross_asset_impulse_strip` (centered impulse strip)
   - `holdings_excess_performance` (ranked excess-move panel)
   - `sector_exposure_quadrant` (exposure vs move scatter)
   - `event_linked_annotated_trend` (annotated trend view)
+- Added expanded finance-style chart families:
+  - `breadth_leadership_panel`
+  - `rates_curve_micro_panel`
+  - `volatility_regime_card`
+  - `portfolio_concentration_risk_card`
+  - `earnings_relevance_strip`
 - `MorningBriefing` now carries:
   - `morning_chart_bundle`
   - `morning_chart_selection`
 - New chart preview surfaces:
   - `GET /ui/briefing/morning/charts?profile=...`
   - `GET /api/v1/profile/{profile}/briefing/morning/charts`
+- Outlook-focused email shell was tightened to a denser desk-note style:
+  - compact metadata strip (timestamp, profile, deterministic/LLM shadow state, confidence)
+  - reduced radius / tighter rhythm / higher data-ink ratio modules
+  - stable inline-image module styling for CID assets across desktop clients
 - LLM boundary tightened: renderer receives deterministic chart summaries/tags for prose only and cannot control chart design decisions
 
 ### Intelligence pipeline

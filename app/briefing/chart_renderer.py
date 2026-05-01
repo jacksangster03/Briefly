@@ -23,17 +23,17 @@ import matplotlib.pyplot as plt
 
 logger = get_logger("chart_renderer")
 
-POSITIVE = "#0F9D58"
-NEGATIVE = "#D93025"
-NEUTRAL = "#335C81"
-ACCENT = "#1B4965"
-BG = "#F7F9FC"
-GRID = "#D8E2ED"
-TEXT = "#102A43"
+POSITIVE = "#1C8C5E"
+NEGATIVE = "#C53A32"
+NEUTRAL = "#4A607A"
+ACCENT = "#274C77"
+BG = "#F5F7FA"
+GRID = "#D3DAE4"
+TEXT = "#13273F"
 
 
 class ChartRenderer:
-    """Render simple static PNG chart cards."""
+    """Render deterministic static PNG chart cards."""
 
     def render_from_spec(self, spec: dict) -> ChartAsset | None:
         key = str(spec.get("chart_key") or "").strip().lower()
@@ -49,6 +49,16 @@ class ChartRenderer:
             return self.render_sector_quadrant_from_spec(spec)
         if key == "event_linked_annotated_trend":
             return self.render_event_linked_from_spec(spec)
+        if key == "breadth_leadership_panel":
+            return self.render_breadth_leadership_from_spec(spec)
+        if key == "rates_curve_micro_panel":
+            return self.render_rates_curve_micro_from_spec(spec)
+        if key == "volatility_regime_card":
+            return self.render_volatility_regime_from_spec(spec)
+        if key == "portfolio_concentration_risk_card":
+            return self.render_concentration_risk_from_spec(spec)
+        if key == "earnings_relevance_strip":
+            return self.render_earnings_relevance_from_spec(spec)
         return None
 
     def render_market_snapshot(self, quotes: list[QuoteData]) -> ChartAsset | None:
@@ -531,6 +541,205 @@ class ChartRenderer:
             title=str(spec.get("title") or f"{label} Event-Linked Trend"),
             caption=str(spec.get("caption") or ""),
             filename="event-linked-annotated-trend.png",
+        )
+
+    def render_breadth_leadership_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        labels = [str(row.get("name") or "") for row in rows]
+        values = [float(row.get("value") or 0.0) for row in rows]
+        colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
+        fig, ax = plt.subplots(figsize=(8.6, 4.4), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        y_pos = list(range(len(labels)))
+        ax.axvline(0, color=GRID, linewidth=1.1)
+        ax.barh(y_pos, values, color=colors, alpha=0.84)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, fontsize=9, color=TEXT)
+        ax.invert_yaxis()
+        ax.set_title(str(spec.get("title") or "Breadth & Leadership"), loc="left", fontsize=15, weight="bold", color=TEXT)
+        ax.set_xlabel("Signal", color=TEXT)
+        ax.grid(axis="x", color=GRID, linewidth=0.8, alpha=0.7)
+        ax.tick_params(axis="x", colors=TEXT)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        for idx, value in enumerate(values):
+            ax.text(
+                value + (0.08 if value >= 0 else -0.08),
+                idx,
+                f"{value:+.2f}",
+                va="center",
+                ha="left" if value >= 0 else "right",
+                fontsize=8.8,
+                color=TEXT,
+                weight="bold",
+            )
+        fig.tight_layout()
+        return self._to_asset(
+            fig,
+            key="breadth_leadership_panel",
+            title=str(spec.get("title") or "Breadth & Leadership"),
+            caption=str(spec.get("caption") or ""),
+            filename="breadth-leadership.png",
+        )
+
+    def render_rates_curve_micro_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        labels = [str(row.get("name") or "") for row in rows]
+        levels = [row.get("level") for row in rows]
+        impulses = [row.get("impulse") for row in rows]
+        colors = [POSITIVE if (float(value or 0.0) >= 0) else NEGATIVE for value in impulses]
+        fig, ax = plt.subplots(figsize=(8.0, 2.9), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        ax.axis("off")
+        ax.set_title(str(spec.get("title") or "Rates & Curve"), loc="left", fontsize=14, weight="bold", color=TEXT, pad=8)
+        x0 = 0.03
+        for idx, label in enumerate(labels):
+            xpos = x0 + idx * 0.31
+            lvl = levels[idx]
+            imp = impulses[idx]
+            level_text = "n/a" if lvl is None else f"{float(lvl):.3f}%"
+            impulse_text = "n/a" if imp is None else f"{float(imp):+.2f}bp"
+            color = colors[idx]
+            ax.text(xpos, 0.62, label, transform=ax.transAxes, fontsize=9.2, color=TEXT, weight="bold")
+            ax.text(xpos, 0.40, level_text, transform=ax.transAxes, fontsize=11.2, color=TEXT)
+            ax.text(
+                xpos,
+                0.19,
+                impulse_text,
+                transform=ax.transAxes,
+                fontsize=9.4,
+                color=color,
+                bbox={"facecolor": "#EEF2F7", "edgecolor": "none", "pad": 1.2},
+            )
+        return self._to_asset(
+            fig,
+            key="rates_curve_micro_panel",
+            title=str(spec.get("title") or "Rates & Curve"),
+            caption=str(spec.get("caption") or ""),
+            filename="rates-curve-micro.png",
+        )
+
+    def render_volatility_regime_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        meta = dict(spec.get("meta") or {})
+        level = None
+        delta = None
+        for row in rows:
+            if str(row.get("name") or "").lower().startswith("vix level"):
+                level = row.get("value")
+            if str(row.get("name") or "").lower().startswith("vix delta"):
+                delta = row.get("value")
+        regime = str(meta.get("regime") or "unavailable").lower()
+        regime_color = {
+            "calm": POSITIVE,
+            "normal": ACCENT,
+            "elevated": "#D18C00",
+            "stress": NEGATIVE,
+        }.get(regime, NEUTRAL)
+        fig, ax = plt.subplots(figsize=(8.0, 2.9), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        ax.axis("off")
+        ax.set_title(str(spec.get("title") or "Volatility Regime"), loc="left", fontsize=14, weight="bold", color=TEXT, pad=8)
+        level_text = "n/a" if level is None else f"{float(level):.2f}"
+        delta_text = "n/a" if delta is None else f"{float(delta):+.2f}%"
+        ax.text(0.04, 0.52, f"VIX {level_text}", transform=ax.transAxes, fontsize=16, color=TEXT, weight="bold")
+        ax.text(0.04, 0.28, f"Δ {delta_text}", transform=ax.transAxes, fontsize=10, color=TEXT)
+        ax.text(
+            0.60,
+            0.45,
+            regime.upper(),
+            transform=ax.transAxes,
+            fontsize=11,
+            color=regime_color,
+            weight="bold",
+            bbox={"facecolor": "#EEF2F7", "edgecolor": "none", "pad": 2.0},
+        )
+        return self._to_asset(
+            fig,
+            key="volatility_regime_card",
+            title=str(spec.get("title") or "Volatility Regime"),
+            caption=str(spec.get("caption") or ""),
+            filename="volatility-regime.png",
+        )
+
+    def render_concentration_risk_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        meta = dict(spec.get("meta") or {})
+        if not rows:
+            return None
+        values = {str(row.get("name") or ""): row.get("value") for row in rows}
+        top5 = float(values.get("Top 5 Weight") or 0.0)
+        largest = float(values.get("Largest Position") or 0.0)
+        holdings = int(values.get("Active Holdings") or 0)
+        state = str(meta.get("risk_state") or "moderate")
+        state_color = {"balanced": POSITIVE, "moderate": ACCENT, "concentrated": NEGATIVE}.get(state, NEUTRAL)
+        fig, ax = plt.subplots(figsize=(8.0, 2.9), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        ax.axis("off")
+        ax.set_title(str(spec.get("title") or "Portfolio Concentration"), loc="left", fontsize=14, weight="bold", color=TEXT, pad=8)
+        ax.text(0.04, 0.58, f"Top 5: {top5:.1f}%", transform=ax.transAxes, fontsize=13, color=TEXT, weight="bold")
+        ax.text(0.04, 0.34, f"Largest: {largest:.1f}%", transform=ax.transAxes, fontsize=10.2, color=TEXT)
+        ax.text(0.04, 0.15, f"Holdings: {holdings}", transform=ax.transAxes, fontsize=10.2, color=TEXT)
+        ax.text(
+            0.64,
+            0.42,
+            state.upper(),
+            transform=ax.transAxes,
+            fontsize=11,
+            color=state_color,
+            weight="bold",
+            bbox={"facecolor": "#EEF2F7", "edgecolor": "none", "pad": 2.0},
+        )
+        return self._to_asset(
+            fig,
+            key="portfolio_concentration_risk_card",
+            title=str(spec.get("title") or "Portfolio Concentration"),
+            caption=str(spec.get("caption") or ""),
+            filename="portfolio-concentration.png",
+        )
+
+    def render_earnings_relevance_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        labels = [str(row.get("name") or "") for row in rows]
+        values = [float(row.get("value") or 0.0) for row in rows]
+        fig, ax = plt.subplots(figsize=(8.0, 2.9), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        bars = ax.bar(labels, values, color=ACCENT, alpha=0.85)
+        ax.set_title(str(spec.get("title") or "Earnings Relevance"), loc="left", fontsize=14, weight="bold", color=TEXT)
+        ax.grid(axis="y", color=GRID, linewidth=0.8, alpha=0.75)
+        ax.tick_params(axis="x", labelrotation=0, colors=TEXT, labelsize=8.8)
+        ax.tick_params(axis="y", colors=TEXT, labelsize=8.8)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        for bar, value in zip(bars, values):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                value + 0.08,
+                f"{value:.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=8.6,
+                color=TEXT,
+                weight="bold",
+            )
+        fig.tight_layout()
+        return self._to_asset(
+            fig,
+            key="earnings_relevance_strip",
+            title=str(spec.get("title") or "Earnings Relevance"),
+            caption=str(spec.get("caption") or ""),
+            filename="earnings-relevance-strip.png",
         )
 
     @staticmethod

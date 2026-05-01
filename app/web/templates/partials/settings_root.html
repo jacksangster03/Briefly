@@ -4053,6 +4053,26 @@
         <p class="chart-title">Event-Linked Trend</p>
         <div id="morning-event-chart" style="min-height:280px;"></div>
       </div>
+      <div class="chart-card wide">
+        <p class="chart-title">Breadth & Leadership</p>
+        <div id="morning-breadth-chart" style="min-height:280px;"></div>
+      </div>
+      <div class="chart-card">
+        <p class="chart-title">Rates & Curve</p>
+        <div id="morning-rates-micro-chart" style="min-height:220px;"></div>
+      </div>
+      <div class="chart-card">
+        <p class="chart-title">Volatility Regime</p>
+        <div id="morning-volatility-chart" style="min-height:220px;"></div>
+      </div>
+      <div class="chart-card">
+        <p class="chart-title">Portfolio Concentration</p>
+        <div id="morning-concentration-chart" style="min-height:220px;"></div>
+      </div>
+      <div class="chart-card">
+        <p class="chart-title">Earnings Relevance</p>
+        <div id="morning-earnings-chart" style="min-height:220px;"></div>
+      </div>
     </div>
     <script id="morning-chart-data" type="application/json">{{ (morning_chart_preview.bundle if morning_chart_preview.bundle is defined else {}) | tojson }}</script>
   </section>

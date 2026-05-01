@@ -47,4 +47,4 @@ class MorningChartBuilder:
             if legacy_macro:
                 rendered.append(legacy_macro)
 
-        return rendered[:5]
+        return rendered[:7]
