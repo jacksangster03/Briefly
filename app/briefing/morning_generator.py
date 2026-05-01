@@ -20,12 +20,17 @@ from app.briefing.theme_builder import build_top_themes
 from app.logger import get_logger
 from app.personalization.delivery_rules import load_alert_rules
 from app.personalization.user_profile import UserProfile
+from app.processing.article_quality import (
+    classify_article_type,
+    classify_source_quality,
+    is_low_quality_for_section,
+)
 from app.processing.pipeline import is_actionable_event, process_event_stream
 from app.schemas.briefings import MarketSetup, MorningBriefing, session_mode_for
 from app.schemas.events import EarningsEvent, NormalisedEvent, SectorSnapshot
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
-from app.universe.ticker_metadata import company_name_for_ticker
+from app.universe.ticker_metadata import TICKER_DISPLAY_NAMES, company_name_for_ticker
 
 logger = get_logger("morning_gen")
 
@@ -551,19 +556,57 @@ class MorningBriefingGenerator:
         return any(term in text for term in MACRO_BLEED_TERMS)
 
     def _fetch_earnings(self):
-        """Fetch upcoming earnings and backfill missing EPS data for relevant symbols."""
+        """Fetch upcoming earnings, enrich with relevance/sector/cap, and filter.
+
+        Keeps only events where the symbol is portfolio/watchlist relevant OR
+        sits in the curated large-cap universe. Microcaps and unknowns are
+        dropped before assembly so the briefing never carries noise.
+        """
         if not self.news_svc.finnhub or not self.news_svc.finnhub.is_configured():
             return []
-        events = self.news_svc.finnhub.get_earnings_calendar(days_ahead=7)[: self.rules.max_earnings]
-        events = [_compute_earnings_surprise(event) for event in events]
 
-        watchlist = set(self.profile.all_watchlist_tickers) | set(self.profile.portfolio_symbols)
-        relevant = [event for event in events if str(event.symbol).upper() in watchlist]
-        missing = [event for event in relevant if event.eps_estimate is None or event.eps_actual is None]
+        # Pull a wider window than max_earnings since filtering will trim it.
+        raw = self.news_svc.finnhub.get_earnings_calendar(days_ahead=7)
+
+        portfolio = {h.symbol.upper() for h in self.profile.portfolio_holdings}
+        watchlist = {s.upper() for s in self.profile.all_watchlist_tickers}
+        large_cap_universe = set(TICKER_DISPLAY_NAMES.keys())
+
+        ticker_to_sector: dict[str, str] = {}
+        for sector_def in self.universe.sectors:
+            for ticker in getattr(sector_def, "key_names", []) or []:
+                ticker_to_sector.setdefault(ticker.upper(), sector_def.display_name)
+
+        enriched: list[EarningsEvent] = []
+        for event in raw:
+            sym = (event.symbol or "").upper()
+            if not sym:
+                continue
+            if sym in portfolio:
+                event.is_relevant = True
+                event.relevance_tag = "portfolio"
+            elif sym in watchlist:
+                event.is_relevant = True
+                event.relevance_tag = "watchlist"
+            if not event.company_name:
+                event.company_name = company_name_for_ticker(sym)
+            event.sector = ticker_to_sector.get(sym, event.sector or "")
+            if sym in large_cap_universe:
+                event.market_cap_bucket = "large"
+            if event.is_relevant or event.market_cap_bucket == "large":
+                enriched.append(event)
+
+        enriched = enriched[: self.rules.max_earnings]
+        enriched = [_compute_earnings_surprise(event) for event in enriched]
+
+        missing = [
+            event for event in enriched
+            if event.is_relevant and (event.eps_estimate is None or event.eps_actual is None)
+        ]
         if missing:
             enrich_earnings_from_yfinance(missing)
 
-        return events
+        return enriched
 
     def _build_earnings_relevance(self, earnings: list) -> dict[str, str]:
         portfolio = {holding.symbol.upper() for holding in self.profile.portfolio_holdings}
@@ -796,6 +839,24 @@ class MorningBriefingGenerator:
         is_weekend = session_mode in {"saturday", "sunday"}
         has_catalyst = self._is_material_portfolio_catalyst(event, text_lower)
         has_readthrough = self._has_portfolio_readthrough_signal(event, text_lower)
+
+        portfolio_symbols = {s.upper() for s in self.profile.portfolio_symbols}
+        watchlist_symbols = {s.upper() for s in self.profile.all_watchlist_tickers}
+        relevant_symbols = portfolio_symbols | watchlist_symbols
+        has_relevant_ticker = any(t.upper() in relevant_symbols for t in event.tickers)
+
+        article_type = classify_article_type(event.title, event.summary, event.url)
+        source_quality = classify_source_quality(
+            event.source,
+            str(event.raw_data.get("source_name", "")),
+            event.url,
+        )
+        if (
+            is_low_quality_for_section(article_type, source_quality)
+            and not has_relevant_ticker
+            and not has_catalyst
+        ):
+            return False
 
         # Hard blocks for obvious low-value framing unless there is a hard catalyst.
         if any(pattern in text_lower for pattern in TRUST_HARD_BLOCK_PATTERNS) and not has_catalyst:

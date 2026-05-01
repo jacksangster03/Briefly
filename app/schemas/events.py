@@ -58,6 +58,10 @@ class EarningsEvent(BaseModel):
 
     symbol: str
     company_name: str = ""
+    sector: str = ""
+    market_cap_bucket: str = ""   # large | mid | small | ""
+    is_relevant: bool = False
+    relevance_tag: str = ""       # portfolio | watchlist | ""
     report_date: str = ""   # YYYY-MM-DD
     fiscal_quarter: str = ""
     eps_estimate: float | None = None

@@ -470,29 +470,65 @@ class TelegramFormatter:
         if not earnings:
             return ""
         relevance = relevance or {}
-        lines = [f"<b>{SECTION_HEADERS['earnings']}</b>"]
         grouped = self._group_earnings(earnings[:MAX_EARNINGS_DISPLAY])
-        total = sum(len(items) for items in grouped.values())
-        relevant = sum(1 for item in earnings[:MAX_EARNINGS_DISPLAY] if str(item.symbol or "").upper() in relevance)
-        lines.append(f"Upcoming: {total} earnings ({relevant} portfolio/watchlist relevant).")
+        body: list[str] = []
         for label in ("Today", "Tomorrow", "This Week"):
             bucket = grouped.get(label, [])
             if not bucket:
                 continue
-            lines.append(f"  <i>{label}</i>")
+            body.append(f"  <i>{label}</i>")
             for e in bucket:
-                time_label = {"bmo": "pre-market", "amc": "post-market", "during": "during-market"}.get(e.time, "")
-                est = f" (est. ${e.eps_estimate:.2f})" if e.eps_estimate else ""
-                base_name = (e.company_name or "").strip() or company_name_for_ticker(e.symbol)
-                display = f"{base_name} ({e.symbol})" if base_name.upper() != e.symbol.upper() else format_company_ticker(e.symbol)
-                tag = ""
-                normalized_symbol = str(e.symbol or "").upper()
-                if relevance.get(normalized_symbol) == "portfolio":
-                    tag = " [portfolio]"
-                elif relevance.get(normalized_symbol) == "watchlist":
-                    tag = " [watchlist]"
-                lines.append(f"    {display} — {e.fiscal_quarter} {time_label}{est}{tag}".rstrip())
-        return "\n".join(lines)
+                body.append(f"    {self._format_earnings_line(e, relevance)}")
+        if not body:
+            return ""
+        return "\n".join([f"<b>{SECTION_HEADERS['earnings']}</b>", *body])
+
+    def _format_earnings_line(self, e: EarningsEvent, relevance: dict[str, str]) -> str:
+        """Format: (TICKER) Name, Sector — Qx YYYY (dd/mm/yyyy, time-of-day) [tag]."""
+        sym = str(e.symbol or "").upper()
+        name = (e.company_name or "").strip() or company_name_for_ticker(sym)
+        if e.sector:
+            head = f"({sym}) {name}, {e.sector}"
+        else:
+            head = f"({sym}) {name}"
+
+        quarter = (e.fiscal_quarter or "").strip()
+
+        date_str = ""
+        if e.report_date:
+            try:
+                dt = datetime.strptime(e.report_date, "%Y-%m-%d")
+                date_str = dt.strftime("%d/%m/%Y")
+            except (TypeError, ValueError):
+                date_str = ""
+
+        time_label = {
+            "bmo": "pre-market",
+            "amc": "post-market",
+            "during": "during-market",
+        }.get(e.time, "")
+
+        when = ""
+        if date_str and time_label:
+            when = f"({date_str}, {time_label})"
+        elif date_str:
+            when = f"({date_str})"
+
+        est = f", est. ${e.eps_estimate:.2f}" if e.eps_estimate else ""
+
+        tag_source = relevance.get(sym) or e.relevance_tag
+        tag = ""
+        if tag_source == "portfolio":
+            tag = " [portfolio]"
+        elif tag_source == "watchlist":
+            tag = " [watchlist]"
+
+        parts = [head]
+        if quarter:
+            parts.append(f" — {quarter}")
+        if when:
+            parts.append(f" {when}")
+        return f"{''.join(parts)}{est}{tag}".rstrip()
 
     def _format_watchlist(
         self,

@@ -189,20 +189,76 @@ class TestTelegramFormatter:
         assert "oil-led" in text or "geopolitics-driven" in text
 
     def test_earnings_section_uses_company_name_and_grouping(self):
+        from datetime import date, timedelta
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
         briefing = MorningBriefing(
             earnings_calendar=[
-                EarningsEvent(symbol="AAPL", company_name="Apple Inc.", report_date="2026-04-20", fiscal_quarter="Q2 2026", time="amc"),
-                EarningsEvent(symbol="MSFT", company_name="Microsoft Corp.", report_date="2026-04-21", fiscal_quarter="Q2 2026", time="amc"),
+                EarningsEvent(
+                    symbol="AAPL",
+                    company_name="Apple Inc.",
+                    sector="Technology",
+                    report_date=today.isoformat(),
+                    fiscal_quarter="Q2 2026",
+                    time="amc",
+                ),
+                EarningsEvent(
+                    symbol="MSFT",
+                    company_name="Microsoft Corp.",
+                    sector="Technology",
+                    report_date=tomorrow.isoformat(),
+                    fiscal_quarter="Q2 2026",
+                    time="amc",
+                ),
             ],
             earnings_relevance={"AAPL": "portfolio"},
         )
         messages = self.formatter.format_morning_briefing(briefing)
         full = "\n".join(messages)
-        assert "Upcoming: 2 earnings" in full
         assert "Today" in full
         assert "Tomorrow" in full
-        assert "Apple Inc. (AAPL)" in full
+        assert "(AAPL) Apple Inc., Technology" in full
+        assert "Q2 2026" in full
+        assert "post-market" in full
         assert "[portfolio]" in full
+        assert "Upcoming:" not in full
+
+    def test_earnings_line_omits_sector_when_unknown(self):
+        e = EarningsEvent(
+            symbol="ZZZ",
+            company_name="Zeta Corp",
+            report_date="2026-05-01",
+            fiscal_quarter="Q1 2026",
+            time="bmo",
+        )
+        line = self.formatter._format_earnings_line(e, {})
+        assert line.startswith("(ZZZ) Zeta Corp")
+        assert "," not in line.split(" — ")[0]
+        assert "Q1 2026" in line
+        assert "01/05/2026" in line
+        assert "pre-market" in line
+
+    def test_earnings_line_includes_estimate_when_provided(self):
+        e = EarningsEvent(
+            symbol="AAPL",
+            company_name="Apple Inc.",
+            sector="Technology",
+            report_date="2026-05-01",
+            fiscal_quarter="Q2 2026",
+            time="amc",
+            eps_estimate=2.34,
+        )
+        line = self.formatter._format_earnings_line(e, {"AAPL": "portfolio"})
+        assert "est. $2.34" in line
+        assert "[portfolio]" in line
+
+    def test_earnings_section_is_empty_when_no_dated_events(self):
+        # Events without report_date should still render under "This Week" but
+        # if the calendar is empty, the section should be omitted entirely.
+        briefing = MorningBriefing(earnings_calendar=[])
+        messages = self.formatter.format_morning_briefing(briefing)
+        full = "\n".join(messages)
+        assert "EARNINGS CALENDAR" not in full
 
     def test_morning_includes_regional_and_portfolio_impact_sections(self):
         briefing = MorningBriefing(
