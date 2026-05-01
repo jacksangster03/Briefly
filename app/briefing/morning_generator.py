@@ -22,7 +22,7 @@ from app.personalization.delivery_rules import load_alert_rules
 from app.personalization.user_profile import UserProfile
 from app.processing.pipeline import is_actionable_event, process_event_stream
 from app.schemas.briefings import MarketSetup, MorningBriefing, session_mode_for
-from app.schemas.events import NormalisedEvent, SectorSnapshot
+from app.schemas.events import EarningsEvent, NormalisedEvent, SectorSnapshot
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
 from app.universe.ticker_metadata import company_name_for_ticker
@@ -221,6 +221,66 @@ WEEKEND_LOW_TRUST_SOURCES = (
     "zacks",
     "thestreet",
 )
+
+
+def _compute_earnings_surprise(event: EarningsEvent) -> EarningsEvent:
+    """Compute surprise_percent when estimate and actual are both available."""
+    if (
+        event.surprise_percent is None
+        and event.eps_estimate is not None
+        and event.eps_actual is not None
+        and event.eps_estimate != 0.0
+    ):
+        surprise = (event.eps_actual - event.eps_estimate) / abs(event.eps_estimate) * 100
+        event.surprise_percent = round(surprise, 2)
+    return event
+
+
+def enrich_earnings_from_yfinance(events: list[EarningsEvent]) -> list[EarningsEvent]:
+    """Backfill missing earnings estimates/actuals from yfinance where possible."""
+    try:
+        import yfinance as yf
+    except ImportError:
+        return events
+
+    needs_enrich = [event for event in events if event.eps_estimate is None or event.eps_actual is None]
+    symbols = list({event.symbol for event in needs_enrich if event.symbol})
+    if not symbols:
+        return events
+
+    yf_data: dict[str, object] = {}
+    for symbol in symbols:
+        try:
+            ticker = yf.Ticker(symbol)
+            df = ticker.earnings_dates
+            yf_data[symbol] = df if df is not None and not df.empty else None
+        except Exception:
+            yf_data[symbol] = None
+
+    for event in events:
+        df = yf_data.get(event.symbol)
+        if df is None:
+            _compute_earnings_surprise(event)
+            continue
+        try:
+            for date_idx, row in df.iterrows():
+                date_str = str(date_idx)[:10]
+                if date_str != event.report_date:
+                    continue
+                if event.eps_estimate is None:
+                    estimate = row["EPS Estimate"]
+                    if estimate is not None and str(estimate) != "nan":
+                        event.eps_estimate = float(estimate)
+                if event.eps_actual is None:
+                    actual = row["Reported EPS"]
+                    if actual is not None and str(actual) != "nan":
+                        event.eps_actual = float(actual)
+                break
+        except Exception:
+            pass
+        _compute_earnings_surprise(event)
+
+    return events
 
 
 class MorningBriefingGenerator:
@@ -482,10 +542,19 @@ class MorningBriefingGenerator:
         return any(term in text for term in MACRO_BLEED_TERMS)
 
     def _fetch_earnings(self):
-        """Fetch upcoming earnings calendar."""
+        """Fetch upcoming earnings and backfill missing EPS data for relevant symbols."""
         if not self.news_svc.finnhub or not self.news_svc.finnhub.is_configured():
             return []
-        return self.news_svc.finnhub.get_earnings_calendar(days_ahead=7)[: self.rules.max_earnings]
+        events = self.news_svc.finnhub.get_earnings_calendar(days_ahead=7)[: self.rules.max_earnings]
+        events = [_compute_earnings_surprise(event) for event in events]
+
+        watchlist = set(self.profile.all_watchlist_tickers) | set(self.profile.portfolio_symbols)
+        relevant = [event for event in events if str(event.symbol).upper() in watchlist]
+        missing = [event for event in relevant if event.eps_estimate is None or event.eps_actual is None]
+        if missing:
+            enrich_earnings_from_yfinance(missing)
+
+        return events
 
     def _build_earnings_relevance(self, earnings: list) -> dict[str, str]:
         portfolio = {holding.symbol.upper() for holding in self.profile.portfolio_holdings}
