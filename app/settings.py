@@ -136,6 +136,14 @@ class Settings(BaseSettings):
         return bool(self.bea_api_key)
 
     @property
+    def ecb_configured(self) -> bool:
+        return bool(self.ecb_base_url)
+
+    @property
+    def eurostat_configured(self) -> bool:
+        return bool(self.eurostat_base_url)
+
+    @property
     def newsapi_configured(self) -> bool:
         return bool(self.newsapi_key)
 

@@ -1,7 +1,9 @@
-"""Macro data service: economic indicators from FRED."""
+"""Macro data service: economic indicators from FRED, ECB, and Eurostat."""
 
 from __future__ import annotations
 
+from app.data_sources.providers.ecb import ECBProvider
+from app.data_sources.providers.eurostat import EurostatProvider
 from app.data_sources.providers.fred import FREDProvider
 from app.logger import get_logger
 from app.schemas.events import MacroDataPoint
@@ -17,7 +19,7 @@ EXTENDED_SERIES = ["UNRATE", "CPIAUCSL", "FEDFUNDS"]
 
 
 class MacroDataService:
-    """Fetches macroeconomic data from FRED."""
+    """Fetches macroeconomic data from FRED, ECB, and Eurostat."""
 
     def __init__(self, settings: Settings):
         self.fred = (
@@ -27,6 +29,24 @@ class MacroDataService:
                 max_retries=settings.provider_max_retries,
             )
             if settings.fred_configured
+            else None
+        )
+        self.ecb = (
+            ECBProvider(
+                base_url=settings.ecb_base_url,
+                timeout=settings.provider_timeout,
+                max_retries=settings.provider_max_retries,
+            )
+            if settings.ecb_configured
+            else None
+        )
+        self.eurostat = (
+            EurostatProvider(
+                base_url=settings.eurostat_base_url,
+                timeout=settings.provider_timeout,
+                max_retries=settings.provider_max_retries,
+            )
+            if settings.eurostat_configured
             else None
         )
 
@@ -53,3 +73,28 @@ class MacroDataService:
             return []
 
         return self.fred.get_macro_snapshot(EXTENDED_SERIES)
+
+    def get_ecb_snapshot(self) -> list[MacroDataPoint]:
+        """Fetch ECB policy rate, EUR/USD, and HICP inflation."""
+        if not self.ecb or not self.ecb.is_configured():
+            return []
+        points = []
+        for fetcher in [
+            self.ecb.get_deposit_facility_rate,
+            self.ecb.get_eur_usd,
+            self.ecb.get_hicp_inflation,
+        ]:
+            point = fetcher()
+            if point is not None:
+                points.append(point)
+        logger.info("ECB snapshot: %d items", len(points))
+        return points
+
+    def get_eurostat_snapshot(self) -> list[MacroDataPoint]:
+        """Fetch Euro area unemployment from Eurostat."""
+        if not self.eurostat or not self.eurostat.is_configured():
+            return []
+        point = self.eurostat.get_euro_area_unemployment()
+        points = [point] if point is not None else []
+        logger.info("Eurostat snapshot: %d items", len(points))
+        return points
