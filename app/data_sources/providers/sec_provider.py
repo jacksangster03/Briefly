@@ -66,7 +66,11 @@ class SECProvider(BaseProvider):
 
         params: dict = {"q": query, "dateRange": "custom", "startdt": "", "enddt": ""}
 
-        if not date_range:
+        if date_range and ":" in date_range:
+            start, end = date_range.split(":", 1)
+            params["startdt"] = start
+            params["enddt"] = end
+        elif not date_range:
             today = datetime.now(timezone.utc).date()
             params["startdt"] = (today - timedelta(days=1)).isoformat()
             params["enddt"] = today.isoformat()
@@ -125,6 +129,24 @@ class SECProvider(BaseProvider):
 
         logger.info("Fetched %d SEC filings", len(events))
         return events
+
+    def search_insider_trades(
+        self,
+        tickers: list[str] | None = None,
+        days_back: int = 7,
+        limit: int = 50,
+    ) -> list[NormalisedEvent]:
+        """Fetch recent Form 4 insider transaction filings."""
+        today = datetime.now(timezone.utc).date()
+        start = (today - timedelta(days=days_back)).isoformat()
+        end = today.isoformat()
+        events = self.search_filings(
+            date_range=f"{start}:{end}",
+            forms=["4"],
+            tickers=tickers,
+            limit=limit,
+        )
+        return [event for event in events if event.event_type == "insider_transaction"]
 
     # -- Company filings via submissions API ----------------------------------
 
@@ -242,7 +264,7 @@ class SECProvider(BaseProvider):
     @staticmethod
     def _is_material_hit(form_type: str, description: str) -> bool:
         form = form_type.upper().strip()
-        if form in {"8-K", "8-K/A"}:
+        if form in {"8-K", "8-K/A", "4"}:
             return True
         if not description:
             return form in {"10-K", "10-Q"}

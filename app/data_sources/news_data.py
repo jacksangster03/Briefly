@@ -110,6 +110,20 @@ class NewsDataService:
         logger.info("SEC filings: %d items", len(events))
         return events
 
+    def fetch_insider_trades(
+        self,
+        tickers: list[str] | None = None,
+        days_back: int = 7,
+    ) -> list[NormalisedEvent]:
+        """Fetch Form 4 insider transactions, optionally filtered by tickers."""
+        if not self.sec or not self.sec.is_configured():
+            return []
+
+        events = self.sec.search_insider_trades(tickers=tickers, days_back=days_back)
+        insider_events = [event for event in events if event.event_type == "insider_transaction"]
+        logger.info("Insider trades (Form 4): %d items", len(insider_events))
+        return insider_events
+
     def fetch_all(self, watchlist: list[str] | None = None) -> list[NormalisedEvent]:
         """Fetch all available news, filings, and headlines."""
         all_events: list[NormalisedEvent] = []
@@ -118,6 +132,7 @@ class NewsDataService:
         if watchlist:
             all_events.extend(self.fetch_company_news(watchlist))
         all_events.extend(self.fetch_filings(tickers=watchlist))
+        all_events.extend(self.fetch_insider_trades(tickers=watchlist))
 
         logger.info("Total events from all sources: %d", len(all_events))
         return all_events
