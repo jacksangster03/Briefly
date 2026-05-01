@@ -13,6 +13,7 @@ The final_score is a weighted combination used for inclusion/ranking.
 from __future__ import annotations
 
 from app.logger import get_logger
+from app.processing.sentiment import compute_sentiment
 from app.personalization.user_profile import UserProfile
 from app.schemas.events import NormalisedEvent
 
@@ -87,6 +88,8 @@ LOW_SIGNAL_PATTERNS = (
     "some facts to note",
 )
 
+SENTIMENT_ADJUSTMENT_CAP = 0.05
+
 
 def _normalize_region_key(region: str) -> str:
     return str(region or "").strip().lower().replace(" ", "_").replace("-", "_")
@@ -135,19 +138,21 @@ def score_event(
 
     # Apply a small penalty to generic feature/listicle content.
     quality_penalty = _quality_penalty(event)
+    sentiment_adjustment = _sentiment_adjustment(event)
 
     # Composite
     final = sum(
         COMPOSITE_WEIGHTS[dim] * scores[dim]
         for dim in COMPOSITE_WEIGHTS
     )
-    final = max(0.0, final - quality_penalty)
+    final = max(0.0, min(1.0, final - quality_penalty + sentiment_adjustment))
 
     # Apply the scores back to the event
     event.importance_score = scores["event_type_weight"]
     event.personal_relevance_score = scores["personal_relevance"]
     event.novelty_score = scores["novelty"]
     event.attention_score = scores["source_credibility"]
+    event.sentiment = round(event.sentiment, 4)
     event.final_score = round(final, 4)
 
     # Build explanation
@@ -248,6 +253,17 @@ def _portfolio_relevance(event: NormalisedEvent, profile: UserProfile) -> float:
             sector_readthrough = min(0.75, 0.40 + (0.50 * concentration))
 
     return max(direct_score, sector_readthrough)
+
+
+def _sentiment_adjustment(event: NormalisedEvent) -> float:
+    text = " ".join(part for part in [event.title, event.summary] if part).strip()
+    if not text:
+        return 0.0
+    result = compute_sentiment(text)
+    event.sentiment = result.score
+    event.raw_data["sentiment_label"] = result.label
+    event.raw_data["sentiment_score"] = round(result.score, 4)
+    return max(-SENTIMENT_ADJUSTMENT_CAP, min(SENTIMENT_ADJUSTMENT_CAP, result.score * SENTIMENT_ADJUSTMENT_CAP))
 
 
 def _build_explanation(

@@ -85,6 +85,8 @@ class Settings(BaseSettings):
     breaking_storyline_cooldown_minutes: int = 45
     breaking_max_alerts_per_hour: int = 3
     breaking_followup_min_asset_move_pct: float = 0.9
+    enable_finbert: bool = False
+    enable_garch: bool = False
 
     # -- Paths ----------------------------------------------------------------
     configs_dir: str = str(PROJECT_ROOT / "configs")
