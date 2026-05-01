@@ -24,16 +24,19 @@ class TestAlpacaProvider:
     def test_get_quote_returns_quote_data(self):
         provider = self._make_provider()
 
+        mock_bar_prev = MagicMock()
+        mock_bar_prev.close = 148.0
+
         mock_bar = MagicMock()
         mock_bar.open = 149.0
         mock_bar.high = 151.0
         mock_bar.low = 148.5
         mock_bar.close = 150.45
         mock_bar.volume = 1_500_000
+        mock_bar.timestamp = datetime(2026, 5, 1, 14, 30, tzinfo=timezone.utc)
 
-        with patch.object(provider, "_fetch_prev_close", return_value=148.0):
-            with patch.object(provider, "_fetch_latest_bar", return_value=mock_bar):
-                result = provider.get_quote("AAPL")
+        with patch.object(provider, "_fetch_recent_daily_bars", return_value=[mock_bar_prev, mock_bar]):
+            result = provider.get_quote("AAPL")
 
         assert isinstance(result, QuoteData)
         assert result.symbol == "AAPL"
@@ -43,7 +46,7 @@ class TestAlpacaProvider:
 
     def test_get_quote_returns_none_on_failure(self):
         provider = self._make_provider()
-        with patch.object(provider, "_fetch_latest_bar", side_effect=Exception("API down")):
+        with patch.object(provider, "_fetch_recent_daily_bars", side_effect=Exception("API down")):
             result = provider.get_quote("AAPL")
         assert result is None
 
@@ -74,13 +77,26 @@ class TestAlpacaProvider:
         assert result[0].close == pytest.approx(150.0)
         assert result[1].source == "alpaca"
 
-    def test_get_quotes_skips_failures(self):
+    def test_get_quotes_uses_batch_call(self):
+        """get_quotes calls _get_quotes_batch, not serial get_quote."""
         provider = self._make_provider()
-        with patch.object(provider, "get_quote", side_effect=[
+        expected = [
             QuoteData(symbol="AAPL", current_price=150.0, source="alpaca"),
-            None,
             QuoteData(symbol="MSFT", current_price=300.0, source="alpaca"),
-        ]):
-            result = provider.get_quotes(["AAPL", "FAIL", "MSFT"])
-        assert len(result) == 2
-        assert {q.symbol for q in result} == {"AAPL", "MSFT"}
+        ]
+        with patch.object(provider, "_get_quotes_batch", return_value=expected) as mock_batch:
+            result = provider.get_quotes(["AAPL", "MSFT"])
+        mock_batch.assert_called_once_with(["AAPL", "MSFT"])
+        assert result == expected
+
+    def test_get_quotes_falls_back_to_serial_on_batch_failure(self):
+        """If batch fails, get_quotes falls back to serial."""
+        provider = self._make_provider()
+        with patch.object(provider, "_get_quotes_batch", side_effect=Exception("batch error")):
+            with patch.object(provider, "get_quote", side_effect=[
+                QuoteData(symbol="AAPL", current_price=150.0, source="alpaca"),
+                None,
+            ]):
+                result = provider.get_quotes(["AAPL", "FAIL"])
+        assert len(result) == 1
+        assert result[0].symbol == "AAPL"

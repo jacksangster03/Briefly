@@ -41,21 +41,27 @@ class AlpacaProvider(BaseProvider):
     def _get_client(self):
         if self._client is None:
             from alpaca.data.historical import StockHistoricalDataClient
+            # alpaca_base_url is for the trading broker client (order management).
+            # StockHistoricalDataClient uses data.alpaca.markets internally.
             self._client = StockHistoricalDataClient(self.api_key, self.api_secret)
         return self._client
 
-    def _fetch_latest_bar(self, symbol: str):
-        from alpaca.data.requests import StockLatestBarRequest
-        client = self._get_client()
-        req = StockLatestBarRequest(symbol_or_symbols=symbol)
-        bars = client.get_stock_latest_bar(req)
-        return bars.get(symbol)
+    def _fetch_recent_daily_bars(self, symbol: str, days: int = 5) -> list:
+        """Fetch recent daily bars in a single API call."""
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame
 
-    def _fetch_prev_close(self, symbol: str) -> float | None:
-        bars = self._fetch_bars(symbol, period="5d", interval="1d")
-        if len(bars) >= 2:
-            return float(bars[-2].close)
-        return None
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=days)
+        client = self._get_client()
+        req = StockBarsRequest(
+            symbol_or_symbols=symbol,
+            timeframe=TimeFrame.Day,
+            start=start,
+            end=end,
+        )
+        bars_response = client.get_stock_bars(req)
+        return list(bars_response.get(symbol, []))
 
     def _fetch_bars(self, symbol: str, period: str = "1mo", interval: str = "1d") -> list:
         from alpaca.data.requests import StockBarsRequest
@@ -88,13 +94,14 @@ class AlpacaProvider(BaseProvider):
         if not self.is_configured():
             return None
         try:
-            bar = self._fetch_latest_bar(symbol)
-            if bar is None:
+            bars = self._fetch_recent_daily_bars(symbol, days=5)
+            if not bars:
                 return None
-            prev_close = self._fetch_prev_close(symbol) or float(bar.close)
+            bar = bars[-1]
+            prev_close = float(bars[-2].close) if len(bars) >= 2 else float(bar.close)
             price = float(bar.close)
-            change = price - float(prev_close)
-            pct = (change / float(prev_close) * 100) if prev_close else 0.0
+            change = price - prev_close
+            pct = (change / prev_close * 100) if prev_close else 0.0
             return QuoteData(
                 symbol=symbol,
                 current_price=round(price, 2),
@@ -112,13 +119,59 @@ class AlpacaProvider(BaseProvider):
             logger.warning("Alpaca quote failed for %s: %s", symbol, exc)
             return None
 
-    def get_quotes(self, symbols: list[str]) -> list[QuoteData]:
+    def _get_quotes_batch(self, symbols: list[str]) -> list[QuoteData]:
+        """Fetch quotes for multiple symbols in a single API call."""
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame
+
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=5)
+        client = self._get_client()
+        req = StockBarsRequest(
+            symbol_or_symbols=symbols,
+            timeframe=TimeFrame.Day,
+            start=start,
+            end=end,
+        )
+        bars_response = client.get_stock_bars(req)
         results = []
         for sym in symbols:
-            q = self.get_quote(sym)
-            if q:
-                results.append(q)
+            bars = list(bars_response.get(sym, []))
+            if not bars:
+                continue
+            bar = bars[-1]
+            prev_close = float(bars[-2].close) if len(bars) >= 2 else float(bar.close)
+            price = float(bar.close)
+            change = price - prev_close
+            pct = (change / prev_close * 100) if prev_close else 0.0
+            results.append(QuoteData(
+                symbol=sym,
+                current_price=round(price, 2),
+                change=round(change, 2),
+                change_percent=round(pct, 2),
+                high=round(float(bar.high), 2),
+                low=round(float(bar.low), 2),
+                open=round(float(bar.open), 2),
+                previous_close=round(float(prev_close), 2),
+                volume=float(bar.volume) if hasattr(bar, "volume") else None,
+                timestamp=bar.timestamp if hasattr(bar, "timestamp") else datetime.now(timezone.utc),
+                source="alpaca",
+            ))
         return results
+
+    def get_quotes(self, symbols: list[str]) -> list[QuoteData]:
+        if not self.is_configured() or not symbols:
+            return []
+        try:
+            return self._get_quotes_batch(symbols)
+        except Exception as exc:
+            logger.warning("Alpaca batch quotes failed, falling back to serial: %s", exc)
+            results = []
+            for sym in symbols:
+                q = self.get_quote(sym)
+                if q:
+                    results.append(q)
+            return results
 
     def get_price_history(
         self,
