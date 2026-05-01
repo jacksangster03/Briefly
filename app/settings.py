@@ -118,6 +118,10 @@ class Settings(BaseSettings):
         return bool(self.finnhub_api_key)
 
     @property
+    def alpaca_configured(self) -> bool:
+        return bool(self.alpaca_api_key and self.alpaca_api_secret)
+
+    @property
     def fred_configured(self) -> bool:
         return bool(self.fred_api_key)
 
