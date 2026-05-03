@@ -274,6 +274,13 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
   - stable inline-image module styling for CID assets across desktop clients
 - LLM boundary tightened: renderer receives deterministic chart summaries/tags for prose only and cannot control chart design decisions
 
+**Signal Hygiene Upgrade (Phase 6.5)**
+- Added deterministic **dominant tape driver** detection in market setup interpretation (geo-energy shock, rates repricing, and mega-cap earnings cluster paths)
+- Global-news selector now hard-filters low-quality preview/listicle/SEO headlines when they lack a real catalyst
+- Watchlist catalyst line now prefers dominant-driver context over low-signal single-note headlines
+- Earnings section now suppresses low-value microcap blocks when there is no portfolio/watchlist overlap (`No portfolio-relevant earnings this week.`)
+- Morning chart renderer moved to a darker desk-note palette to reduce “template dashboard” feel in email chart cards
+
 ### Intelligence pipeline
 
 - Finnhub + NewsAPI event processing with credibility scoring, personal relevance, and clustering

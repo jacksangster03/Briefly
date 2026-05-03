@@ -23,11 +23,17 @@ class TestArticleType:
     def test_preview_heres_why(self):
         assert classify_article_type("Here's Why Nvidia Could Hit $200") == "preview"
 
+    def test_preview_what_to_watch(self):
+        assert classify_article_type("Stock Market Records: What To Watch This Week") == "preview"
+
     def test_seo_everything_you_need(self):
         assert classify_article_type("Everything You Need To Know About AI Stocks") == "seo"
 
     def test_seo_how_to_invest(self):
         assert classify_article_type("How To Invest In Semiconductors In 2026") == "seo"
+
+    def test_seo_is_still_best_to_buy(self):
+        assert classify_article_type("Is Alphabet Still The Best AI Stock To Buy?") == "seo"
 
     def test_opinion_url_path(self):
         assert classify_article_type(

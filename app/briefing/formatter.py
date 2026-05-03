@@ -126,6 +126,8 @@ class TelegramFormatter:
             briefing.watchlist_events,
             briefing.watchlist_quotes,
             briefing.session_mode,
+            dominant_driver=briefing.dominant_tape_driver,
+            top_themes=briefing.top_themes,
         )
         if watchlist:
             sections.append(watchlist)
@@ -280,6 +282,9 @@ class TelegramFormatter:
         if setup.treasury_2y:
             chg = f" ({format_change(setup.treasury_2y.change or 0, 0)})" if setup.treasury_2y.change else ""
             lines.append(f"US 2Y: {setup.treasury_2y.value:.3f}%{chg}")
+        if briefing.dominant_tape_driver:
+            lines.append("")
+            lines.append(f"<i>Dominant driver:</i> {briefing.dominant_tape_driver}")
         if briefing.market_setup_analysis:
             lines.append("")
             lines.append(f"<i>Setup read:</i> {briefing.market_setup_analysis}")
@@ -470,6 +475,14 @@ class TelegramFormatter:
         if not earnings:
             return ""
         relevance = relevance or {}
+        has_relevant = any(tag in {"portfolio", "watchlist"} for tag in relevance.values())
+        if not has_relevant:
+            return "\n".join(
+                [
+                    f"<b>{SECTION_HEADERS['earnings']}</b>",
+                    "No portfolio-relevant earnings this week.",
+                ]
+            )
         grouped = self._group_earnings(earnings[:MAX_EARNINGS_DISPLAY])
         body: list[str] = []
         for label in ("Today", "Tomorrow", "This Week"):
@@ -535,6 +548,9 @@ class TelegramFormatter:
         events: list[NormalisedEvent],
         quotes: list[QuoteData],
         session_mode: str = "weekday",
+        *,
+        dominant_driver: str = "",
+        top_themes: list[NormalisedEvent] | None = None,
     ) -> str:
         parts = [f"<b>{SECTION_HEADERS['watchlist']}</b>"]
 
@@ -543,7 +559,12 @@ class TelegramFormatter:
             q_lines = [format_compact_price(q.display_name or q.symbol, q.change_percent)
                        for q in quotes[:10]]
             parts.append(" | ".join(q_lines))
-            summary = self._watchlist_summary_line(quotes, events)
+            summary = self._watchlist_summary_line(
+                quotes,
+                events,
+                dominant_driver=dominant_driver,
+                top_themes=top_themes or [],
+            )
             if summary:
                 parts.append(f"<i>{summary}</i>")
             freshness = self._format_quotes_freshness_summary(quotes, session_mode)
@@ -561,7 +582,14 @@ class TelegramFormatter:
 
         return "\n".join(parts) if len(parts) > 1 else ""
 
-    def _watchlist_summary_line(self, quotes: list[QuoteData], events: list[NormalisedEvent]) -> str:
+    def _watchlist_summary_line(
+        self,
+        quotes: list[QuoteData],
+        events: list[NormalisedEvent],
+        *,
+        dominant_driver: str = "",
+        top_themes: list[NormalisedEvent] | None = None,
+    ) -> str:
         if not quotes:
             return ""
         sorted_quotes = sorted(quotes, key=lambda q: float(q.change_percent or 0.0), reverse=True)
@@ -569,7 +597,18 @@ class TelegramFormatter:
         bottom = sorted_quotes[-1]
         positives = sum(1 for q in quotes if float(q.change_percent or 0.0) > 0.0)
         direction = "mostly green" if positives >= max(1, int(len(quotes) * 0.6)) else "mixed-to-red"
-        catalyst = (events[0].title[:88] + "...") if events and len(events[0].title) > 88 else (events[0].title if events else "no dominant catalyst yet")
+        catalyst = "no dominant catalyst yet"
+        if dominant_driver:
+            catalyst = truncate(dominant_driver, 120)
+        elif events:
+            ranked = sorted(
+                events,
+                key=lambda evt: (float(evt.final_score or 0.0), int(evt.cluster_size or 1)),
+                reverse=True,
+            )
+            catalyst = truncate(ranked[0].title, 110)
+        elif top_themes:
+            catalyst = truncate(top_themes[0].title, 110)
         return (
             f"Watchlist is {direction}; leaders: {(top.display_name or top.symbol)} {float(top.change_percent or 0.0):+.2f}% "
             f"vs laggard {(bottom.display_name or bottom.symbol)} {float(bottom.change_percent or 0.0):+.2f}%. "

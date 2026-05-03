@@ -23,13 +23,13 @@ import matplotlib.pyplot as plt
 
 logger = get_logger("chart_renderer")
 
-POSITIVE = "#1C8C5E"
-NEGATIVE = "#C53A32"
-NEUTRAL = "#4A607A"
-ACCENT = "#274C77"
-BG = "#F5F7FA"
-GRID = "#D3DAE4"
-TEXT = "#13273F"
+POSITIVE = "#27C07D"
+NEGATIVE = "#F05B4F"
+NEUTRAL = "#7EA7D8"
+ACCENT = "#FF6B00"
+BG = "#0A1628"
+GRID = "#2A3441"
+TEXT = "#D9E4F1"
 
 
 class ChartRenderer:
@@ -615,7 +615,7 @@ class ChartRenderer:
                 transform=ax.transAxes,
                 fontsize=9.4,
                 color=color,
-                bbox={"facecolor": "#EEF2F7", "edgecolor": "none", "pad": 1.2},
+                bbox={"facecolor": "#18243A", "edgecolor": "none", "pad": 1.2},
             )
         return self._to_asset(
             fig,
@@ -659,7 +659,7 @@ class ChartRenderer:
             fontsize=11,
             color=regime_color,
             weight="bold",
-            bbox={"facecolor": "#EEF2F7", "edgecolor": "none", "pad": 2.0},
+            bbox={"facecolor": "#18243A", "edgecolor": "none", "pad": 2.0},
         )
         return self._to_asset(
             fig,
@@ -696,7 +696,7 @@ class ChartRenderer:
             fontsize=11,
             color=state_color,
             weight="bold",
-            bbox={"facecolor": "#EEF2F7", "edgecolor": "none", "pad": 2.0},
+            bbox={"facecolor": "#18243A", "edgecolor": "none", "pad": 2.0},
         )
         return self._to_asset(
             fig,

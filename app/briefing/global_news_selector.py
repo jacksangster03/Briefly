@@ -6,6 +6,11 @@ from datetime import datetime, timezone
 import re
 from typing import Callable
 
+from app.processing.article_quality import (
+    classify_article_type,
+    classify_source_quality,
+    is_low_quality_for_section,
+)
 from app.schemas.events import NormalisedEvent
 
 GLOBAL_MARKET_EVENT_TYPES = {
@@ -236,6 +241,15 @@ def is_global_market_news_worthy(
     text_lower = _normalise_text(f"{event.title} {event.summary}")
     title_lower = _normalise_text(event.title)
     has_catalyst = _has_catalyst_signal(event, text_lower)
+    article_type = classify_article_type(event.title, event.summary, event.url)
+    source_quality = classify_source_quality(
+        event.source,
+        str(event.raw_data.get("source_name", "")),
+        event.url,
+    )
+
+    if is_low_quality_for_section(article_type, source_quality) and not has_catalyst:
+        return False, 0.0, has_catalyst
 
     if any(pattern in text_lower for pattern in GLOBAL_HARD_BLOCK_PATTERNS) and not has_catalyst:
         return False, 0.0, has_catalyst
@@ -323,10 +337,11 @@ def build_market_relevance_note(
     templates: list[str]
     is_em_fx = any(term in text for term in ("fx", "currency", "dollar", "yuan", "yen", "euro", "devaluation"))
     is_conflict = any(term in text for term in ("iran", "israel", "war", "conflict", "ceasefire", "missile", "naval"))
-    if any(term in text for term in ("hormuz", "opec", "oil", "crude", "shipping", "tanker", "freight")):
+    if any(term in text for term in ("hormuz", "blockade", "naval", "toll", "opec", "oil", "crude", "shipping", "tanker", "freight")):
         templates = [
             "Why market-relevant: energy chokepoints can quickly reprice inflation and transport-sensitive sectors.",
             "Why market-relevant: oil and shipping shocks can move inflation expectations, margins, and risk premia.",
+            "Why market-relevant: blockade and tanker-flow shifts can ripple into fuel costs, logistics, and EM FX stress.",
         ]
     elif any(term in text for term in ("fomc", "fed", "ecb", "boe", "boj", "inflation", "cpi", "ppi", "yield", "rates")):
         templates = [
@@ -337,11 +352,13 @@ def build_market_relevance_note(
         templates = [
             "Why market-relevant: sanctions and trade controls can hit supply chains, earnings guidance, and FX.",
             "Why market-relevant: policy frictions can alter trade volumes, input costs, and cross-border risk appetite.",
+            "Why market-relevant: trade and sanctions shocks often reprice industrial margins and currency channels first.",
         ]
     elif is_conflict:
         templates = [
             "Why market-relevant: conflict headlines can shift energy risk premia and broad risk sentiment.",
             "Why market-relevant: geopolitical escalation/de-escalation can rapidly move commodities, rates, and defensives.",
+            "Why market-relevant: geopolitical turnarounds can unwind hedges quickly, increasing cross-asset volatility.",
         ]
     elif is_em_fx:
         templates = [
@@ -357,6 +374,7 @@ def build_market_relevance_note(
         templates = [
             "Why market-relevant: cross-asset macro moves can quickly shift index direction and sector rotation.",
             "Why market-relevant: headline risk can change liquidity tone, factor leadership, and benchmark dispersion.",
+            "Why market-relevant: macro headline clusters can alter risk premia before fundamentals fully reprice.",
         ]
     return _pick_unique_note(templates, used_notes)
 

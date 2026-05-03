@@ -150,9 +150,11 @@ class TestTelegramFormatter:
                     QuoteData(symbol="SPY", display_name="S&P 500 (SPX)", current_price=5234.5, change=12.3, change_percent=0.24),
                 ],
             ),
+            dominant_tape_driver="Iran/Hormuz oil shock unwinding (WTI -3.3%) with inflation transmission in focus.",
             market_setup_analysis="Market tone is mixed with no single dominant impulse.",
         )
         email = EmailFormatter("Europe/Madrid").format_morning_briefing(briefing)
+        assert "Dominant driver:" in email.html_body
         assert "Setup read:" in email.html_body
         assert "single dominant impulse" in email.html_body
 
@@ -259,6 +261,36 @@ class TestTelegramFormatter:
         messages = self.formatter.format_morning_briefing(briefing)
         full = "\n".join(messages)
         assert "EARNINGS CALENDAR" not in full
+
+    def test_earnings_section_collapses_when_no_relevant_overlap(self):
+        briefing = MorningBriefing(
+            earnings_calendar=[
+                EarningsEvent(
+                    symbol="XYZ",
+                    company_name="Example Corp",
+                    report_date="2026-05-05",
+                    fiscal_quarter="Q2 2026",
+                )
+            ],
+            earnings_relevance={},
+        )
+        full = "\n".join(self.formatter.format_morning_briefing(briefing))
+        assert "EARNINGS CALENDAR" in full
+        assert "No portfolio-relevant earnings this week." in full
+
+    def test_watchlist_summary_prefers_dominant_driver_catalyst(self):
+        briefing = MorningBriefing(
+            dominant_tape_driver="Iran/Hormuz oil shock unwinding (WTI -3.3%) with inflation transmission in focus.",
+            watchlist_quotes=[
+                QuoteData(symbol="AAPL", display_name="Apple", current_price=190, change=2, change_percent=1.2),
+                QuoteData(symbol="NVDA", display_name="Nvidia", current_price=900, change=-4, change_percent=-0.4),
+            ],
+            watchlist_events=[
+                NormalisedEvent(title="Low-signal analyst note", cluster_size=1, final_score=0.4),
+            ],
+        )
+        full = "\n".join(self.formatter.format_morning_briefing(briefing))
+        assert "Main catalyst: Iran/Hormuz oil shock unwinding" in full
 
     def test_morning_includes_regional_and_portfolio_impact_sections(self):
         briefing = MorningBriefing(

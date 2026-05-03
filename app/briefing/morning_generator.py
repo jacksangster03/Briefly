@@ -338,6 +338,7 @@ class MorningBriefingGenerator:
         briefing.market_setup.treasury_2y = two_y
         setup_interpretation = interpret_market_setup(briefing.market_setup, briefing.macro_context)
         briefing.market_setup_analysis = setup_interpretation.narrative
+        briefing.dominant_tape_driver = setup_interpretation.dominant_driver
         briefing.market_setup_analysis_confidence = setup_interpretation.confidence
         briefing.market_setup_signal_tags = setup_interpretation.tags
 
@@ -375,6 +376,7 @@ class MorningBriefingGenerator:
             global_news=briefing.global_news,
         )
         briefing.market_setup_analysis = setup_interpretation.narrative
+        briefing.dominant_tape_driver = setup_interpretation.dominant_driver
         briefing.market_setup_analysis_confidence = setup_interpretation.confidence
         briefing.market_setup_signal_tags = setup_interpretation.tags
         regional_lens, regional_skew = build_regional_lens(

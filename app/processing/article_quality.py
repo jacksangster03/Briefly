@@ -94,6 +94,8 @@ _PREVIEW_REGEXES = [
     re.compile(r"\bis\s+\w+\s+(?:a\s+)?(?:buy|sell|hold)\b", re.I),
     re.compile(r"\bhere(?:'s|\s+is)\s+why\b", re.I),
     re.compile(r"\bwhat\s+(?:to\s+)?(?:expect|watch)\b", re.I),
+    re.compile(r"\bthis\s+week\s+on\s+wall\s+street\b", re.I),
+    re.compile(r"\bhistoric\s+rally\b", re.I),
 ]
 
 _SEO_REGEXES = [
@@ -101,6 +103,8 @@ _SEO_REGEXES = [
     re.compile(r"\b\d+\s+things?\s+(?:you|investors)\b", re.I),
     re.compile(r"\bhow\s+to\s+(?:invest|trade|buy|sell|profit)\b", re.I),
     re.compile(r"\bvs\.?\s+\w+:\s+which\s+is\s+better\b", re.I),
+    re.compile(r"\bis\s+.+\s+still\s+the\s+best\s+.+\s+to\s+buy\b", re.I),
+    re.compile(r"\bbet\s+on\s+these\b", re.I),
 ]
 
 _OPINION_REGEXES = [

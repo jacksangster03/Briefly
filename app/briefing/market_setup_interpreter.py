@@ -14,6 +14,7 @@ class MarketSetupInterpretation:
     """Human-readable interpretation plus lightweight internal signal tags."""
 
     narrative: str
+    dominant_driver: str
     tags: list[str]
     confidence: str
 
@@ -48,10 +49,20 @@ def interpret_market_setup(
         region_score=region_score,
         global_news=global_news or [],
     )
+    dominant_driver = _dominant_tape_driver(
+        setup=setup,
+        global_news=global_news or [],
+        macro_points=macro_points,
+    )
 
     narrative = f"{tone} {breadth} {divergence} {vol} {rates} {commodities} {takeaway}"
     tags = _tags(risk_score=risk_score, rates_score=rates_score, commodity_score=commodity_score, region_score=region_score)
-    return MarketSetupInterpretation(narrative=narrative, tags=tags, confidence=confidence)
+    return MarketSetupInterpretation(
+        narrative=narrative,
+        dominant_driver=dominant_driver,
+        tags=tags,
+        confidence=confidence,
+    )
 
 
 def _risk_appetite_score(index_quotes) -> int:
@@ -251,6 +262,47 @@ def _net_takeaway(
     if total <= -3:
         return "Net takeaway: defensive posture is warranted as volatility and macro pressure outweigh broad equity support."
     return "Net takeaway: conditions are mixed; focus on regional dispersion and macro headlines rather than index direction alone."
+
+
+def _dominant_tape_driver(
+    *,
+    setup: MarketSetup,
+    global_news: Iterable[NormalisedEvent],
+    macro_points: list[MacroDataPoint],
+) -> str:
+    news = list(global_news)
+    text = " ".join(f"{evt.title} {evt.summary}".lower() for evt in news)
+    cluster_weight = sum(max(1, int(evt.cluster_size or 1)) for evt in news)
+    oil_quote = _find_quote(setup.macro_quotes or [], ("WTI", "CRUDE", "CL1:COM", "CL=F"))
+    oil_move = float(oil_quote.change_percent or 0.0) if oil_quote is not None else None
+    geo_oil_hit = any(
+        term in text for term in ("iran", "hormuz", "blockade", "naval", "shipping", "tanker")
+    ) and any(term in text for term in ("oil", "crude", "energy"))
+    if geo_oil_hit and cluster_weight >= 12 and oil_move is not None and abs(oil_move) >= 2.0:
+        direction = "spiking" if oil_move > 0 else "unwinding"
+        return (
+            f"Iran/Hormuz oil shock {direction} (WTI {oil_move:+.1f}%) "
+            f"with inflation and transport-risk transmission in focus."
+        )
+
+    megacap_tokens = ("apple", "microsoft", "alphabet", "google", "meta", "amazon", "nvidia", "tesla")
+    earnings_cluster = sum(
+        1
+        for evt in news
+        if ("earnings" in f"{evt.title} {evt.summary}".lower())
+        and any(token in f"{evt.title} {evt.summary}".lower() for token in megacap_tokens)
+    )
+    if earnings_cluster >= 2:
+        return "Big-tech earnings digest is steering index leadership and intra-sector dispersion."
+
+    ten_y_change = _macro_change(macro_points, ("10y treasury", "us 10y", "10y treasury yield"))
+    if ten_y_change is None and setup.treasury_10y:
+        ten_y_change = float(setup.treasury_10y.change or 0.0)
+    if ten_y_change is not None and abs(ten_y_change) >= 0.035:
+        direction = "higher" if ten_y_change > 0 else "lower"
+        return f"Rates repricing is the lead driver (US 10Y {direction} {ten_y_change:+.3f})."
+
+    return ""
 
 
 def _confidence_label(*, total: int, signals: list[int]) -> str:
