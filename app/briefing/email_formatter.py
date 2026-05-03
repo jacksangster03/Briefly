@@ -16,6 +16,10 @@ from app.schemas.events import QuoteData
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _BOLD_HEADER_RE = re.compile(r"^<b>([^<]+)</b>\s*$")
+_LABEL_RE = re.compile(
+    r"(?P<label>Dominant driver|Setup read|Portfolio impact|Action posture|Regional skew|Watchlist|Earnings Calendar):"
+)
+_EMAIL_FONT_STACK = "Aptos,'Segoe UI',Arial,sans-serif"
 
 
 class EmailFormatter:
@@ -49,49 +53,47 @@ class EmailFormatter:
         llm_shadow = bool(bundle_meta.get("llm_shadow_mode", True))
         profile_name = str(bundle_meta.get("profile_name") or "default_user")
         confidence = str(bundle_meta.get("data_confidence") or "medium").upper()
-        lead = "Desk-note view: deterministic chart stack + high-signal narrative."
+        lead = "Deterministic market stack, portfolio lens, and high-signal narrative."
         freshness = self._freshness_summary(briefing)
         generated_local = self._format_local(briefing.generated_at)
+        title, date_label = self._split_subject(subject)
+        regime_text = " / ".join(str(tag).replace("_", " ").upper() for tag in regime_tags) or "MIXED"
 
         parts = [
-            "<html><body style=\"margin:0;padding:0;background:#ECEFF3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#0E2438;\">",
-            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#ECEFF3;\">",
-            "<tr><td align=\"center\" style=\"padding:16px;\">",
-            "<table role=\"presentation\" width=\"780\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:780px;max-width:780px;background:#F8FAFC;border:1px solid #CED6E1;border-radius:8px;overflow:hidden;\">",
-            "<tr><td style=\"padding:14px 18px;border-bottom:1px solid #D6DEE8;background:#F2F6FB;\">",
-            f"<div style=\"font-size:13px;font-weight:600;color:#2A415A;letter-spacing:0.02em;\">{html.escape(subject)}</div>",
-            f"<div style=\"margin-top:2px;font-size:11.5px;color:#4E627A;\">{html.escape(lead)}</div>",
-            "</td></tr>",
-            "<tr><td style=\"padding:10px 18px;border-bottom:1px solid #D6DEE8;background:#FFFFFF;\">",
+            f"<html><body style=\"margin:0;padding:0;background:#071421;font-family:{_EMAIL_FONT_STACK};color:#F3F7FB;\">",
+            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#071629;\">",
+            "<tr><td align=\"center\" style=\"padding:10px 6px;\">",
+            "<table role=\"presentation\" width=\"780\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:780px;max-width:780px;background:#091B2B;border:1px solid #23384D;\">",
+            "<tr><td style=\"height:4px;line-height:4px;font-size:0;background:#FF7A00;\">&nbsp;</td></tr>",
+            "<tr><td style=\"padding:18px 20px 14px 20px;border-bottom:1px solid #23384D;background:#0B1D30;\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
-            f"<td style=\"font-size:11.5px;color:#3C546D;\">Generated: <strong>{html.escape(generated_local)}</strong></td>",
-            f"<td align=\"right\" style=\"font-size:11.5px;color:#3C546D;\">Profile: <strong>{html.escape(profile_name)}</strong></td>",
-            "</tr><tr>",
-            f"<td style=\"padding-top:4px;font-size:11.5px;color:#3C546D;\">Mode: <strong>{html.escape(delivery_mode)}</strong> · LLM shadow: <strong>{'on' if llm_shadow else 'off'}</strong></td>",
-            f"<td align=\"right\" style=\"padding-top:4px;font-size:11.5px;color:#3C546D;\">Data confidence: <strong>{html.escape(confidence)}</strong></td>",
+            "<td valign=\"bottom\" style=\"width:62%;\">",
+            f"<div style=\"font-size:30px;line-height:1.02;font-weight:800;color:#F3F7FB;letter-spacing:-0.035em;\">{html.escape(title)}</div>",
+            f"<div style=\"margin-top:7px;font-size:13px;line-height:1.45;color:#9FB3C8;\">{html.escape(lead)}</div>",
+            "</td>",
+            "<td valign=\"bottom\" align=\"right\" style=\"width:38%;\">",
+            f"<div style=\"font-size:16px;line-height:1.2;font-weight:700;color:#F3F7FB;letter-spacing:0.01em;\">{html.escape(date_label)}</div>",
+            f"<div style=\"margin-top:8px;font-size:11px;line-height:1.35;color:#9FB3C8;\">REGIME <span style=\"color:#FF7A00;font-weight:800;\">{html.escape(regime_text)}</span></div>",
+            "</td></tr></table>",
+            "</td></tr>",
+            "<tr><td style=\"padding:9px 20px;border-bottom:1px solid #23384D;background:#091B2B;\">",
+            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
+            f"<td style=\"font-size:12px;line-height:1.45;color:#9FB3C8;\"><strong style=\"color:#F3F7FB;\">Generated</strong> {html.escape(generated_local)}</td>",
+            f"<td align=\"center\" style=\"font-size:12px;line-height:1.45;color:#9FB3C8;\"><strong style=\"color:#F3F7FB;\">Profile</strong> {html.escape(profile_name)}</td>",
+            f"<td align=\"right\" style=\"font-size:12px;line-height:1.45;color:#9FB3C8;\"><strong style=\"color:#F3F7FB;\">Mode</strong> {html.escape(delivery_mode)} · LLM shadow {'on' if llm_shadow else 'off'} · <strong style=\"color:#F3F7FB;\">Confidence</strong> {html.escape(confidence)}</td>",
             "</tr></table>",
             "</td></tr>",
-            "<tr><td style=\"padding:10px 18px;border-bottom:1px solid #D6DEE8;background:#FFFFFF;\">",
-            f"<div style=\"font-size:11.5px;color:#3C546D;\">{html.escape(freshness)}</div>",
+            "<tr><td style=\"padding:8px 20px;border-bottom:1px solid #23384D;background:#091B2B;\">",
+            f"<div style=\"font-size:12px;line-height:1.45;color:#9FB3C8;\"><strong style=\"color:#F3F7FB;\">Source freshness</strong> {html.escape(freshness)}</div>",
             "</td></tr>",
         ]
 
-        if regime_tags:
-            parts.append("<tr><td style=\"padding:8px 18px;border-bottom:1px solid #D6DEE8;background:#FFFFFF;\">")
-            parts.append("<div style=\"font-size:11px;color:#3C546D;\">Regime tags: ")
-            for tag in regime_tags:
-                parts.append(
-                    "<span style=\"display:inline-block;margin:0 4px 4px 0;padding:2px 6px;border:1px solid #CAD5E2;border-radius:999px;background:#F2F6FB;font-size:10.5px;color:#2A415A;\">"
-                    f"{html.escape(tag)}</span>"
-                )
-            parts.append("</div></td></tr>")
-
         if briefing.chart_assets:
-            parts.append("<tr><td style=\"padding:12px 16px 4px 16px;background:#F8FAFC;\">")
+            parts.append("<tr><td style=\"padding:13px 20px 0 20px;background:#091B2B;\">")
             parts.append(self._chart_modules(briefing))
             parts.append("</td></tr>")
 
-        parts.append("<tr><td style=\"padding:8px 16px 16px 16px;background:#F8FAFC;\">")
+        parts.append("<tr><td style=\"padding:2px 20px 20px 20px;background:#091B2B;\">")
         parts.append(self._brief_modules(full_html))
         parts.append("</td></tr>")
 
@@ -99,21 +101,31 @@ class EmailFormatter:
         return "".join(parts)
 
     def _chart_modules(self, briefing: MorningBriefing) -> str:
+        roles = {row.get("chart_key"): row.get("role") for row in (briefing.morning_chart_selection or [])}
         modules = [
-            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:separate;border-spacing:0 10px;\">"
+            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;\">"
         ]
-        for asset in briefing.chart_assets:
-            modules.append("<tr><td style=\"background:#FFFFFF;border:1px solid #D4DCE7;border-radius:8px;padding:10px 12px;\">")
+        for idx, asset in enumerate(briefing.chart_assets):
+            role = str(roles.get(asset.key) or ("hero" if idx == 0 else "support"))
+            is_hero = role == "hero" or idx == 0
+            is_micro = role.startswith("micro")
+            title_size = "20px" if is_hero else ("14px" if is_micro else "16px")
+            pad_top = "0" if idx == 0 else ("11px" if is_micro else "14px")
+            pad_bottom = "16px" if is_hero else ("10px" if is_micro else "13px")
+            image_border = "1px solid #23384D" if is_hero else "1px solid #1D3145"
             modules.append(
-                f"<div style=\"font-size:13px;font-weight:700;color:#18324D;letter-spacing:0.01em;\">{html.escape(asset.title)}</div>"
+                f"<tr><td style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid #23384D;\">"
+            )
+            modules.append(
+                f"<div style=\"font-size:{title_size};line-height:1.18;font-weight:800;color:#F3F7FB;letter-spacing:-0.015em;padding:0 0 7px 0;\">{html.escape(asset.title)}</div>"
             )
             modules.append(
                 f"<img src=\"cid:{html.escape(asset.content_id)}\" alt=\"{html.escape(asset.title)}\" "
-                "style=\"display:block;width:100%;max-width:748px;margin-top:8px;border:1px solid #E1E7F0;border-radius:4px;\">"
+                f"style=\"display:block;width:100%;max-width:738px;margin-top:0;border:{image_border};\">"
             )
             if asset.caption:
                 modules.append(
-                    f"<div style=\"margin-top:7px;font-size:11.5px;line-height:1.5;color:#4D6078;\">{html.escape(asset.caption)}</div>"
+                    f"<div style=\"margin-top:7px;font-size:12.5px;line-height:1.45;color:#9FB3C8;\"><span style=\"color:#FF7A00;font-weight:800;\">READ</span> {html.escape(asset.caption)}</div>"
                 )
             modules.append("</td></tr>")
         modules.append("</table>")
@@ -129,21 +141,36 @@ class EmailFormatter:
         header_match = _BOLD_HEADER_RE.match(first)
         if header_match and len(lines) > 1:
             header_text = header_match.group(1)
-            body = "<br>".join(line for line in lines[1:] if line is not None)
+            body = self._emphasize_market_labels("<br>".join(line for line in lines[1:] if line is not None))
             return (
                 "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;\">"
-                "<tr><td style=\"background:#FFFFFF;border:1px solid #D4DCE7;border-radius:8px;padding:10px 12px;font-size:13px;color:#112C44;line-height:1.55;\">"
-                f"<div style=\"font-size:12px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#294561;margin-bottom:6px;\">{html.escape(header_text)}</div>"
+                "<tr><td style=\"padding:14px 0 11px 0;font-size:15px;color:#DCE7F3;line-height:1.62;border-top:1px solid #23384D;\">"
+                f"<div style=\"font-size:18px;line-height:1.2;font-weight:800;letter-spacing:-0.015em;color:#F3F7FB;margin:0 0 8px 0;\">{html.escape(header_text)}</div>"
                 f"{body}"
                 "</td></tr></table>"
             )
-        body = "<br>".join(lines)
+        body = self._emphasize_market_labels("<br>".join(lines))
         return (
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;\">"
-            "<tr><td style=\"background:#FFFFFF;border:1px solid #D4DCE7;border-radius:8px;padding:10px 12px;font-size:13px;color:#112C44;line-height:1.55;\">"
+            "<tr><td style=\"padding:14px 0 11px 0;font-size:15px;color:#DCE7F3;line-height:1.62;border-top:1px solid #23384D;\">"
             f"{body}"
             "</td></tr></table>"
         )
+
+    @staticmethod
+    def _split_subject(subject: str) -> tuple[str, str]:
+        if "|" not in subject:
+            return subject, ""
+        title, date_label = subject.split("|", 1)
+        return title.strip(), date_label.strip()
+
+    @staticmethod
+    def _emphasize_market_labels(body: str) -> str:
+        def repl(match: re.Match[str]) -> str:
+            label = html.escape(match.group("label"))
+            return f'<strong style="color:#FF7A00;font-weight:800;">{label}:</strong>'
+
+        return _LABEL_RE.sub(repl, body)
 
     def _freshness_summary(self, briefing: MorningBriefing) -> str:
         quotes = self._freshness_quotes(briefing)

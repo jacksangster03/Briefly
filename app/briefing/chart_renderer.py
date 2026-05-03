@@ -23,17 +23,86 @@ import matplotlib.pyplot as plt
 
 logger = get_logger("chart_renderer")
 
-POSITIVE = "#27C07D"
-NEGATIVE = "#F05B4F"
-NEUTRAL = "#7EA7D8"
-ACCENT = "#FF6B00"
-BG = "#0A1628"
-GRID = "#2A3441"
-TEXT = "#D9E4F1"
+POSITIVE = "#19C37D"
+NEGATIVE = "#FF5B5B"
+NEUTRAL = "#4DA3FF"
+ACCENT = "#FF7A00"
+BG = "#071421"
+PANEL = "#0B1D30"
+GRID = "#23384D"
+MUTED = "#9FB3C8"
+TEXT = "#F3F7FB"
+SUBTLE = "#14263A"
+
+REGION_COLORS = {
+    "us": ACCENT,
+    "europe": "#4DA3FF",
+    "asia": "#F6C445",
+    "other": "#8EA7C2",
+}
 
 
 class ChartRenderer:
     """Render deterministic static PNG chart cards."""
+
+    @staticmethod
+    def _figure(width: float = 8.8, height: float = 4.9):
+        fig, ax = plt.subplots(figsize=(width, height), dpi=150)
+        fig.patch.set_facecolor(BG)
+        ax.set_facecolor(BG)
+        return fig, ax
+
+    @staticmethod
+    def _style_axes(
+        ax,
+        *,
+        title: str,
+        xlabel: str | None = None,
+        ylabel: str | None = None,
+        grid_axis: str = "y",
+    ) -> None:
+        ax.set_title(title, loc="left", fontsize=16, weight="bold", color=TEXT, pad=12)
+        if xlabel:
+            ax.set_xlabel(xlabel, color=MUTED, fontsize=9.5)
+        if ylabel:
+            ax.set_ylabel(ylabel, color=MUTED, fontsize=9.5)
+        ax.tick_params(axis="x", colors=MUTED, labelsize=8.8)
+        ax.tick_params(axis="y", colors=MUTED, labelsize=8.8)
+        ax.grid(axis=grid_axis, color=GRID, linewidth=0.75, alpha=0.72)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+    @staticmethod
+    def _value_box(
+        ax,
+        x: float,
+        y: float,
+        label: str,
+        *,
+        color: str = TEXT,
+        ha: str = "left",
+        va: str = "center",
+        fontsize: float = 8.6,
+    ) -> None:
+        ax.text(
+            x,
+            y,
+            label,
+            ha=ha,
+            va=va,
+            fontsize=fontsize,
+            color=color,
+            weight="bold",
+            bbox={"facecolor": BG, "edgecolor": GRID, "linewidth": 0.45, "pad": 1.4},
+            zorder=6,
+        )
+
+    @staticmethod
+    def _series_color(row: dict, idx: int) -> str:
+        family = str(row.get("family") or "").lower()
+        if idx == 0:
+            return ACCENT
+        return REGION_COLORS.get(family, REGION_COLORS["other"])
 
     def render_from_spec(self, spec: dict) -> ChartAsset | None:
         key = str(spec.get("chart_key") or "").strip().lower()
@@ -315,38 +384,50 @@ class ChartRenderer:
         series = list(spec.get("series") or [])
         if not series:
             return None
-        fig, ax = plt.subplots(figsize=(8.6, 4.8), dpi=150)
-        fig.patch.set_facecolor(BG)
-        ax.set_facecolor(BG)
-        palette = ["#335c81", "#4c78a8", "#1f9d8a", "#f59f00", "#bf616a", "#7b8aa6", "#6c5ce7", "#16a085"]
+        fig, ax = self._figure(8.8, 5.0)
+        y_latest: list[float] = []
         for idx, row in enumerate(series):
             x = row.get("x_5d") or []
             y = row.get("y_5d") or []
             if not x or not y:
                 continue
             name = str(row.get("name") or row.get("symbol") or f"Series {idx + 1}")
-            color = palette[idx % len(palette)]
-            linewidth = 2.2 if idx == 0 else 1.7
-            ax.plot(x, y, color=color, linewidth=linewidth)
-            ax.text(
-                x[-1] + 0.08,
-                y[-1],
-                name,
+            color = self._series_color(row, idx)
+            alpha = 0.98 if idx <= 2 else 0.62
+            linewidth = 2.9 if idx == 0 else (2.15 if idx <= 2 else 1.35)
+            ax.plot(x, y, color=color, linewidth=linewidth, alpha=alpha)
+            y_latest.append(float(y[-1]))
+            label = name.replace(" Composite", "").replace("EURO STOXX 50", "STOXX50")
+            self._value_box(
+                ax,
+                float(x[-1]) + 0.12,
+                float(y[-1]),
+                label,
                 color=color,
-                fontsize=8.6,
-                va="center",
+                fontsize=7.8 if idx > 2 else 8.4,
             )
 
-        ax.grid(axis="y", color=GRID, linewidth=0.8, alpha=0.78)
-        ax.set_title(str(spec.get("title") or "Global Equity Leadership"), loc="left", fontsize=15, weight="bold", color=TEXT)
-        ax.set_xlabel("Period", color=TEXT)
-        ax.set_ylabel("Rebased (100)", color=TEXT)
-        ax.tick_params(axis="x", colors=TEXT)
-        ax.tick_params(axis="y", colors=TEXT)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-        ax.margins(x=0.12)
-        fig.tight_layout()
+        ax.axhline(100, color=ACCENT, linewidth=1.0, alpha=0.62)
+        if y_latest:
+            spread = max(y_latest) - min(y_latest)
+            ax.text(
+                0.01,
+                0.03,
+                f"5D rebased · leadership spread {spread:.2f} pts",
+                transform=ax.transAxes,
+                color=MUTED,
+                fontsize=8.4,
+                weight="bold",
+            )
+        self._style_axes(
+            ax,
+            title=str(spec.get("title") or "Global Equity Leadership"),
+            xlabel="5D session path",
+            ylabel="Rebased to 100",
+            grid_axis="y",
+        )
+        ax.margins(x=0.2, y=0.18)
+        fig.subplots_adjust(left=0.08, right=0.82, top=0.86, bottom=0.18)
         return self._to_asset(
             fig,
             key="global_relative_performance",
@@ -356,52 +437,57 @@ class ChartRenderer:
         )
 
     def render_cross_asset_impulse_from_spec(self, spec: dict) -> ChartAsset | None:
-        points = list(spec.get("series") or [])
+        points = sorted(list(spec.get("series") or []), key=lambda row: abs(float(row.get("impulse") or 0.0)), reverse=True)
         if not points:
             return None
         labels = [self._compact_impulse_label(str(row.get("name") or row.get("symbol") or "")) for row in points]
         values = [float(row.get("impulse") or 0.0) for row in points]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
 
-        fig, ax = plt.subplots(figsize=(8.8, 4.9), dpi=150)
-        fig.patch.set_facecolor(BG)
-        ax.set_facecolor(BG)
+        fig, ax = self._figure(8.8, 4.9)
         y_pos = list(range(len(labels)))
-        ax.axvline(0, color=GRID, linewidth=1.2)
-        ax.hlines(y=y_pos, xmin=[0 for _ in values], xmax=values, color=colors, linewidth=2.2, alpha=0.84)
-        ax.scatter(values, y_pos, color=colors, s=74, zorder=3)
+        ax.axvline(0, color=ACCENT, linewidth=1.55, alpha=0.92)
+        ax.hlines(y=y_pos, xmin=[0 for _ in values], xmax=values, color=colors, linewidth=2.8, alpha=0.88)
+        ax.scatter(values, y_pos, color=colors, s=88, edgecolor=BG, linewidth=1.1, zorder=3)
         ax.set_yticks(y_pos)
-        ax.set_yticklabels(labels, color=TEXT)
+        ax.set_yticklabels(labels, color=TEXT, fontsize=9.2, fontweight="bold")
         ax.invert_yaxis()
-        ax.set_xlabel("Impulse (mixed units; see labels)", color=TEXT)
-        ax.set_title(str(spec.get("title") or "Cross-Asset Impulses"), loc="left", fontsize=15, weight="bold", color=TEXT)
-        ax.grid(axis="x", color=GRID, linewidth=0.8, alpha=0.75)
-        ax.tick_params(axis="x", colors=TEXT)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
 
         min_value = min(values) if values else -1.0
         max_value = max(values) if values else 1.0
-        x_pad = max(0.8, (max_value - min_value) * 0.08)
+        x_pad = max(1.0, (max_value - min_value) * 0.16)
         ax.set_xlim(min(min_value - x_pad, -0.5), max(max_value + x_pad, 0.5))
 
         for idx, row in enumerate(points):
             unit = str(row.get("unit") or "pct")
             value = float(row.get("impulse") or 0.0)
             suffix = "bp" if unit == "bps" else "%"
-            x_text = value + (0.12 if value < 0 else 0.08)
-            ax.text(
+            x_text = value + (0.20 if value >= 0 else -0.20)
+            self._value_box(
+                ax,
                 x_text,
                 idx,
                 f"{value:+.2f}{suffix}",
-                va="center",
-                ha="left",
+                color=colors[idx],
+                ha="left" if value >= 0 else "right",
                 fontsize=8.5,
-                color=TEXT,
-                weight="bold",
-                bbox={"facecolor": BG, "edgecolor": "none", "pad": 0.6},
             )
-        fig.subplots_adjust(left=0.32, right=0.97, top=0.88, bottom=0.18)
+        self._style_axes(
+            ax,
+            title=str(spec.get("title") or "Cross-Asset Impulses"),
+            xlabel="Centered daily impulse (bps / %)",
+            grid_axis="x",
+        )
+        ax.text(
+            0.01,
+            0.02,
+            "Sorted by absolute impulse · zero line marks neutral transmission",
+            transform=ax.transAxes,
+            color=MUTED,
+            fontsize=8.2,
+            weight="bold",
+        )
+        fig.subplots_adjust(left=0.25, right=0.94, top=0.86, bottom=0.18)
         return self._to_asset(
             fig,
             key="cross_asset_impulse_strip",
@@ -430,38 +516,39 @@ class ChartRenderer:
         rows = list(spec.get("series") or [])
         if not rows:
             return None
-        labels = [str(row.get("name") or row.get("symbol") or "") for row in rows]
+        rows = sorted(rows, key=lambda row: abs(float(row.get("excess_pct") or 0.0)), reverse=True)[:8]
+        labels = [str(row.get("symbol") or row.get("name") or "") for row in rows]
+        absolute = [float(row.get("change_pct") or 0.0) for row in rows]
         excess = [float(row.get("excess_pct") or 0.0) for row in rows]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in excess]
 
-        fig, ax = plt.subplots(figsize=(8.4, 4.8), dpi=150)
-        fig.patch.set_facecolor(BG)
-        ax.set_facecolor(BG)
+        fig, ax = self._figure(8.8, 5.0)
         y_pos = list(range(len(labels)))
-        ax.axvline(0, color=GRID, linewidth=1.2)
-        ax.hlines(y=y_pos, xmin=[0 for _ in excess], xmax=excess, color=colors, linewidth=2.4, alpha=0.84)
-        ax.scatter(excess, y_pos, color=colors, s=82, zorder=3)
+        ax.axvline(0, color=ACCENT, linewidth=1.25, alpha=0.8)
+        for idx, (abs_move, excess_move, color) in enumerate(zip(absolute, excess, colors)):
+            ax.hlines(y=idx, xmin=min(abs_move, excess_move), xmax=max(abs_move, excess_move), color=GRID, linewidth=2.2, alpha=0.9)
+            ax.scatter(abs_move, idx, color=NEUTRAL, s=62, edgecolor=BG, linewidth=1.0, zorder=4)
+            ax.scatter(excess_move, idx, color=color, s=88, edgecolor=BG, linewidth=1.0, zorder=5)
         ax.set_yticks(y_pos)
-        ax.set_yticklabels(labels, color=TEXT)
+        ax.set_yticklabels(labels, color=TEXT, fontsize=9.3, fontweight="bold")
         ax.invert_yaxis()
-        ax.set_xlabel("Excess Return vs Benchmark (%)", color=TEXT)
-        ax.set_title(str(spec.get("title") or "Portfolio Movers vs Benchmark"), loc="left", fontsize=15, weight="bold", color=TEXT)
-        ax.grid(axis="x", color=GRID, linewidth=0.8, alpha=0.75)
-        ax.tick_params(axis="x", colors=TEXT)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-        for idx, value in enumerate(excess):
-            ax.text(
-                value + (0.08 if value >= 0 else -0.08),
+        for idx, (abs_move, value) in enumerate(zip(absolute, excess)):
+            self._value_box(
+                ax,
+                value + (0.12 if value >= 0 else -0.12),
                 idx,
-                f"{value:+.2f}%",
-                va="center",
+                f"excess {value:+.2f}% · abs {abs_move:+.2f}%",
                 ha="left" if value >= 0 else "right",
                 fontsize=8.5,
-                color=TEXT,
-                weight="bold",
+                color=colors[idx],
             )
-        fig.tight_layout()
+        self._style_axes(
+            ax,
+            title=str(spec.get("title") or "Portfolio Movers vs Benchmark"),
+            xlabel="Daily move (%) · blue=absolute, green/red=excess",
+            grid_axis="x",
+        )
+        fig.subplots_adjust(left=0.16, right=0.89, top=0.86, bottom=0.18)
         return self._to_asset(
             fig,
             key="holdings_excess_performance",
@@ -479,24 +566,38 @@ class ChartRenderer:
         y_vals = [float(row.get("y_change_pct") or 0.0) for row in points]
         labels = [str(row.get("name") or row.get("sector_key") or "") for row in points]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in y_vals]
+        sizes = [max(70.0, min(420.0, float(row.get("bubble_size") or 10.0) * 10.0)) for row in points]
 
-        fig, ax = plt.subplots(figsize=(8.4, 4.8), dpi=150)
-        fig.patch.set_facecolor(BG)
-        ax.set_facecolor(BG)
-        ax.axhline(0, color=GRID, linewidth=1.0)
-        ax.axvline(0, color=GRID, linewidth=1.0)
-        ax.scatter(x_vals, y_vals, color=colors, s=82, alpha=0.88)
-        for x_val, y_val, label in zip(x_vals, y_vals, labels):
-            ax.text(x_val + 0.3, y_val + (0.05 if y_val >= 0 else -0.05), label, fontsize=8.2, color=TEXT)
-        ax.set_title(str(spec.get("title") or "Sector Exposure vs Move"), loc="left", fontsize=15, weight="bold", color=TEXT)
-        ax.set_xlabel("Exposure (%)", color=TEXT)
-        ax.set_ylabel("Sector Move (%)", color=TEXT)
-        ax.grid(color=GRID, linewidth=0.7, alpha=0.45)
-        ax.tick_params(axis="x", colors=TEXT)
-        ax.tick_params(axis="y", colors=TEXT)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-        fig.tight_layout()
+        fig, ax = self._figure(8.8, 5.0)
+        exposure_mid = max(0.0, sum(x_vals) / len(x_vals)) if x_vals else 0.0
+        ax.axhline(0, color=ACCENT, linewidth=1.15, alpha=0.78)
+        ax.axvline(exposure_mid, color=GRID, linewidth=1.0, linestyle="--", alpha=0.82)
+        ax.scatter(x_vals, y_vals, color=colors, s=sizes, alpha=0.84, edgecolor=BG, linewidth=1.1)
+        outlier_order = sorted(range(len(points)), key=lambda idx: abs(y_vals[idx]) + x_vals[idx] * 0.08, reverse=True)
+        for idx in outlier_order[:7]:
+            x_val = x_vals[idx]
+            y_val = y_vals[idx]
+            label = labels[idx].replace("Communication Services", "Comm Services")
+            ax.text(
+                x_val + 0.35,
+                y_val + (0.08 if y_val >= 0 else -0.08),
+                label,
+                fontsize=8.1,
+                color=TEXT,
+                weight="bold" if idx in outlier_order[:3] else "normal",
+            )
+        ax.text(0.02, 0.92, "Underweight winners", transform=ax.transAxes, color=MUTED, fontsize=8.0)
+        ax.text(0.74, 0.92, "Overweight winners", transform=ax.transAxes, color=MUTED, fontsize=8.0)
+        ax.text(0.02, 0.06, "Underweight losers", transform=ax.transAxes, color=MUTED, fontsize=8.0)
+        ax.text(0.74, 0.06, "Overweight losers", transform=ax.transAxes, color=MUTED, fontsize=8.0)
+        self._style_axes(
+            ax,
+            title=str(spec.get("title") or "Sector Exposure vs Move"),
+            xlabel="Portfolio exposure (%)",
+            ylabel="Sector move (%)",
+            grid_axis="both",
+        )
+        fig.subplots_adjust(left=0.1, right=0.96, top=0.86, bottom=0.18)
         return self._to_asset(
             fig,
             key="sector_exposure_quadrant",
@@ -516,25 +617,47 @@ class ChartRenderer:
             return None
         label = str(row.get("name") or row.get("symbol") or "Focus Symbol")
 
-        fig, ax = plt.subplots(figsize=(8.4, 4.8), dpi=150)
-        fig.patch.set_facecolor(BG)
-        ax.set_facecolor(BG)
-        line_color = NEUTRAL if y[-1] >= y[0] else NEGATIVE
-        ax.plot(x, y, color=line_color, linewidth=2.3)
-        ax.fill_between(x, y, min(y), color=line_color, alpha=0.11)
+        fig, ax = self._figure(8.8, 5.0)
+        line_color = POSITIVE if y[-1] >= y[0] else NEGATIVE
+        ax.plot(x, y, color=line_color, linewidth=2.7)
+        ax.fill_between(x, y, min(y), color=line_color, alpha=0.13)
+        marker = None
         for ann in (spec.get("annotations") or []):
             if ann.get("label") == "event_window_start":
                 x_mark = int(ann.get("x") or 0)
-                ax.axvline(x_mark, color="#7b8aa6", linewidth=1.0, linestyle="--", alpha=0.8)
-        ax.set_title(str(spec.get("title") or f"{label} Event-Linked Trend"), loc="left", fontsize=15, weight="bold", color=TEXT)
-        ax.set_xlabel("Session", color=TEXT)
-        ax.set_ylabel("Price", color=TEXT)
-        ax.grid(axis="y", color=GRID, linewidth=0.8, alpha=0.75)
-        ax.tick_params(axis="x", colors=TEXT)
-        ax.tick_params(axis="y", colors=TEXT)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-        fig.tight_layout()
+                marker = x_mark
+                ax.axvspan(x_mark, max(x), color=ACCENT, alpha=0.08)
+                ax.axvline(x_mark, color=ACCENT, linewidth=1.15, linestyle="--", alpha=0.92)
+        change_pct = ((float(y[-1]) / float(y[0])) - 1.0) * 100.0 if y[0] else 0.0
+        self._value_box(
+            ax,
+            float(x[-1]),
+            float(y[-1]),
+            f"{label} {change_pct:+.2f}%",
+            color=line_color,
+            ha="right",
+            va="bottom",
+            fontsize=8.5,
+        )
+        if marker is not None:
+            ax.text(
+                marker,
+                max(y),
+                "event window",
+                color=ACCENT,
+                fontsize=8.2,
+                weight="bold",
+                ha="left",
+                va="top",
+            )
+        self._style_axes(
+            ax,
+            title=str(spec.get("title") or f"{label} Event-Linked Trend"),
+            xlabel="30D session window",
+            ylabel="Price",
+            grid_axis="y",
+        )
+        fig.subplots_adjust(left=0.1, right=0.95, top=0.86, bottom=0.18)
         return self._to_asset(
             fig,
             key="event_linked_annotated_trend",
@@ -550,33 +673,30 @@ class ChartRenderer:
         labels = [str(row.get("name") or "") for row in rows]
         values = [float(row.get("value") or 0.0) for row in rows]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
-        fig, ax = plt.subplots(figsize=(8.6, 4.4), dpi=150)
-        fig.patch.set_facecolor(BG)
-        ax.set_facecolor(BG)
+        fig, ax = self._figure(8.8, 4.5)
         y_pos = list(range(len(labels)))
-        ax.axvline(0, color=GRID, linewidth=1.1)
-        ax.barh(y_pos, values, color=colors, alpha=0.84)
+        ax.axvline(0, color=ACCENT, linewidth=1.15, alpha=0.78)
+        ax.barh(y_pos, values, color=colors, alpha=0.82, height=0.58)
         ax.set_yticks(y_pos)
-        ax.set_yticklabels(labels, fontsize=9, color=TEXT)
+        ax.set_yticklabels(labels, fontsize=9, color=TEXT, fontweight="bold")
         ax.invert_yaxis()
-        ax.set_title(str(spec.get("title") or "Breadth & Leadership"), loc="left", fontsize=15, weight="bold", color=TEXT)
-        ax.set_xlabel("Signal", color=TEXT)
-        ax.grid(axis="x", color=GRID, linewidth=0.8, alpha=0.7)
-        ax.tick_params(axis="x", colors=TEXT)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
         for idx, value in enumerate(values):
-            ax.text(
+            self._value_box(
+                ax,
                 value + (0.08 if value >= 0 else -0.08),
                 idx,
                 f"{value:+.2f}",
-                va="center",
                 ha="left" if value >= 0 else "right",
                 fontsize=8.8,
-                color=TEXT,
-                weight="bold",
+                color=colors[idx],
             )
-        fig.tight_layout()
+        self._style_axes(
+            ax,
+            title=str(spec.get("title") or "Breadth & Leadership"),
+            xlabel="Signal value",
+            grid_axis="x",
+        )
+        fig.subplots_adjust(left=0.24, right=0.91, top=0.86, bottom=0.18)
         return self._to_asset(
             fig,
             key="breadth_leadership_panel",
@@ -593,11 +713,9 @@ class ChartRenderer:
         levels = [row.get("level") for row in rows]
         impulses = [row.get("impulse") for row in rows]
         colors = [POSITIVE if (float(value or 0.0) >= 0) else NEGATIVE for value in impulses]
-        fig, ax = plt.subplots(figsize=(8.0, 2.9), dpi=150)
-        fig.patch.set_facecolor(BG)
-        ax.set_facecolor(BG)
+        fig, ax = self._figure(8.0, 2.9)
         ax.axis("off")
-        ax.set_title(str(spec.get("title") or "Rates & Curve"), loc="left", fontsize=14, weight="bold", color=TEXT, pad=8)
+        ax.set_title(str(spec.get("title") or "Rates & Curve"), loc="left", fontsize=15, weight="bold", color=TEXT, pad=9)
         x0 = 0.03
         for idx, label in enumerate(labels):
             xpos = x0 + idx * 0.31
@@ -606,11 +724,12 @@ class ChartRenderer:
             level_text = "n/a" if lvl is None else f"{float(lvl):.3f}%"
             impulse_text = "n/a" if imp is None else f"{float(imp):+.2f}bp"
             color = colors[idx]
-            ax.text(xpos, 0.62, label, transform=ax.transAxes, fontsize=9.2, color=TEXT, weight="bold")
-            ax.text(xpos, 0.40, level_text, transform=ax.transAxes, fontsize=11.2, color=TEXT)
+            ax.plot([xpos, xpos + 0.23], [0.72, 0.72], transform=ax.transAxes, color=ACCENT, linewidth=1.8, alpha=0.8)
+            ax.text(xpos, 0.58, label.upper(), transform=ax.transAxes, fontsize=8.8, color=MUTED, weight="bold")
+            ax.text(xpos, 0.35, level_text, transform=ax.transAxes, fontsize=15, color=TEXT, weight="bold")
             ax.text(
                 xpos,
-                0.19,
+                0.14,
                 impulse_text,
                 transform=ax.transAxes,
                 fontsize=9.4,
@@ -642,24 +761,23 @@ class ChartRenderer:
             "elevated": "#D18C00",
             "stress": NEGATIVE,
         }.get(regime, NEUTRAL)
-        fig, ax = plt.subplots(figsize=(8.0, 2.9), dpi=150)
-        fig.patch.set_facecolor(BG)
-        ax.set_facecolor(BG)
+        fig, ax = self._figure(8.0, 2.9)
         ax.axis("off")
-        ax.set_title(str(spec.get("title") or "Volatility Regime"), loc="left", fontsize=14, weight="bold", color=TEXT, pad=8)
+        ax.set_title(str(spec.get("title") or "Volatility Regime"), loc="left", fontsize=15, weight="bold", color=TEXT, pad=9)
         level_text = "n/a" if level is None else f"{float(level):.2f}"
         delta_text = "n/a" if delta is None else f"{float(delta):+.2f}%"
-        ax.text(0.04, 0.52, f"VIX {level_text}", transform=ax.transAxes, fontsize=16, color=TEXT, weight="bold")
-        ax.text(0.04, 0.28, f"Δ {delta_text}", transform=ax.transAxes, fontsize=10, color=TEXT)
+        ax.plot([0.04, 0.42], [0.72, 0.72], transform=ax.transAxes, color=ACCENT, linewidth=1.8, alpha=0.8)
+        ax.text(0.04, 0.50, f"VIX {level_text}", transform=ax.transAxes, fontsize=19, color=TEXT, weight="bold")
+        ax.text(0.04, 0.25, f"daily delta {delta_text}", transform=ax.transAxes, fontsize=10, color=MUTED, weight="bold")
         ax.text(
             0.60,
             0.45,
             regime.upper(),
             transform=ax.transAxes,
-            fontsize=11,
+            fontsize=12,
             color=regime_color,
             weight="bold",
-            bbox={"facecolor": "#18243A", "edgecolor": "none", "pad": 2.0},
+            bbox={"facecolor": SUBTLE, "edgecolor": GRID, "linewidth": 0.5, "pad": 2.4},
         )
         return self._to_asset(
             fig,
@@ -680,23 +798,21 @@ class ChartRenderer:
         holdings = int(values.get("Active Holdings") or 0)
         state = str(meta.get("risk_state") or "moderate")
         state_color = {"balanced": POSITIVE, "moderate": ACCENT, "concentrated": NEGATIVE}.get(state, NEUTRAL)
-        fig, ax = plt.subplots(figsize=(8.0, 2.9), dpi=150)
-        fig.patch.set_facecolor(BG)
-        ax.set_facecolor(BG)
+        fig, ax = self._figure(8.0, 2.9)
         ax.axis("off")
-        ax.set_title(str(spec.get("title") or "Portfolio Concentration"), loc="left", fontsize=14, weight="bold", color=TEXT, pad=8)
-        ax.text(0.04, 0.58, f"Top 5: {top5:.1f}%", transform=ax.transAxes, fontsize=13, color=TEXT, weight="bold")
-        ax.text(0.04, 0.34, f"Largest: {largest:.1f}%", transform=ax.transAxes, fontsize=10.2, color=TEXT)
-        ax.text(0.04, 0.15, f"Holdings: {holdings}", transform=ax.transAxes, fontsize=10.2, color=TEXT)
+        ax.set_title(str(spec.get("title") or "Portfolio Concentration"), loc="left", fontsize=15, weight="bold", color=TEXT, pad=9)
+        ax.plot([0.04, 0.44], [0.72, 0.72], transform=ax.transAxes, color=ACCENT, linewidth=1.8, alpha=0.8)
+        ax.text(0.04, 0.50, f"Top 5 {top5:.1f}%", transform=ax.transAxes, fontsize=17, color=TEXT, weight="bold")
+        ax.text(0.04, 0.27, f"Largest {largest:.1f}% · Holdings {holdings}", transform=ax.transAxes, fontsize=10, color=MUTED, weight="bold")
         ax.text(
             0.64,
             0.42,
             state.upper(),
             transform=ax.transAxes,
-            fontsize=11,
+            fontsize=12,
             color=state_color,
             weight="bold",
-            bbox={"facecolor": "#18243A", "edgecolor": "none", "pad": 2.0},
+            bbox={"facecolor": SUBTLE, "edgecolor": GRID, "linewidth": 0.5, "pad": 2.4},
         )
         return self._to_asset(
             fig,
@@ -712,28 +828,28 @@ class ChartRenderer:
             return None
         labels = [str(row.get("name") or "") for row in rows]
         values = [float(row.get("value") or 0.0) for row in rows]
-        fig, ax = plt.subplots(figsize=(8.0, 2.9), dpi=150)
-        fig.patch.set_facecolor(BG)
-        ax.set_facecolor(BG)
-        bars = ax.bar(labels, values, color=ACCENT, alpha=0.85)
-        ax.set_title(str(spec.get("title") or "Earnings Relevance"), loc="left", fontsize=14, weight="bold", color=TEXT)
-        ax.grid(axis="y", color=GRID, linewidth=0.8, alpha=0.75)
-        ax.tick_params(axis="x", labelrotation=0, colors=TEXT, labelsize=8.8)
-        ax.tick_params(axis="y", colors=TEXT, labelsize=8.8)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
+        fig, ax = self._figure(8.0, 2.9)
+        bars = ax.bar(labels, values, color=ACCENT, alpha=0.88, width=0.58)
         for bar, value in zip(bars, values):
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
-                value + 0.08,
+                value + max(0.08, max(values or [1.0]) * 0.04),
                 f"{value:.0f}",
                 ha="center",
                 va="bottom",
-                fontsize=8.6,
+                fontsize=9.2,
                 color=TEXT,
                 weight="bold",
             )
-        fig.tight_layout()
+        self._style_axes(
+            ax,
+            title=str(spec.get("title") or "Earnings Relevance"),
+            ylabel="Count",
+            grid_axis="y",
+        )
+        ax.tick_params(axis="x", labelrotation=0, colors=TEXT, labelsize=8.4)
+        ax.set_ylim(0, max(values) * 1.35 if values and max(values) else 1.0)
+        fig.subplots_adjust(left=0.08, right=0.97, top=0.84, bottom=0.22)
         return self._to_asset(
             fig,
             key="earnings_relevance_strip",

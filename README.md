@@ -269,9 +269,13 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
   - `GET /ui/briefing/morning/charts?profile=...`
   - `GET /api/v1/profile/{profile}/briefing/morning/charts`
 - Outlook-focused email shell was tightened to a denser desk-note style:
-  - compact metadata strip (timestamp, profile, deterministic/LLM shadow state, confidence)
-  - reduced radius / tighter rhythm / higher data-ink ratio modules
-  - stable inline-image module styling for CID assets across desktop clients
+  - continuous dark navy briefing canvas with one subtle outer frame and thin section dividers
+  - sharper masthead, compact metadata strip, source-freshness line, and regime marker
+  - role-aware chart hierarchy (hero/support/micro) with stable inline-image CID assets
+  - reduced radius/card chrome, stronger typography, and selective orange emphasis for key labels
+- Morning email chart renderer now uses a stricter terminal palette and finance-style annotations:
+  - dark integrated plot backgrounds, endpoint/value boxes, orange neutral/reference lines, and semantic green/red moves
+  - upgraded global leadership, cross-asset impulse, holdings dumbbell, sector quadrant, event trend, and microcard visuals
 - LLM boundary tightened: renderer receives deterministic chart summaries/tags for prose only and cannot control chart design decisions
 
 **Signal Hygiene Upgrade (Phase 6.5)**

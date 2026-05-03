@@ -149,6 +149,36 @@ def test_email_formatter_embeds_inline_chart_cids():
     assert "PORTFOLIO FOCUS" in rendered.plain_text
 
 
+def test_email_formatter_uses_continuous_finance_canvas():
+    formatter = EmailFormatter("Europe/Madrid")
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 4, 12, 8, 45, tzinfo=timezone.utc),
+        session_mode="sunday",
+        chart_assets=[_sample_chart_asset()],
+        morning_chart_selection=[{"chart_key": "market_snapshot", "role": "hero", "reason": "test"}],
+        morning_chart_bundle={
+            "regime_tags": ["risk_on", "rates_led"],
+            "meta": {
+                "profile_name": "default_user",
+                "delivery_mode": "deterministic",
+                "llm_shadow_mode": True,
+                "data_confidence": "high",
+            },
+        },
+        market_setup_analysis="Market tone is mixed with no single dominant impulse.",
+    )
+
+    rendered = formatter.format_morning_briefing(briefing)
+    assert "background:#071421" in rendered.html_body
+    assert "font-size:30px" in rendered.html_body
+    assert "#FF7A00" in rendered.html_body
+    assert "Source freshness" in rendered.html_body
+    assert "REGIME" in rendered.html_body
+    assert "READ" in rendered.html_body
+    assert "border-radius" not in rendered.html_body
+    assert '<strong style="color:#FF7A00;font-weight:800;">Setup read:</strong>' in rendered.html_body
+
+
 def test_email_formatter_includes_quote_freshness_metadata():
     formatter = EmailFormatter("Europe/Madrid")
     briefing = MorningBriefing(

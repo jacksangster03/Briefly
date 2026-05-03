@@ -10,7 +10,8 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from app.briefing.chart_builder import MorningChartBuilder
-from app.briefing.morning_charts import build_morning_chart_bundle
+from app.briefing.chart_renderer import ChartRenderer
+from app.briefing.morning_charts import build_morning_chart_bundle, selected_chart_specs
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MarketSetup, MorningBriefing
 from app.schemas.events import MacroDataPoint, PricePoint, QuoteData, SectorSnapshot
@@ -145,6 +146,22 @@ def test_chart_builder_populates_bundle_and_assets():
     assert charts
     assert briefing.morning_chart_bundle
     assert briefing.morning_chart_selection
+
+
+def test_chart_renderer_renders_available_morning_specs():
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=_sample_briefing(),
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+    )
+    renderer = ChartRenderer()
+    assets = [renderer.render_from_spec(spec) for spec in selected_chart_specs(bundle) if spec.get("available")]
+
+    assert assets
+    assert all(asset is not None for asset in assets)
+    assert all(asset.content.startswith(b"\x89PNG") for asset in assets if asset is not None)
+    assert any(asset.key == "global_relative_performance" for asset in assets if asset is not None)
+    assert any(asset.key == "cross_asset_impulse_strip" for asset in assets if asset is not None)
 
 
 def test_briefing_morning_charts_route_renders_preview(monkeypatch, validation_test_settings):
