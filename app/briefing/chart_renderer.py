@@ -434,21 +434,32 @@ class ChartRenderer:
         y_latest: list[float] = []
         label_rows: list[tuple[int, str, float, float, str]] = []
         for idx, row in enumerate(series):
-            x = row.get("x_5d") or []
+            x_raw = row.get("x_5d") or []
             y = row.get("y_5d") or []
-            if not x or not y:
+            if not x_raw or not y:
                 continue
+            n = len(x_raw)
+            # Replace integer indices with meaningful relative labels: T-4 … T
+            x_numeric = list(range(n))
             name = str(row.get("name") or row.get("symbol") or f"Series {idx + 1}")
             color = self._series_color(row, idx)
-            # thicker lines for leader (idx 0) and laggard (last)
             alpha = 0.98 if idx in (0, len(series) - 1) else 0.70
             linewidth = 3.0 if idx == 0 else (2.2 if idx == len(series) - 1 else 1.6)
-            ax.plot(x, y, color=color, linewidth=linewidth, alpha=alpha)
+            ax.plot(x_numeric, y, color=color, linewidth=linewidth, alpha=alpha)
             y_latest.append(float(y[-1]))
             label = name.replace(" Composite", "").replace("EURO STOXX 50", "STOXX50")
-            label_rows.append((idx, label, float(x[-1]), float(y[-1]), color))
+            label_rows.append((idx, label, float(x_numeric[-1]), float(y[-1]), color))
 
         ax.axhline(100, color=GRID, linewidth=1.0, alpha=0.78, linestyle="--")
+
+        # Set x-axis ticks to relative session labels
+        if label_rows:
+            n_pts = max(len(line.get_xdata()) for line in ax.lines) if ax.lines else 5
+            tick_positions = list(range(n_pts))
+            tick_labels = [f"T-{n_pts - 1 - i}" if i < n_pts - 1 else "T" for i in range(n_pts)]
+            ax.set_xticks(tick_positions)
+            ax.set_xticklabels(tick_labels, fontsize=9, color=MUTED)
+
         if y_latest:
             spread = max(y_latest) - min(y_latest)
             ax.text(
@@ -475,7 +486,7 @@ class ChartRenderer:
         self._style_axes(
             ax,
             title=str(spec.get("title") or "Global Equity Leadership"),
-            xlabel="5D session",
+            xlabel="Trading session",
             ylabel="Rebased to 100",
             grid_axis="y",
         )
@@ -754,17 +765,24 @@ class ChartRenderer:
         labels = [str(row.get("name") or "") for row in rows]
         values = [float(row.get("value") or 0.0) for row in rows]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
-        fig, ax = self._figure(8.8, 4.5)
+        fig, ax = self._figure(8.8, max(4.5, 0.5 * len(labels) + 2.0))
         y_pos = list(range(len(labels)))
-        ax.axvline(0, color=ACCENT, linewidth=1.15, alpha=0.78)
         ax.barh(y_pos, values, color=colors, alpha=0.82, height=0.58)
+        ax.axvline(0, color=ACCENT, linewidth=1.5, alpha=0.90, zorder=3)
         ax.set_yticks(y_pos)
-        ax.set_yticklabels(labels, fontsize=9, color=TEXT, fontweight="bold")
+        ax.set_yticklabels(labels, fontsize=8.5, color=TEXT, fontweight="bold")
         ax.invert_yaxis()
+
+        # Symmetric x-axis around zero so diverging nature is clear
+        x_range = max((abs(v) for v in values), default=1.0)
+        pad = x_range * 0.35
+        ax.set_xlim(-x_range - pad, x_range + pad)
+
         for idx, value in enumerate(values):
+            offset = x_range * 0.06
             self._value_box(
                 ax,
-                value + (0.08 if value >= 0 else -0.08),
+                value + (offset if value >= 0 else -offset),
                 idx,
                 f"{value:+.2f}",
                 ha="left" if value >= 0 else "right",
@@ -774,10 +792,11 @@ class ChartRenderer:
         self._style_axes(
             ax,
             title=str(spec.get("title") or "Breadth & Leadership"),
-            xlabel="Signal value",
+            xlabel="Signal value (negative = bearish, positive = bullish)",
             grid_axis="x",
         )
-        fig.subplots_adjust(left=0.24, right=0.91, top=0.86, bottom=0.18)
+        # Wide left margin so y-axis labels are never clipped
+        fig.subplots_adjust(left=0.32, right=0.91, top=0.86, bottom=0.18)
         return self._to_asset(
             fig,
             key="breadth_leadership_panel",
@@ -1080,36 +1099,46 @@ class ChartRenderer:
             return None
         total = float((spec.get("annotations") or [{}])[0].get("value") or 0.0)
 
-        labels = [row["symbol"] for row in bars]
-        contribs = [float(row["contribution"]) for row in bars]
+        # Sort: positives (descending) then negatives (ascending by abs), TOTAL always last
+        pos_bars = sorted([r for r in bars if float(r.get("contribution") or 0.0) >= 0],
+                          key=lambda r: float(r.get("contribution") or 0.0), reverse=True)
+        neg_bars = sorted([r for r in bars if float(r.get("contribution") or 0.0) < 0],
+                          key=lambda r: float(r.get("contribution") or 0.0))
+        sorted_bars = pos_bars + neg_bars
+
+        labels = [row["symbol"] for row in sorted_bars]
+        contribs = [float(row["contribution"]) for row in sorted_bars]
         colors = [POSITIVE if c >= 0 else NEGATIVE for c in contribs]
 
-        # Append total bar
+        # Append TOTAL bar (visually separated by inserting a gap row)
+        labels.append("")  # spacer
+        contribs.append(0.0)
+        colors.append(BG)
         labels.append("TOTAL")
         contribs.append(total)
         colors.append(ACCENT)
 
-        fig, ax = self._figure(8.8, max(4.0, 0.55 * len(labels) + 1.5))
+        fig, ax = self._figure(8.8, max(4.0, 0.52 * len(labels) + 1.5))
         y_pos = list(range(len(labels)))
 
-        # Running base for waterfall
-        running = 0.0
-        bases = []
-        for i, c in enumerate(contribs[:-1]):
-            bases.append(running if c >= 0 else running + c)
-            running += c
-        bases.append(0.0)  # total bar starts at 0
+        # Simple diverging bars from zero — no waterfall offset
+        ax.barh(y_pos, contribs, color=colors, alpha=0.84, height=0.55,
+                edgecolor=BG, linewidth=0.6)
 
-        ax.barh(y_pos, [abs(c) for c in contribs], left=bases,
-                color=colors, alpha=0.84, height=0.55, edgecolor=BG, linewidth=0.6)
-        ax.axvline(0, color=AXIS, linewidth=1.2, alpha=0.9)
+        # Prominent zero reference line
+        ax.axvline(0, color=TEXT, linewidth=1.5, alpha=0.85, zorder=3)
 
-        x_range = max(abs(c) for c in contribs + bases) if contribs else 0.5
-        x_pad = max(0.05, x_range * 0.25)
+        # Symmetric x-axis
+        x_range = max((abs(c) for c in contribs if c != 0.0), default=0.5)
+        pad = x_range * 0.35
+        ax.set_xlim(-x_range - pad, x_range + pad)
 
-        for i, (contrib, base) in enumerate(zip(contribs, bases)):
-            x_label = base + contrib + (x_pad * 0.3 if contrib >= 0 else -x_pad * 0.3)
-            self._value_box(ax, x_label, i, f"{contrib:+.2f}%",
+        offset = x_range * 0.06
+        for i, contrib in enumerate(contribs):
+            if contrib == 0.0:
+                continue  # skip spacer
+            self._value_box(ax, contrib + (offset if contrib >= 0 else -offset), i,
+                            f"{contrib:+.2f}%",
                             ha="left" if contrib >= 0 else "right",
                             color=colors[i], fontsize=8.2)
 
@@ -1118,8 +1147,7 @@ class ChartRenderer:
         ax.invert_yaxis()
         self._style_axes(ax, title=str(spec.get("title") or "P&L Attribution"),
                          xlabel="Weighted daily contribution (%)", grid_axis="x")
-        ax.grid(False)
-        fig.subplots_adjust(left=0.14, right=0.92, top=0.86, bottom=0.14)
+        fig.subplots_adjust(left=0.16, right=0.92, top=0.86, bottom=0.14)
         return self._to_asset(fig, key="pnl_attribution_waterfall",
                               title=str(spec.get("title") or "P&L Attribution"),
                               caption=str(spec.get("caption") or ""), filename="pnl-attribution.png")
