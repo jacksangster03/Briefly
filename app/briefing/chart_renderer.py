@@ -39,7 +39,7 @@ SUBTLE = "#14263A"
 REGION_COLORS = {
     "us": ACCENT,
     "europe": "#4A90E2",
-    "asia": "#FFD700",
+    "asia": "#B08EFF",
     "other": "#9BA3AB",
 }
 
@@ -416,7 +416,7 @@ class ChartRenderer:
         )
 
     def render_global_relative_from_spec(self, spec: dict) -> ChartAsset | None:
-        series = self._line_series_for_email(list(spec.get("series") or []), limit=7)
+        series = self._line_series_for_email(list(spec.get("series") or []), limit=5)
         if not series:
             return None
         fig, ax = self._figure(8.8, 5.0)
@@ -429,45 +429,42 @@ class ChartRenderer:
                 continue
             name = str(row.get("name") or row.get("symbol") or f"Series {idx + 1}")
             color = self._series_color(row, idx)
-            alpha = 0.98 if idx <= 2 else 0.62
-            linewidth = 2.9 if idx == 0 else (2.15 if idx <= 2 else 1.35)
+            # thicker lines for leader (idx 0) and laggard (last)
+            alpha = 0.98 if idx in (0, len(series) - 1) else 0.70
+            linewidth = 3.0 if idx == 0 else (2.2 if idx == len(series) - 1 else 1.6)
             ax.plot(x, y, color=color, linewidth=linewidth, alpha=alpha)
             y_latest.append(float(y[-1]))
             label = name.replace(" Composite", "").replace("EURO STOXX 50", "STOXX50")
             label_rows.append((idx, label, float(x[-1]), float(y[-1]), color))
 
-        ax.axhline(100, color=ACCENT, linewidth=1.0, alpha=0.62)
+        ax.axhline(100, color=GRID, linewidth=1.0, alpha=0.78, linestyle="--")
         if y_latest:
             spread = max(y_latest) - min(y_latest)
             ax.text(
                 0.01,
                 0.03,
-                f"5D rebased · leadership spread {spread:.2f} pts",
+                f"5D rebased to 100 · spread {spread:.2f} pts · leader vs laggard",
                 transform=ax.transAxes,
                 color=MUTED,
                 fontsize=8.4,
                 weight="bold",
             )
-            q1 = min(y_latest) + (max(y_latest) - min(y_latest)) * 0.25
-            q3 = min(y_latest) + (max(y_latest) - min(y_latest)) * 0.75
-            label_candidates = [
-                row for row in label_rows if row[0] == 0 or row[3] <= q1 or row[3] >= q3
-            ][:5]
-            adjusted = self._label_positions([row[3] for row in label_candidates])
-            for row, y_pos in zip(label_candidates, adjusted):
+            adjusted = self._label_positions([row[3] for row in label_rows])
+            for row, y_pos in zip(label_rows, adjusted):
                 idx, label, x_val, y_val, color = row
+                excess = y_val - 100.0
                 self._value_box(
                     ax,
                     x_val + 0.12,
                     y_pos,
-                    f"{label} {y_val:.1f}",
+                    f"{label} {excess:+.1f}%",
                     color=color,
-                    fontsize=7.8 if idx > 2 else 8.2,
+                    fontsize=8.4 if idx in (0, len(series) - 1) else 7.8,
                 )
         self._style_axes(
             ax,
             title=str(spec.get("title") or "Global Equity Leadership"),
-            xlabel="5D session path",
+            xlabel="5D session",
             ylabel="Rebased to 100",
             grid_axis="y",
         )
@@ -489,50 +486,57 @@ class ChartRenderer:
         values = [float(row.get("impulse") or 0.0) for row in points]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
 
+        # Cap the visual range if one outlier dominates (>3x the median abs value)
+        abs_vals = sorted([abs(v) for v in values if v != 0.0])
+        median_abs = abs_vals[len(abs_vals) // 2] if abs_vals else 1.0
+        cap = max(abs_vals) if not abs_vals or max(abs_vals) <= median_abs * 3.5 else median_abs * 3.5
+        display_values = [max(-cap, min(cap, v)) for v in values]
+        capped_any = any(abs(v) > cap for v in values)
+
         fig, ax = self._figure(8.8, 4.9)
         y_pos = list(range(len(labels)))
-        ax.axvline(0, color=TEXT, linewidth=1.55, alpha=0.9)
-        ax.hlines(y=y_pos, xmin=[0 for _ in values], xmax=values, color=colors, linewidth=2.8, alpha=0.88)
-        ax.scatter(values, y_pos, color=colors, s=88, edgecolor=BG, linewidth=1.1, zorder=3)
+        ax.axvline(0, color=AXIS, linewidth=1.55, alpha=0.9)
+        ax.hlines(y=y_pos, xmin=[0 for _ in display_values], xmax=display_values, color=colors, linewidth=2.8, alpha=0.88)
+        ax.scatter(display_values, y_pos, color=colors, s=88, edgecolor=BG, linewidth=1.1, zorder=3)
         ax.set_yticks(y_pos)
         ax.set_yticklabels(labels, color=TEXT, fontsize=9.2, fontweight="bold")
         ax.invert_yaxis()
 
-        min_value = min(values) if values else -1.0
-        max_value = max(values) if values else 1.0
-        x_pad = max(1.0, (max_value - min_value) * 0.16)
-        ax.set_xlim(min(min_value - x_pad, -0.5), max(max_value + x_pad, 0.5))
+        x_pad = max(1.0, cap * 0.22)
+        ax.set_xlim(-cap - x_pad, cap + x_pad)
+
+        # Group dividers: draw a subtle line between rates and commodities buckets
+        buckets = [self._impulse_sort_key(row)[0] for row in points]
+        for i in range(1, len(buckets)):
+            if buckets[i] != buckets[i - 1]:
+                ax.axhline(i - 0.5, color=GRID, linewidth=0.8, alpha=0.6, linestyle="--")
 
         for idx, row in enumerate(points):
             unit = str(row.get("unit") or "pct")
             value = float(row.get("impulse") or 0.0)
             suffix = "bp" if unit == "bps" else "%"
-            x_text = value + (0.20 if value >= 0 else -0.20)
+            dv = display_values[idx]
+            x_text = dv + (x_pad * 0.32 if dv >= 0 else -x_pad * 0.32)
+            label_text = f"{value:+.2f}{suffix}" + (" ▶" if abs(value) > cap else "")
             self._value_box(
                 ax,
                 x_text,
                 idx,
-                f"{value:+.2f}{suffix}",
+                label_text,
                 color=colors[idx],
-                ha="left" if value >= 0 else "right",
+                ha="left" if dv >= 0 else "right",
                 fontsize=8.5,
             )
+        subtitle = "Rates · Commodities · Risk gauges  |  zero = neutral"
+        if capped_any:
+            subtitle += "  (scale capped)"
         self._style_axes(
             ax,
             title=str(spec.get("title") or "Cross-Asset Impulses"),
-            xlabel="Centered daily impulse (bps / %)",
+            xlabel=subtitle,
             grid_axis="x",
         )
         ax.grid(False)
-        ax.text(
-            0.01,
-            0.02,
-            "Rates first, commodities next; zero line marks neutral transmission",
-            transform=ax.transAxes,
-            color=MUTED,
-            fontsize=8.2,
-            weight="bold",
-        )
         fig.subplots_adjust(left=0.25, right=0.94, top=0.86, bottom=0.18)
         return self._to_asset(
             fig,
@@ -562,36 +566,39 @@ class ChartRenderer:
         rows = list(spec.get("series") or [])
         if not rows:
             return None
-        rows = sorted(rows, key=lambda row: abs(float(row.get("excess_pct") or 0.0)), reverse=True)[:8]
+        rows = sorted(rows, key=lambda row: float(row.get("excess_pct") or 0.0), reverse=True)[:8]
         labels = [str(row.get("symbol") or row.get("name") or "") for row in rows]
-        absolute = [float(row.get("change_pct") or 0.0) for row in rows]
         excess = [float(row.get("excess_pct") or 0.0) for row in rows]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in excess]
 
         fig, ax = self._figure(8.8, 5.0)
         y_pos = list(range(len(labels)))
-        ax.axvline(0, color=ACCENT, linewidth=1.25, alpha=0.8)
-        for idx, (abs_move, excess_move, color) in enumerate(zip(absolute, excess, colors)):
-            ax.hlines(y=idx, xmin=min(abs_move, excess_move), xmax=max(abs_move, excess_move), color=GRID, linewidth=2.2, alpha=0.9)
-            ax.scatter(abs_move, idx, color=NEUTRAL, s=62, edgecolor=BG, linewidth=1.0, zorder=4)
-            ax.scatter(excess_move, idx, color=color, s=88, edgecolor=BG, linewidth=1.0, zorder=5)
+        # Zero line labelled as "Benchmark"
+        ax.axvline(0, color=AXIS, linewidth=1.25, alpha=0.9)
+        ax.text(0, len(labels) - 0.3, "Benchmark", color=MUTED, fontsize=7.8, ha="center", va="top")
+        ax.hlines(y=y_pos, xmin=[0 for _ in excess], xmax=excess, color=colors, linewidth=2.8, alpha=0.88)
+        ax.scatter(excess, y_pos, color=colors, s=88, edgecolor=BG, linewidth=1.0, zorder=5)
         ax.set_yticks(y_pos)
         ax.set_yticklabels(labels, color=TEXT, fontsize=9.3, fontweight="bold")
         ax.invert_yaxis()
-        for idx, (abs_move, value) in enumerate(zip(absolute, excess)):
+
+        x_range = max(abs(v) for v in excess) if excess else 1.0
+        x_pad = max(0.15, x_range * 0.22)
+        for idx, value in enumerate(excess):
+            x_text = value + (x_pad * 0.5 if value >= 0 else -x_pad * 0.5)
             self._value_box(
                 ax,
-                value + (0.12 if value >= 0 else -0.12),
+                x_text,
                 idx,
-                f"excess {value:+.2f}% · abs {abs_move:+.2f}%",
+                f"{value:+.2f}%",
                 ha="left" if value >= 0 else "right",
-                fontsize=8.5,
+                fontsize=8.8,
                 color=colors[idx],
             )
         self._style_axes(
             ax,
             title=str(spec.get("title") or "Portfolio Movers vs Benchmark"),
-            xlabel="Daily move (%) · blue=absolute, green/red=excess",
+            xlabel="Excess return vs benchmark (%)",
             grid_axis="x",
         )
         fig.subplots_adjust(left=0.16, right=0.89, top=0.86, bottom=0.18)
@@ -665,14 +672,43 @@ class ChartRenderer:
 
         fig, ax = self._figure(8.8, 5.0)
         line_color = ACCENT
-        ax.plot(x, y, color=line_color, linewidth=2.7)
-        marker = None
+        ax.plot(x, y, color=line_color, linewidth=2.7, zorder=3)
+        ax.fill_between(x, y, min(y), color=line_color, alpha=0.10, zorder=2)
+
+        event_label = ""
         for ann in (spec.get("annotations") or []):
             if ann.get("label") == "event_window_start":
                 x_mark = int(ann.get("x") or 0)
-                marker = x_mark
-                ax.axvspan(x_mark, max(x), color=ACCENT, alpha=0.08)
-                ax.axvline(x_mark, color=ACCENT, linewidth=1.15, linestyle="--", alpha=0.92)
+                event_label = str(ann.get("event_name") or "event")
+                # Shaded vertical band from event start to chart end
+                ax.axvspan(x_mark, max(x), color=ACCENT, alpha=0.10, zorder=1)
+                ax.axvline(x_mark, color=ACCENT, linewidth=1.4, linestyle="--", alpha=0.75, zorder=4)
+                # Event band label inside the shaded region
+                y_label_pos = min(y) + (max(y) - min(y)) * 0.94
+                ax.text(
+                    x_mark + (max(x) - x_mark) * 0.04,
+                    y_label_pos,
+                    event_label,
+                    color=ACCENT,
+                    fontsize=8.2,
+                    weight="bold",
+                    ha="left",
+                    va="top",
+                    zorder=5,
+                )
+                window_pct = ((float(y[-1]) / float(y[x_mark])) - 1.0) * 100.0 if float(y[x_mark]) else 0.0
+                ax.text(
+                    x_mark + (max(x) - x_mark) * 0.04,
+                    y_label_pos * 0.995,
+                    f"+{window_pct:.2f}% window" if window_pct >= 0 else f"{window_pct:.2f}% window",
+                    color=MUTED,
+                    fontsize=7.8,
+                    ha="left",
+                    va="top",
+                    zorder=5,
+                )
+                break
+
         change_pct = ((float(y[-1]) / float(y[0])) - 1.0) * 100.0 if y[0] else 0.0
         self._value_box(
             ax,
@@ -684,21 +720,10 @@ class ChartRenderer:
             va="bottom",
             fontsize=8.5,
         )
-        if marker is not None:
-            ax.text(
-                marker,
-                max(y),
-                "event window",
-                color=ACCENT,
-                fontsize=8.2,
-                weight="bold",
-                ha="left",
-                va="top",
-            )
         self._style_axes(
             ax,
             title=str(spec.get("title") or f"{label} Event-Linked Trend"),
-            xlabel="30D session window",
+            xlabel="30D session",
             ylabel="Price",
             grid_axis="y",
         )
@@ -842,23 +867,56 @@ class ChartRenderer:
         largest = float(values.get("Largest Position") or 0.0)
         holdings = int(values.get("Active Holdings") or 0)
         state = str(meta.get("risk_state") or "moderate")
-        state_color = {"balanced": POSITIVE, "moderate": ACCENT, "concentrated": NEGATIVE}.get(state, NEUTRAL)
-        fig, ax = self._figure(8.0, 2.9)
-        ax.axis("off")
-        ax.set_title(str(spec.get("title") or "Portfolio Concentration"), loc="left", fontsize=15, weight="bold", color=TEXT, pad=9)
-        ax.plot([0.04, 0.44], [0.72, 0.72], transform=ax.transAxes, color=ACCENT, linewidth=1.8, alpha=0.8)
-        ax.text(0.04, 0.50, f"Top 5 {top5:.1f}%", transform=ax.transAxes, fontsize=17, color=TEXT, weight="bold")
-        ax.text(0.04, 0.27, f"Largest {largest:.1f}% · Holdings {holdings}", transform=ax.transAxes, fontsize=10, color=MUTED, weight="bold")
+        state_color = {"balanced": POSITIVE, "moderate": ACCENT, "concentrated": "#D18C00"}.get(state, NEUTRAL)
+
+        # Thresholds for visual reference lines
+        top5_threshold = 75.0
+        largest_threshold = 15.0
+
+        fig, ax = self._figure(8.4, 3.4)
+        ax.set_facecolor(BG)
+        ax.set_xlim(0, 100)
+        ax.set_ylim(-0.5, 2.5)
+
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+        ax.set_title(str(spec.get("title") or "Portfolio Concentration"), loc="left", fontsize=14.5, weight="bold", color=TEXT, pad=10)
+
+        bar_height = 0.38
+
+        # Top 5 gauge
+        top5_color = NEGATIVE if top5 >= top5_threshold else (ACCENT if top5 >= top5_threshold * 0.85 else POSITIVE)
+        ax.barh(1.8, top5, height=bar_height, color=top5_color, alpha=0.82, left=0, zorder=3)
+        ax.barh(1.8, 100, height=bar_height, color=SUBTLE, alpha=0.9, left=0, zorder=2)
+        ax.axvline(top5_threshold, color=MUTED, linewidth=1.0, linestyle="--", alpha=0.6, ymin=0.62, ymax=0.82)
+        ax.text(-1.5, 1.8, "Top 5", color=MUTED, fontsize=8.5, ha="right", va="center", weight="bold")
+        ax.text(top5 + 1.5, 1.8, f"{top5:.1f}%", color=top5_color, fontsize=9.0, ha="left", va="center", weight="bold")
+        ax.text(top5_threshold, 2.12, f"≥{top5_threshold:.0f}%", color=MUTED, fontsize=7.2, ha="center", va="bottom")
+
+        # Largest position gauge
+        lrg_color = NEGATIVE if largest >= largest_threshold else (ACCENT if largest >= largest_threshold * 0.8 else POSITIVE)
+        ax.barh(1.0, largest, height=bar_height, color=lrg_color, alpha=0.82, left=0, zorder=3)
+        ax.barh(1.0, 100, height=bar_height, color=SUBTLE, alpha=0.9, left=0, zorder=2)
+        ax.axvline(largest_threshold, color=MUTED, linewidth=1.0, linestyle="--", alpha=0.6, ymin=0.28, ymax=0.48)
+        ax.text(-1.5, 1.0, "Largest", color=MUTED, fontsize=8.5, ha="right", va="center", weight="bold")
+        ax.text(largest + 1.5, 1.0, f"{largest:.1f}%", color=lrg_color, fontsize=9.0, ha="left", va="center", weight="bold")
+        ax.text(largest_threshold, 1.32, f"≥{largest_threshold:.0f}%", color=MUTED, fontsize=7.2, ha="center", va="bottom")
+
+        # Holdings count and state label
+        ax.text(0, 0.18, f"{holdings} holdings", color=TEXT, fontsize=10, ha="left", va="center", weight="bold")
         ax.text(
-            0.64,
-            0.42,
+            60, 0.18,
             state.upper(),
-            transform=ax.transAxes,
-            fontsize=12,
             color=state_color,
+            fontsize=10,
+            ha="left",
+            va="center",
             weight="bold",
             bbox={"facecolor": SUBTLE, "edgecolor": GRID, "linewidth": 0.5, "pad": 2.4},
         )
+
+        fig.subplots_adjust(left=0.12, right=0.96, top=0.84, bottom=0.08)
         return self._to_asset(
             fig,
             key="portfolio_concentration_risk_card",
@@ -873,28 +931,48 @@ class ChartRenderer:
             return None
         labels = [str(row.get("name") or "") for row in rows]
         values = [float(row.get("value") or 0.0) for row in rows]
-        fig, ax = self._figure(8.0, 2.9)
-        bars = ax.bar(labels, values, color=ACCENT, alpha=0.88, width=0.58)
-        for bar, value in zip(bars, values):
+
+        # Skip chart entirely when all buckets are empty; caller shows text fallback
+        if not any(v > 0 for v in values):
+            return None
+
+        # Lollipop: filter to non-zero buckets only, sort by value
+        non_zero = [(l, v) for l, v in zip(labels, values) if v > 0]
+        non_zero.sort(key=lambda item: item[1], reverse=True)
+        labels_nz = [item[0] for item in non_zero]
+        values_nz = [item[1] for item in non_zero]
+        colors_nz = [ACCENT if "portfolio" in l.lower() or "watchlist" in l.lower() else NEUTRAL for l in labels_nz]
+
+        fig, ax = self._figure(8.0, max(2.9, 0.6 * len(labels_nz) + 1.4))
+        y_pos = list(range(len(labels_nz)))
+        ax.axvline(0, color=GRID, linewidth=0.8, alpha=0.6)
+        ax.hlines(y=y_pos, xmin=0, xmax=values_nz, color=colors_nz, linewidth=2.5, alpha=0.88)
+        ax.scatter(values_nz, y_pos, color=colors_nz, s=80, edgecolor=BG, linewidth=1.0, zorder=3)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels_nz, color=TEXT, fontsize=9.0, fontweight="bold")
+        ax.invert_yaxis()
+        x_pad = max(0.5, max(values_nz) * 0.15)
+        ax.set_xlim(0, max(values_nz) + x_pad)
+        for idx, value in enumerate(values_nz):
             ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                value + max(0.08, max(values or [1.0]) * 0.04),
+                value + x_pad * 0.3,
+                idx,
                 f"{value:.0f}",
-                ha="center",
-                va="bottom",
-                fontsize=9.2,
-                color=TEXT,
+                ha="left",
+                va="center",
+                fontsize=9.0,
+                color=colors_nz[idx],
                 weight="bold",
             )
         self._style_axes(
             ax,
             title=str(spec.get("title") or "Earnings Relevance"),
-            ylabel="Count",
-            grid_axis="y",
+            xlabel="Count",
+            grid_axis="x",
         )
-        ax.tick_params(axis="x", labelrotation=0, colors=TEXT, labelsize=8.4)
-        ax.set_ylim(0, max(values) * 1.35 if values and max(values) else 1.0)
-        fig.subplots_adjust(left=0.08, right=0.97, top=0.84, bottom=0.22)
+        ax.grid(False)
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=5))
+        fig.subplots_adjust(left=0.28, right=0.94, top=0.84, bottom=0.18)
         return self._to_asset(
             fig,
             key="earnings_relevance_strip",
