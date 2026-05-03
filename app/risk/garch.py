@@ -19,6 +19,9 @@ def compute_garch_metrics(daily_returns: list[float]) -> dict[str, Any]:
         from arch import arch_model
 
         returns_pct = np.asarray(daily_returns, dtype=float) * 100.0
+        returns_pct = returns_pct[np.isfinite(returns_pct)]
+        if len(returns_pct) < _MIN_OBS:
+            return {"available": False, "reason": f"Insufficient clean data after NaN/inf removal (need >= {_MIN_OBS})."}
         model = arch_model(returns_pct, vol="Garch", p=1, q=1, dist="normal", rescale=False)
         fitted = model.fit(disp="off", show_warning=False)
 

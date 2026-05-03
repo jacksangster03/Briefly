@@ -26,7 +26,11 @@ class ECBProvider(BaseProvider):
     def _fetch_series(self, flow: str, last_n: int = 2) -> list[tuple[str, float]]:
         url = f"{self.base_url}/data/{flow}"
         try:
-            data = self._get(url, params={"format": "jsondata", "lastNObservations": last_n})
+            data = self._get(
+                url,
+                params={"lastNObservations": last_n, "detail": "dataonly"},
+                headers={"Accept": "application/vnd.sdmx.data+json;version=1.0.0-wd"},
+            )
         except ProviderError:
             logger.warning("ECB fetch failed for %s", flow)
             return []

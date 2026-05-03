@@ -260,6 +260,8 @@ class LLMEmailRenderer:
                             "Never invent events, tickers, numbers, or URLs. "
                             "Do not invent or modify chart type, chart scale, chart series, or chart annotations. "
                             "Charts are deterministic and already selected upstream. "
+                            "When referencing prices or values, never prefix numbers with currency symbols ($, €, £). "
+                            "Write 'WTI at 101.3' or '101.3 USD' rather than '$101.3'. "
                             "Return strict JSON with keys: subject (string), body (string), source_urls (array of strings). "
                             "Body should be concise, readable on mobile, and under max_body_chars."
                         ),
