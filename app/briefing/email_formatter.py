@@ -19,7 +19,7 @@ _BOLD_HEADER_RE = re.compile(r"^<b>([^<]+)</b>\s*$")
 _LABEL_RE = re.compile(
     r"(?P<label>Dominant driver|Setup read|Portfolio impact|Action posture|Regional skew|Watchlist|Earnings Calendar):"
 )
-_EMAIL_FONT_STACK = "Aptos,'Segoe UI',Arial,sans-serif"
+_EMAIL_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
 
 
 class EmailFormatter:
@@ -35,7 +35,7 @@ class EmailFormatter:
         subject = self._subject(briefing)
         return EmailRenderResult(
             subject=subject,
-            plain_text=_HTML_TAG_RE.sub("", full_html),
+            plain_text=self._email_plain_text(briefing, full_html),
             html_body=self._html_body(briefing, full_html, subject),
             inline_assets=briefing.chart_assets,
         )
@@ -58,42 +58,50 @@ class EmailFormatter:
         generated_local = self._format_local(briefing.generated_at)
         title, date_label = self._split_subject(subject)
         regime_text = " / ".join(str(tag).replace("_", " ").upper() for tag in regime_tags) or "MIXED"
+        desk_read = self._top_desk_read(briefing)
 
         parts = [
-            f"<html><body style=\"margin:0;padding:0;background:#071421;font-family:{_EMAIL_FONT_STACK};color:#F3F7FB;\">",
+            f"<html><body style=\"margin:0;padding:0;background:#071629;font-family:{_EMAIL_FONT_STACK};color:#E8ECEF;\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#071629;\">",
-            "<tr><td align=\"center\" style=\"padding:10px 6px;\">",
-            "<table role=\"presentation\" width=\"780\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:780px;max-width:780px;background:#091B2B;border:1px solid #23384D;\">",
-            "<tr><td style=\"height:4px;line-height:4px;font-size:0;background:#FF7A00;\">&nbsp;</td></tr>",
-            "<tr><td style=\"padding:18px 20px 14px 20px;border-bottom:1px solid #23384D;background:#0B1D30;\">",
+            "<tr><td align=\"center\" style=\"padding:8px 4px;\">",
+            "<table role=\"presentation\" width=\"680\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:680px;max-width:680px;background:#071629;border:1px solid #1F3447;\">",
+            "<tr><td style=\"height:3px;line-height:3px;font-size:0;background:#FF6B00;\">&nbsp;</td></tr>",
+            "<tr><td style=\"padding:13px 16px 11px 16px;border-bottom:1px solid #1F3447;background:#0B1D30;\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
             "<td valign=\"bottom\" style=\"width:62%;\">",
-            f"<div style=\"font-size:30px;line-height:1.02;font-weight:800;color:#F3F7FB;letter-spacing:-0.035em;\">{html.escape(title)}</div>",
-            f"<div style=\"margin-top:7px;font-size:13px;line-height:1.45;color:#9FB3C8;\">{html.escape(lead)}</div>",
+            f"<div style=\"font-size:20px;line-height:1.08;font-weight:800;color:#E8ECEF;letter-spacing:-0.01em;\">{html.escape(title)}</div>",
+            f"<div style=\"margin-top:5px;font-size:12px;line-height:1.35;color:#7A8FA0;\">{html.escape(lead)}</div>",
             "</td>",
             "<td valign=\"bottom\" align=\"right\" style=\"width:38%;\">",
-            f"<div style=\"font-size:16px;line-height:1.2;font-weight:700;color:#F3F7FB;letter-spacing:0.01em;\">{html.escape(date_label)}</div>",
-            f"<div style=\"margin-top:8px;font-size:11px;line-height:1.35;color:#9FB3C8;\">REGIME <span style=\"color:#FF7A00;font-weight:800;\">{html.escape(regime_text)}</span></div>",
+            f"<div style=\"font-size:13px;line-height:1.2;font-weight:700;color:#E8ECEF;letter-spacing:-0.01em;\">{html.escape(date_label)}</div>",
+            f"<div style=\"margin-top:5px;font-size:10.5px;line-height:1.3;color:#7A8FA0;\">REGIME <span style=\"color:#FF6B00;font-weight:800;\">{html.escape(regime_text)}</span></div>",
             "</td></tr></table>",
             "</td></tr>",
-            "<tr><td style=\"padding:9px 20px;border-bottom:1px solid #23384D;background:#091B2B;\">",
+            "<tr><td style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:#071629;\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
-            f"<td style=\"font-size:12px;line-height:1.45;color:#9FB3C8;\"><strong style=\"color:#F3F7FB;\">Generated</strong> {html.escape(generated_local)}</td>",
-            f"<td align=\"center\" style=\"font-size:12px;line-height:1.45;color:#9FB3C8;\"><strong style=\"color:#F3F7FB;\">Profile</strong> {html.escape(profile_name)}</td>",
-            f"<td align=\"right\" style=\"font-size:12px;line-height:1.45;color:#9FB3C8;\"><strong style=\"color:#F3F7FB;\">Mode</strong> {html.escape(delivery_mode)} · LLM shadow {'on' if llm_shadow else 'off'} · <strong style=\"color:#F3F7FB;\">Confidence</strong> {html.escape(confidence)}</td>",
+            f"<td style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">GENERATED</strong> {html.escape(generated_local)}</td>",
+            f"<td align=\"center\" style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">PROFILE</strong> {html.escape(profile_name)}</td>",
+            f"<td align=\"right\" style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">MODE</strong> {html.escape(delivery_mode)} · LLM shadow {'on' if llm_shadow else 'off'} · <strong style=\"color:#E8ECEF;\">CONF</strong> {html.escape(confidence)}</td>",
             "</tr></table>",
             "</td></tr>",
-            "<tr><td style=\"padding:8px 20px;border-bottom:1px solid #23384D;background:#091B2B;\">",
-            f"<div style=\"font-size:12px;line-height:1.45;color:#9FB3C8;\"><strong style=\"color:#F3F7FB;\">Source freshness</strong> {html.escape(freshness)}</div>",
+            "<tr><td style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:#071629;\">",
+            f"<div style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">SOURCE</strong> {html.escape(freshness)}</div>",
             "</td></tr>",
         ]
 
+        if desk_read:
+            parts.append(
+                "<tr><td style=\"padding:9px 16px;border-bottom:1px solid #1F3447;background:#071629;"
+                "font-size:12.5px;line-height:1.38;color:#E8ECEF;\">"
+                f"{desk_read}</td></tr>"
+            )
+
         if briefing.chart_assets:
-            parts.append("<tr><td style=\"padding:13px 20px 0 20px;background:#091B2B;\">")
+            parts.append("<tr><td style=\"padding:10px 16px 0 16px;background:#071629;\">")
             parts.append(self._chart_modules(briefing))
             parts.append("</td></tr>")
 
-        parts.append("<tr><td style=\"padding:2px 20px 20px 20px;background:#091B2B;\">")
+        parts.append("<tr><td style=\"padding:0 16px 16px 16px;background:#071629;\">")
         parts.append(self._brief_modules(full_html))
         parts.append("</td></tr>")
 
@@ -109,24 +117,23 @@ class EmailFormatter:
             role = str(roles.get(asset.key) or ("hero" if idx == 0 else "support"))
             is_hero = role == "hero" or idx == 0
             is_micro = role.startswith("micro")
-            title_size = "20px" if is_hero else ("14px" if is_micro else "16px")
-            pad_top = "0" if idx == 0 else ("11px" if is_micro else "14px")
-            pad_bottom = "16px" if is_hero else ("10px" if is_micro else "13px")
-            image_border = "1px solid #23384D" if is_hero else "1px solid #1D3145"
+            title_size = "15px" if is_hero else ("13px" if is_micro else "14px")
+            pad_top = "0" if idx == 0 else ("8px" if is_micro else "11px")
+            pad_bottom = "13px" if is_hero else ("9px" if is_micro else "11px")
+            read_line = self._chart_read_line(asset.caption)
             modules.append(
-                f"<tr><td style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid #23384D;\">"
+                f"<tr><td style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid #1F3447;\">"
             )
             modules.append(
-                f"<div style=\"font-size:{title_size};line-height:1.18;font-weight:800;color:#F3F7FB;letter-spacing:-0.015em;padding:0 0 7px 0;\">{html.escape(asset.title)}</div>"
+                f"<div style=\"font-size:{title_size};line-height:1.15;font-weight:800;color:#E8ECEF;letter-spacing:-0.01em;padding:0 0 4px 0;\">{html.escape(asset.title)}</div>"
+            )
+            modules.append(
+                f"<div style=\"font-size:12px;line-height:1.35;color:#7A8FA0;padding:0 0 11px 0;\"><span style=\"color:#FF6B00;font-size:10px;letter-spacing:0.05em;font-weight:800;\">READ</span> {html.escape(read_line)}</div>"
             )
             modules.append(
                 f"<img src=\"cid:{html.escape(asset.content_id)}\" alt=\"{html.escape(asset.title)}\" "
-                f"style=\"display:block;width:100%;max-width:738px;margin-top:0;border:{image_border};\">"
+                "width=\"640\" style=\"display:block;width:100%;max-width:640px;height:auto;margin-top:0;border:0;\">"
             )
-            if asset.caption:
-                modules.append(
-                    f"<div style=\"margin-top:7px;font-size:12.5px;line-height:1.45;color:#9FB3C8;\"><span style=\"color:#FF7A00;font-weight:800;\">READ</span> {html.escape(asset.caption)}</div>"
-                )
             modules.append("</td></tr>")
         modules.append("</table>")
         return "".join(modules)
@@ -144,18 +151,49 @@ class EmailFormatter:
             body = self._emphasize_market_labels("<br>".join(line for line in lines[1:] if line is not None))
             return (
                 "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;\">"
-                "<tr><td style=\"padding:14px 0 11px 0;font-size:15px;color:#DCE7F3;line-height:1.62;border-top:1px solid #23384D;\">"
-                f"<div style=\"font-size:18px;line-height:1.2;font-weight:800;letter-spacing:-0.015em;color:#F3F7FB;margin:0 0 8px 0;\">{html.escape(header_text)}</div>"
+                "<tr><td style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;\">"
+                f"<div style=\"font-size:15px;line-height:1.18;font-weight:800;letter-spacing:-0.01em;color:#E8ECEF;margin:0 0 6px 0;\">{html.escape(header_text)}</div>"
                 f"{body}"
                 "</td></tr></table>"
             )
         body = self._emphasize_market_labels("<br>".join(lines))
         return (
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;\">"
-            "<tr><td style=\"padding:14px 0 11px 0;font-size:15px;color:#DCE7F3;line-height:1.62;border-top:1px solid #23384D;\">"
+            "<tr><td style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;\">"
             f"{body}"
             "</td></tr></table>"
         )
+
+    @staticmethod
+    def _chart_read_line(caption: str | None) -> str:
+        text = (caption or "Deterministic market read from current briefing inputs.").strip()
+        words = text.split()
+        if len(words) > 20:
+            text = " ".join(words[:20]).rstrip(".,;:") + "."
+        return text
+
+    def _top_desk_read(self, briefing: MorningBriefing) -> str:
+        lines = [html.escape(line) for line in self._top_desk_read_lines(briefing)]
+        return self._emphasize_market_labels("<br>".join(lines))
+
+    def _email_plain_text(self, briefing: MorningBriefing, full_html: str) -> str:
+        plain = _HTML_TAG_RE.sub("", full_html)
+        desk_lines = self._top_desk_read_lines(briefing)
+        if not desk_lines:
+            return plain
+        return "\n".join(desk_lines) + "\n\n" + plain
+
+    @staticmethod
+    def _top_desk_read_lines(briefing: MorningBriefing) -> list[str]:
+        driver = (
+            briefing.dominant_tape_driver.strip()
+            if briefing.dominant_tape_driver
+            else "No single dominant driver; monitor setup read for mixed market impulses."
+        )
+        lines = [f"Dominant driver: {driver}"]
+        if briefing.market_setup_analysis:
+            lines.append(f"Setup read: {briefing.market_setup_analysis}")
+        return lines
 
     @staticmethod
     def _split_subject(subject: str) -> tuple[str, str]:
@@ -168,7 +206,7 @@ class EmailFormatter:
     def _emphasize_market_labels(body: str) -> str:
         def repl(match: re.Match[str]) -> str:
             label = html.escape(match.group("label"))
-            return f'<strong style="color:#FF7A00;font-weight:800;">{label}:</strong>'
+            return f'<strong style="color:#FF6B00;font-weight:800;">{label}:</strong>'
 
         return _LABEL_RE.sub(repl, body)
 

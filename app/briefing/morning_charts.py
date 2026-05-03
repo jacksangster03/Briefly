@@ -374,6 +374,7 @@ def _global_relative_spec(*, index_quotes: list[QuoteData], market_data_service:
                 "name": quote.display_name or quote.symbol,
                 "symbol": quote.symbol,
                 "family": family,
+                "change_pct": round(float(quote.change_percent or 0.0), 4),
                 "x_1d": list(range(len(rebased_1))),
                 "y_1d": rebased_1,
                 "x_5d": list(range(len(rebased_5))),
@@ -382,6 +383,7 @@ def _global_relative_spec(*, index_quotes: list[QuoteData], market_data_service:
                 "y_20d": rebased_20 or [],
             }
         )
+    series = _limit_global_series(series)
     available = bool(series)
     return {
         "chart_key": "global_relative_performance",
@@ -389,7 +391,7 @@ def _global_relative_spec(*, index_quotes: list[QuoteData], market_data_service:
         "available": available,
         "reason_if_hidden": None if available else "History unavailable for global index comparison.",
         "title": "Global Equity Leadership",
-        "caption": "Rebased path comparison across US, Europe, and Asia with endpoint hierarchy.",
+        "caption": _global_read_line(series),
         "series": series,
         "annotations": [],
         "meta": {
@@ -397,7 +399,7 @@ def _global_relative_spec(*, index_quotes: list[QuoteData], market_data_service:
             "supported_windows": ["1d", "5d", "20d"],
             "missing": missing,
         },
-        "email_dimensions": {"width": 8.8, "height": 4.9},
+        "email_dimensions": {"width": 1000, "height": 600},
     }
 
 
@@ -441,11 +443,11 @@ def _cross_asset_impulse_spec(*, macro_quotes: list[QuoteData], macro_context: l
         "available": available,
         "reason_if_hidden": None if available else "Macro instruments unavailable for impulse strip.",
         "title": "Cross-Asset Impulses",
-        "caption": "Centered impulse read across rates, commodities, and macro risk gauges.",
+        "caption": _impulse_read_line(points),
         "series": points,
         "annotations": [{"label": "zero_line", "value": 0}],
         "meta": {"impulse_units": {"pct": "percent", "bps": "basis points"}},
-        "email_dimensions": {"width": 8.8, "height": 4.7},
+        "email_dimensions": {"width": 1000, "height": 560},
     }
 
 
@@ -470,11 +472,11 @@ def _holdings_excess_spec(*, holdings_quotes: list[QuoteData], benchmark_referen
         "available": available,
         "reason_if_hidden": None if available else "No holdings/watchlist quotes available.",
         "title": "Portfolio Movers vs Benchmark",
-        "caption": "Absolute move and excess return versus benchmark reference.",
+        "caption": _holdings_read_line(rows),
         "series": rows,
         "annotations": [],
         "meta": {"benchmark_reference_pct": round(benchmark_reference, 4)},
-        "email_dimensions": {"width": 8.8, "height": 5.0},
+        "email_dimensions": {"width": 1000, "height": 600},
     }
 
 
@@ -501,11 +503,11 @@ def _sector_quadrant_spec(briefing: MorningBriefing, profile: UserProfile) -> di
         "available": available,
         "reason_if_hidden": None if available else "Sector exposure/performance inputs unavailable.",
         "title": "Sector Exposure vs Move",
-        "caption": "Quadrant view of exposure concentration versus latest sector move.",
+        "caption": _sector_read_line(points),
         "series": points,
         "annotations": [{"label": "origin", "x": 0, "y": 0}],
         "meta": {},
-        "email_dimensions": {"width": 8.8, "height": 4.9},
+        "email_dimensions": {"width": 1000, "height": 580},
     }
 
 
@@ -518,11 +520,11 @@ def _event_linked_spec(briefing: MorningBriefing, market_data_service: Any) -> d
             "available": False,
             "reason_if_hidden": "No portfolio-linked focus symbol identified.",
             "title": "Event-Linked Trend",
-            "caption": "Annotated trend appears when a deterministic focus symbol is available.",
+            "caption": "Event trend appears when a portfolio-linked focus symbol is available.",
             "series": [],
             "annotations": [],
             "meta": {},
-            "email_dimensions": {"width": 8.8, "height": 4.9},
+            "email_dimensions": {"width": 1000, "height": 580},
         }
 
     history = market_data_service.get_price_history(focus_symbol, period="3mo", interval="1d") or []
@@ -533,11 +535,11 @@ def _event_linked_spec(briefing: MorningBriefing, market_data_service: Any) -> d
             "available": False,
             "reason_if_hidden": f"Insufficient history for {focus_symbol}.",
             "title": f"{focus_symbol} Event-Linked Trend",
-            "caption": "Trend unavailable due to limited history points.",
+            "caption": "Trend unavailable because history is too thin for a reliable event window.",
             "series": [],
             "annotations": [],
             "meta": {"symbol": focus_symbol},
-            "email_dimensions": {"width": 8.8, "height": 4.9},
+            "email_dimensions": {"width": 1000, "height": 580},
         }
     path = history[-30:]
     x = [idx for idx, _ in enumerate(path)]
@@ -549,14 +551,14 @@ def _event_linked_spec(briefing: MorningBriefing, market_data_service: Any) -> d
         "available": True,
         "reason_if_hidden": None,
         "title": f"{focus_symbol} Event-Linked Trend",
-        "caption": "Latest trend with deterministic event-window marker.",
+        "caption": f"{focus_symbol} trend is framed around the latest deterministic catalyst window.",
         "series": [{"name": focus_symbol, "symbol": focus_symbol, "x": x, "y": y}],
         "annotations": [
             {"label": "event_window_start", "x": marker},
             {"label": "latest", "x": len(path) - 1},
         ],
         "meta": {"symbol": focus_symbol},
-        "email_dimensions": {"width": 8.8, "height": 4.9},
+        "email_dimensions": {"width": 1000, "height": 580},
     }
 
 
@@ -583,7 +585,7 @@ def _breadth_leadership_spec(metrics: dict[str, Any]) -> dict[str, Any]:
         "series": rows,
         "annotations": [{"label": "zero_line", "value": 0}],
         "meta": {"up_count": up, "total_count": total},
-        "email_dimensions": {"width": 8.8, "height": 4.4},
+        "email_dimensions": {"width": 1000, "height": 520},
     }
 
 
@@ -689,6 +691,51 @@ def _earnings_relevance_spec(briefing: MorningBriefing) -> dict[str, Any]:
         "meta": {},
         "email_dimensions": {"width": 8.0, "height": 2.9},
     }
+
+
+def _limit_global_series(series: list[dict[str, Any]], *, limit: int = 7) -> list[dict[str, Any]]:
+    if len(series) <= limit:
+        return series
+    primary = series[:2]
+    seen = {row["symbol"] for row in primary}
+    rest = sorted(
+        [row for row in series[2:] if row["symbol"] not in seen],
+        key=lambda row: abs(float(row.get("change_pct") or 0.0)),
+        reverse=True,
+    )
+    return (primary + rest)[:limit]
+
+
+def _global_read_line(series: list[dict[str, Any]]) -> str:
+    if not series:
+        return "Global leadership chart unavailable because index history is incomplete."
+    ranked = sorted(series, key=lambda row: float((row.get("y_5d") or [100.0])[-1]), reverse=True)
+    leader = ranked[0]
+    laggard = ranked[-1]
+    spread = float((leader.get("y_5d") or [100.0])[-1]) - float((laggard.get("y_5d") or [100.0])[-1])
+    return f"{leader['name']} leads {laggard['name']} by {spread:.1f} rebased points over the 5D window."
+
+
+def _impulse_read_line(points: list[dict[str, Any]]) -> str:
+    if not points:
+        return "Macro impulse strip unavailable because rates and commodity inputs are missing."
+    driver = max(points, key=lambda row: abs(float(row.get("impulse") or 0.0)))
+    unit = "bp" if driver.get("unit") == "bps" else "%"
+    return f"{driver['name']} is the largest cross-asset impulse at {float(driver.get('impulse') or 0.0):+.2f}{unit}."
+
+
+def _holdings_read_line(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "Portfolio movers unavailable because holdings and watchlist quotes are missing."
+    driver = max(rows, key=lambda row: abs(float(row.get("excess_pct") or 0.0)))
+    return f"{driver['symbol']} is the biggest benchmark-relative mover at {float(driver.get('excess_pct') or 0.0):+.2f}% excess."
+
+
+def _sector_read_line(points: list[dict[str, Any]]) -> str:
+    if not points:
+        return "Sector quadrant unavailable because sector exposure or ETF move inputs are missing."
+    driver = max(points, key=lambda row: abs(float(row.get("y_change_pct") or 0.0)) + float(row.get("x_exposure") or 0.0) * 0.05)
+    return f"{driver['name']} is the key sector outlier at {float(driver.get('x_exposure') or 0.0):.1f}% exposure and {float(driver.get('y_change_pct') or 0.0):+.2f}% move."
 
 
 def _priority_global_relative(metrics: dict[str, Any], tags: list[str]) -> float:

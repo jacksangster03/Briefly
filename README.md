@@ -269,13 +269,17 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
   - `GET /ui/briefing/morning/charts?profile=...`
   - `GET /api/v1/profile/{profile}/briefing/morning/charts`
 - Outlook-focused email shell was tightened to a denser desk-note style:
-  - continuous dark navy briefing canvas with one subtle outer frame and thin section dividers
-  - sharper masthead, compact metadata strip, source-freshness line, and regime marker
-  - role-aware chart hierarchy (hero/support/micro) with stable inline-image CID assets
-  - reduced radius/card chrome, stronger typography, and selective orange emphasis for key labels
+  - continuous dark navy briefing canvas (`#071629` / `#0B1D30`) with a hard-edged orange top rule and thin section dividers
+  - Outlook-safe table structure, inline styles, system fonts only, and no reliance on rounded cards, shadows, flexbox, grid, or web fonts
+  - compact 680px desk-note width, dense 10-20px typography, 1.3-1.4 line heights, and a top metadata strip for profile/freshness/regime state
+  - top desk-read block with `Dominant driver` and `Setup read` before charts; mixed days receive an explicit no-single-driver fallback
+  - role-aware chart hierarchy (hero/support/micro) with stable inline-image CID assets and a `READ` line above every chart image
 - Morning email chart renderer now uses a stricter terminal palette and finance-style annotations:
-  - dark integrated plot backgrounds, endpoint/value boxes, orange neutral/reference lines, and semantic green/red moves
-  - upgraded global leadership, cross-asset impulse, holdings dumbbell, sector quadrant, event trend, and microcard visuals
+  - dark integrated plot backgrounds, 2x Matplotlib rendering, tighter tick density, endpoint/value boxes, and semantic orange/teal/blue/red moves
+  - global leadership is capped to 7 series for readability, cross-asset impulses are asset-class ordered, and chart labels are collision-aware
+  - upgraded global leadership, cross-asset impulse, holdings dumbbell, sector quadrant, event trend, and terminal-style microcard visuals
+- Chart promotion keeps a richer deterministic stack when data is available:
+  - hero chart + support charts + portfolio/event charts + microcards, targeting 6+ visuals without changing the LLM boundary
 - LLM boundary tightened: renderer receives deterministic chart summaries/tags for prose only and cannot control chart design decisions
 
 **Signal Hygiene Upgrade (Phase 6.5)**

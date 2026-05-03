@@ -20,25 +20,27 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 logger = get_logger("chart_renderer")
 
-POSITIVE = "#19C37D"
-NEGATIVE = "#FF5B5B"
-NEUTRAL = "#4DA3FF"
-ACCENT = "#FF7A00"
-BG = "#071421"
+POSITIVE = "#00D4AA"
+NEGATIVE = "#FF6B6B"
+NEUTRAL = "#4A90E2"
+ACCENT = "#FF6B00"
+BG = "#071629"
 PANEL = "#0B1D30"
-GRID = "#23384D"
-MUTED = "#9FB3C8"
-TEXT = "#F3F7FB"
+GRID = "#2A3441"
+AXIS = "#3D4451"
+MUTED = "#7A8FA0"
+TEXT = "#E8ECEF"
 SUBTLE = "#14263A"
 
 REGION_COLORS = {
     "us": ACCENT,
-    "europe": "#4DA3FF",
-    "asia": "#F6C445",
-    "other": "#8EA7C2",
+    "europe": "#4A90E2",
+    "asia": "#FFD700",
+    "other": "#9BA3AB",
 }
 
 
@@ -47,7 +49,7 @@ class ChartRenderer:
 
     @staticmethod
     def _figure(width: float = 8.8, height: float = 4.9):
-        fig, ax = plt.subplots(figsize=(width, height), dpi=150)
+        fig, ax = plt.subplots(figsize=(width, height), dpi=200)
         fig.patch.set_facecolor(BG)
         ax.set_facecolor(BG)
         return fig, ax
@@ -61,14 +63,16 @@ class ChartRenderer:
         ylabel: str | None = None,
         grid_axis: str = "y",
     ) -> None:
-        ax.set_title(title, loc="left", fontsize=16, weight="bold", color=TEXT, pad=12)
+        ax.set_title(title, loc="left", fontsize=14.5, weight="bold", color=TEXT, pad=10)
         if xlabel:
-            ax.set_xlabel(xlabel, color=MUTED, fontsize=9.5)
+            ax.set_xlabel(xlabel, color=MUTED, fontsize=9.0)
         if ylabel:
-            ax.set_ylabel(ylabel, color=MUTED, fontsize=9.5)
-        ax.tick_params(axis="x", colors=MUTED, labelsize=8.8)
-        ax.tick_params(axis="y", colors=MUTED, labelsize=8.8)
-        ax.grid(axis=grid_axis, color=GRID, linewidth=0.75, alpha=0.72)
+            ax.set_ylabel(ylabel, color=MUTED, fontsize=9.0)
+        ax.tick_params(axis="x", colors=MUTED, labelsize=8.5)
+        ax.tick_params(axis="y", colors=MUTED, labelsize=8.5)
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=6))
+        ax.grid(axis=grid_axis, color=GRID, linewidth=0.5, alpha=0.58)
         for spine in ax.spines.values():
             spine.set_visible(False)
 
@@ -93,7 +97,7 @@ class ChartRenderer:
             fontsize=fontsize,
             color=color,
             weight="bold",
-            bbox={"facecolor": BG, "edgecolor": GRID, "linewidth": 0.45, "pad": 1.4},
+            bbox={"facecolor": BG, "edgecolor": "none", "alpha": 0.82, "pad": 1.2},
             zorder=6,
         )
 
@@ -103,6 +107,37 @@ class ChartRenderer:
         if idx == 0:
             return ACCENT
         return REGION_COLORS.get(family, REGION_COLORS["other"])
+
+    @staticmethod
+    def _line_series_for_email(series: list[dict], limit: int = 7) -> list[dict]:
+        ranked = sorted(
+            series,
+            key=lambda row: abs(float((row.get("y_5d") or [100.0])[-1]) - 100.0),
+            reverse=True,
+        )
+        return ranked[:limit]
+
+    @staticmethod
+    def _label_positions(values: list[float], *, min_gap: float = 0.34) -> list[float]:
+        indexed = sorted(enumerate(values), key=lambda item: item[1])
+        adjusted = [float(value) for value in values]
+        previous: float | None = None
+        for original_idx, value in indexed:
+            next_value = float(value) if previous is None else max(float(value), previous + min_gap)
+            adjusted[original_idx] = next_value
+            previous = next_value
+        return adjusted
+
+    @staticmethod
+    def _impulse_sort_key(row: dict) -> tuple[int, float]:
+        text = f"{row.get('name') or ''} {row.get('symbol') or ''}".lower()
+        if "yield" in text or "curve" in text or "ust" in text:
+            bucket = 0
+        elif "wti" in text or "crude" in text or "gold" in text:
+            bucket = 1
+        else:
+            bucket = 2
+        return bucket, -abs(float(row.get("impulse") or 0.0))
 
     def render_from_spec(self, spec: dict) -> ChartAsset | None:
         key = str(spec.get("chart_key") or "").strip().lower()
@@ -381,11 +416,12 @@ class ChartRenderer:
         )
 
     def render_global_relative_from_spec(self, spec: dict) -> ChartAsset | None:
-        series = list(spec.get("series") or [])
+        series = self._line_series_for_email(list(spec.get("series") or []), limit=7)
         if not series:
             return None
         fig, ax = self._figure(8.8, 5.0)
         y_latest: list[float] = []
+        label_rows: list[tuple[int, str, float, float, str]] = []
         for idx, row in enumerate(series):
             x = row.get("x_5d") or []
             y = row.get("y_5d") or []
@@ -398,14 +434,7 @@ class ChartRenderer:
             ax.plot(x, y, color=color, linewidth=linewidth, alpha=alpha)
             y_latest.append(float(y[-1]))
             label = name.replace(" Composite", "").replace("EURO STOXX 50", "STOXX50")
-            self._value_box(
-                ax,
-                float(x[-1]) + 0.12,
-                float(y[-1]),
-                label,
-                color=color,
-                fontsize=7.8 if idx > 2 else 8.4,
-            )
+            label_rows.append((idx, label, float(x[-1]), float(y[-1]), color))
 
         ax.axhline(100, color=ACCENT, linewidth=1.0, alpha=0.62)
         if y_latest:
@@ -419,6 +448,22 @@ class ChartRenderer:
                 fontsize=8.4,
                 weight="bold",
             )
+            q1 = min(y_latest) + (max(y_latest) - min(y_latest)) * 0.25
+            q3 = min(y_latest) + (max(y_latest) - min(y_latest)) * 0.75
+            label_candidates = [
+                row for row in label_rows if row[0] == 0 or row[3] <= q1 or row[3] >= q3
+            ][:5]
+            adjusted = self._label_positions([row[3] for row in label_candidates])
+            for row, y_pos in zip(label_candidates, adjusted):
+                idx, label, x_val, y_val, color = row
+                self._value_box(
+                    ax,
+                    x_val + 0.12,
+                    y_pos,
+                    f"{label} {y_val:.1f}",
+                    color=color,
+                    fontsize=7.8 if idx > 2 else 8.2,
+                )
         self._style_axes(
             ax,
             title=str(spec.get("title") or "Global Equity Leadership"),
@@ -437,7 +482,7 @@ class ChartRenderer:
         )
 
     def render_cross_asset_impulse_from_spec(self, spec: dict) -> ChartAsset | None:
-        points = sorted(list(spec.get("series") or []), key=lambda row: abs(float(row.get("impulse") or 0.0)), reverse=True)
+        points = sorted(list(spec.get("series") or []), key=self._impulse_sort_key)
         if not points:
             return None
         labels = [self._compact_impulse_label(str(row.get("name") or row.get("symbol") or "")) for row in points]
@@ -446,7 +491,7 @@ class ChartRenderer:
 
         fig, ax = self._figure(8.8, 4.9)
         y_pos = list(range(len(labels)))
-        ax.axvline(0, color=ACCENT, linewidth=1.55, alpha=0.92)
+        ax.axvline(0, color=TEXT, linewidth=1.55, alpha=0.9)
         ax.hlines(y=y_pos, xmin=[0 for _ in values], xmax=values, color=colors, linewidth=2.8, alpha=0.88)
         ax.scatter(values, y_pos, color=colors, s=88, edgecolor=BG, linewidth=1.1, zorder=3)
         ax.set_yticks(y_pos)
@@ -478,10 +523,11 @@ class ChartRenderer:
             xlabel="Centered daily impulse (bps / %)",
             grid_axis="x",
         )
+        ax.grid(False)
         ax.text(
             0.01,
             0.02,
-            "Sorted by absolute impulse · zero line marks neutral transmission",
+            "Rates first, commodities next; zero line marks neutral transmission",
             transform=ax.transAxes,
             color=MUTED,
             fontsize=8.2,
@@ -618,9 +664,8 @@ class ChartRenderer:
         label = str(row.get("name") or row.get("symbol") or "Focus Symbol")
 
         fig, ax = self._figure(8.8, 5.0)
-        line_color = POSITIVE if y[-1] >= y[0] else NEGATIVE
+        line_color = ACCENT
         ax.plot(x, y, color=line_color, linewidth=2.7)
-        ax.fill_between(x, y, min(y), color=line_color, alpha=0.13)
         marker = None
         for ann in (spec.get("annotations") or []):
             if ann.get("label") == "event_window_start":

@@ -169,14 +169,16 @@ def test_email_formatter_uses_continuous_finance_canvas():
     )
 
     rendered = formatter.format_morning_briefing(briefing)
-    assert "background:#071421" in rendered.html_body
-    assert "font-size:30px" in rendered.html_body
-    assert "#FF7A00" in rendered.html_body
-    assert "Source freshness" in rendered.html_body
+    assert "background:#071629" in rendered.html_body
+    assert "font-size:20px" in rendered.html_body
+    assert "#FF6B00" in rendered.html_body
+    assert "SOURCE" in rendered.html_body
     assert "REGIME" in rendered.html_body
     assert "READ" in rendered.html_body
+    assert "Dominant driver:" in rendered.html_body
     assert "border-radius" not in rendered.html_body
-    assert '<strong style="color:#FF7A00;font-weight:800;">Setup read:</strong>' in rendered.html_body
+    assert rendered.html_body.index("READ") < rendered.html_body.index("<img src=\"cid:market-snapshot-cid\"")
+    assert '<strong style="color:#FF6B00;font-weight:800;">Setup read:</strong>' in rendered.html_body
 
 
 def test_email_formatter_includes_quote_freshness_metadata():

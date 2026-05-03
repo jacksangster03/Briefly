@@ -63,6 +63,12 @@ def _sample_briefing() -> MorningBriefing:
                 QuoteData(symbol="^IXIC", display_name="Nasdaq Composite (COMP)", current_price=24400, change=360, change_percent=1.5),
                 QuoteData(symbol="^STOXX50E", display_name="EURO STOXX 50", current_price=6050, change=-40, change_percent=-0.65),
                 QuoteData(symbol="^N225", display_name="Nikkei 225", current_price=41000, change=120, change_percent=0.3),
+                QuoteData(symbol="^DJI", display_name="Dow Jones (DJIA)", current_price=49000, change=180, change_percent=0.4),
+                QuoteData(symbol="^RUT", display_name="Russell 2000 (RUT)", current_price=2800, change=40, change_percent=1.4),
+                QuoteData(symbol="^FTSE", display_name="FTSE 100", current_price=8700, change=-20, change_percent=-0.2),
+                QuoteData(symbol="^GDAXI", display_name="DAX", current_price=24000, change=-120, change_percent=-0.5),
+                QuoteData(symbol="^FCHI", display_name="CAC 40", current_price=8200, change=20, change_percent=0.25),
+                QuoteData(symbol="^HSI", display_name="Hang Seng", current_price=26000, change=-200, change_percent=-0.75),
             ],
             macro_quotes=[
                 QuoteData(symbol="^TNX", display_name="10Y US Treasury Yield", current_price=4.32, change=0.03, change_percent=0.7),
@@ -118,6 +124,7 @@ def test_morning_chart_bundle_contract_has_required_fields():
     assert selected
     assert any(row["role"] == "hero" for row in selected)
     assert any(row["role"].startswith("micro_") for row in selected)
+    assert len(selected) >= 6
     chart_keys = {row["chart_key"] for row in bundle["charts"]}
     assert "breadth_leadership_panel" in chart_keys
     assert "rates_curve_micro_panel" in chart_keys
@@ -139,11 +146,22 @@ def test_morning_chart_bundle_unavailable_when_history_missing():
     assert chart_map["volatility_regime_card"]["reason_if_hidden"]
 
 
+def test_global_chart_series_are_limited_for_email_readability():
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=_sample_briefing(),
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+    )
+    chart_map = {row["chart_key"]: row for row in bundle["charts"]}
+    assert len(chart_map["global_relative_performance"]["series"]) <= 7
+    assert chart_map["global_relative_performance"]["caption"]
+
+
 def test_chart_builder_populates_bundle_and_assets():
     profile = _sample_profile()
     briefing = _sample_briefing()
     charts = MorningChartBuilder(profile=profile, market_data=_StubMarketData(with_history=True)).build(briefing)
-    assert charts
+    assert len(charts) >= 6
     assert briefing.morning_chart_bundle
     assert briefing.morning_chart_selection
 
