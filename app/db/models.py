@@ -471,3 +471,23 @@ class SimulationPreset(Base):
     active = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow)
+
+
+class UserFeedback(Base):
+    """User feedback on individual chart signals and data quality.
+
+    Captured via web UI thumbs-down buttons and Telegram inline keyboard callbacks.
+    Used to bias chart priority scores in morning_charts.py after enough data accumulates.
+    """
+
+    __tablename__ = "user_feedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    chart_key = Column(String(80), nullable=False, index=True)
+    label = Column(String(40), nullable=False, index=True)  # useful | not_relevant | wrong_data
+    source = Column(String(20), nullable=False, default="web")  # web | telegram
+    briefing_date = Column(Date, nullable=True, index=True)
+    notes = Column(Text, nullable=True)
+    regime_tags = Column(JSON, default=list)   # snapshot of regime at time of feedback
+    created_at = Column(DateTime, default=_utcnow, index=True)

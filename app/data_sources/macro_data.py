@@ -14,6 +14,9 @@ logger = get_logger("macro_data")
 # Morning briefing series: yields, USD, oil
 MORNING_SERIES = ["DGS10", "DGS2", "T10Y2Y", "DTWEXBGS"]
 
+# Full yield curve: 2Y, 5Y, 10Y, 30Y
+YIELD_CURVE_SERIES = ["DGS2", "DGS5", "DGS10", "DGS30"]
+
 # Extended macro context
 EXTENDED_SERIES = ["UNRATE", "CPIAUCSL", "FEDFUNDS"]
 
@@ -66,6 +69,12 @@ class MacroDataService:
         ten_y = self.fred.get_latest_observation("DGS10")
         two_y = self.fred.get_latest_observation("DGS2")
         return ten_y, two_y
+
+    def get_yield_curve(self) -> list[MacroDataPoint]:
+        """Fetch 2Y/5Y/10Y/30Y Treasury yields for curve shape chart."""
+        if not self.fred or not self.fred.is_configured():
+            return []
+        return self.fred.get_macro_snapshot(YIELD_CURVE_SERIES)
 
     def get_extended_macro(self) -> list[MacroDataPoint]:
         """Fetch broader macro context (unemployment, CPI, fed funds)."""

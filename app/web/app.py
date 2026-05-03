@@ -1488,7 +1488,157 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             config_payload=config,
         )
 
+    # -------------------------------------------------------------------------
+    # Feedback endpoints
+    # -------------------------------------------------------------------------
+
+    @app.post("/api/v1/feedback")
+    def api_submit_feedback(request: Request, body: dict = None):
+        """Record user feedback on a chart or signal.
+
+        Body: {profile, chart_key, label, source?, notes?, regime_tags?}
+        label must be one of: useful | not_relevant | wrong_data
+        """
+        from datetime import date as _date
+        from app.db.models import UserFeedback
+        from app.db.session import get_session
+
+        if body is None:
+            body = {}
+        profile = str(body.get("profile") or "default_user").strip()
+        chart_key = str(body.get("chart_key") or "").strip()
+        label = str(body.get("label") or "").strip().lower()
+        source = str(body.get("source") or "web").strip()
+        notes = str(body.get("notes") or "").strip() or None
+        regime_tags = list(body.get("regime_tags") or [])
+
+        valid_labels = {"useful", "not_relevant", "wrong_data"}
+        if not chart_key:
+            raise HTTPException(status_code=400, detail={"error": "chart_key is required"})
+        if label not in valid_labels:
+            raise HTTPException(status_code=400, detail={"error": f"label must be one of {sorted(valid_labels)}"})
+
+        with get_session() as session:
+            fb = UserFeedback(
+                profile_name=profile,
+                chart_key=chart_key,
+                label=label,
+                source=source,
+                briefing_date=_date.today(),
+                notes=notes,
+                regime_tags=regime_tags,
+            )
+            session.add(fb)
+            session.commit()
+
+        return {"status": "recorded", "chart_key": chart_key, "label": label}
+
+    @app.get("/api/v1/feedback/weights")
+    def api_feedback_weights(profile: str = "default_user", days: int = 30):
+        """Return per-chart feedback weight multipliers for the last N days.
+
+        Weight: >1.0 means chart is well-liked; <1.0 means downvote pressure.
+        """
+        return get_chart_feedback_weights(profile, days=days)
+
+    @app.post("/api/v1/feedback/telegram")
+    async def api_telegram_feedback_callback(request: Request):
+        """Webhook endpoint for Telegram inline keyboard callback_query feedback."""
+        from datetime import date as _date
+        from app.db.models import UserFeedback
+        from app.db.session import get_session
+
+        data = await request.json()
+        callback = data.get("callback_query") or {}
+        callback_id = str(callback.get("id") or "")
+        callback_data = str(callback.get("data") or "")
+
+        # Format: "fb:<label>:<chart_key>"
+        parts = callback_data.split(":")
+        if len(parts) < 3 or parts[0] != "fb":
+            return {"ok": True}
+
+        label_raw = parts[1]
+        chart_key = ":".join(parts[2:])
+        label_map = {"useful": "useful", "not_relevant": "not_relevant", "wrong_data": "wrong_data"}
+        label = label_map.get(label_raw)
+        if not label:
+            return {"ok": True}
+
+        with get_session() as session:
+            session.add(UserFeedback(
+                profile_name="default_user",
+                chart_key=chart_key,
+                label=label,
+                source="telegram",
+                briefing_date=_date.today(),
+            ))
+            session.commit()
+
+        # Acknowledge to dismiss Telegram spinner
+        settings_obj = _settings(request)
+        if settings_obj.telegram_bot_token and callback_id:
+            from app.messaging.telegram import TelegramMessenger
+            TelegramMessenger(settings_obj).answer_callback_query(callback_id, "Feedback recorded")
+
+        return {"ok": True}
+
     return app
+
+
+def get_chart_feedback_weights(profile: str, *, days: int = 30) -> dict[str, float]:
+    """Compute per-chart priority multipliers from recent feedback.
+
+    Returns {chart_key: multiplier} where:
+      - 1.0  = neutral (no feedback or balanced)
+      - >1.0 = net positive feedback (boost priority)
+      - <1.0 = net negative feedback (suppress priority)
+    Range: [0.50, 1.50]
+    """
+    from datetime import date, timedelta
+    from sqlalchemy import func
+    from app.db.models import UserFeedback
+    from app.db.session import get_session
+
+    cutoff = date.today() - timedelta(days=days)
+    weights: dict[str, float] = {}
+
+    try:
+        with get_session() as session:
+            rows = (
+                session.query(
+                    UserFeedback.chart_key,
+                    UserFeedback.label,
+                    func.count(UserFeedback.id).label("cnt"),
+                )
+                .filter(
+                    UserFeedback.profile_name == profile,
+                    UserFeedback.briefing_date >= cutoff,
+                )
+                .group_by(UserFeedback.chart_key, UserFeedback.label)
+                .all()
+            )
+
+        # Aggregate per chart
+        chart_counts: dict[str, dict[str, int]] = {}
+        for chart_key, label, cnt in rows:
+            chart_counts.setdefault(chart_key, {})
+            chart_counts[chart_key][label] = int(cnt)
+
+        for chart_key, counts in chart_counts.items():
+            useful = counts.get("useful", 0)
+            negative = counts.get("not_relevant", 0) + counts.get("wrong_data", 0)
+            total = useful + negative
+            if total == 0:
+                weights[chart_key] = 1.0
+                continue
+            net_score = (useful - negative) / total  # range [-1, +1]
+            # Map to [0.50, 1.50]
+            weights[chart_key] = round(1.0 + net_score * 0.50, 4)
+    except Exception:
+        pass
+
+    return weights
 
 
 def _render_ui_after_update(

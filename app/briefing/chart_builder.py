@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.briefing.chart_renderer import ChartRenderer
 from app.briefing.morning_charts import build_morning_chart_bundle, selected_chart_specs
 from app.data_sources.market_data import MarketDataService
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MorningBriefing
 from app.schemas.delivery import ChartAsset
+from app.schemas.events import MacroDataPoint
 
 
 class MorningChartBuilder:
@@ -17,16 +20,25 @@ class MorningChartBuilder:
         self,
         profile: UserProfile,
         market_data: MarketDataService,
+        macro_data_svc: Any | None = None,
     ):
         self.profile = profile
         self.market_svc = market_data
+        self.macro_svc = macro_data_svc
         self.renderer = ChartRenderer()
 
     def build(self, briefing: MorningBriefing) -> list[ChartAsset]:
+        yield_curve: list[MacroDataPoint] = []
+        if self.macro_svc is not None:
+            try:
+                yield_curve = self.macro_svc.get_yield_curve()
+            except Exception:
+                pass
         bundle, selection = build_morning_chart_bundle(
             briefing=briefing,
             profile=self.profile,
             market_data_service=self.market_svc,
+            yield_curve_points=yield_curve,
         )
         briefing.morning_chart_bundle = bundle
         briefing.morning_chart_selection = selection

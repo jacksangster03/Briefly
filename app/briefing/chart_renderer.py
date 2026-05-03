@@ -20,6 +20,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from matplotlib.ticker import MaxNLocator
 
 logger = get_logger("chart_renderer")
@@ -163,6 +164,16 @@ class ChartRenderer:
             return self.render_concentration_risk_from_spec(spec)
         if key == "earnings_relevance_strip":
             return self.render_earnings_relevance_from_spec(spec)
+        if key == "yield_curve_shape":
+            return self.render_yield_curve_from_spec(spec)
+        if key == "vix_term_structure":
+            return self.render_vix_term_structure_from_spec(spec)
+        if key == "pnl_attribution_waterfall":
+            return self.render_pnl_waterfall_from_spec(spec)
+        if key == "rsi_momentum_heatmap":
+            return self.render_rsi_heatmap_from_spec(spec)
+        if key == "implied_move_strip":
+            return self.render_implied_move_from_spec(spec)
         return None
 
     def render_market_snapshot(self, quotes: list[QuoteData]) -> ChartAsset | None:
@@ -903,8 +914,12 @@ class ChartRenderer:
         ax.text(largest + 1.5, 1.0, f"{largest:.1f}%", color=lrg_color, fontsize=9.0, ha="left", va="center", weight="bold")
         ax.text(largest_threshold, 1.32, f"≥{largest_threshold:.0f}%", color=MUTED, fontsize=7.2, ha="center", va="bottom")
 
-        # Holdings count and state label
-        ax.text(0, 0.18, f"{holdings} holdings", color=TEXT, fontsize=10, ha="left", va="center", weight="bold")
+        # Holdings count, VaR, and state label
+        var_pct = float(values.get("1D 95% VaR") or 0.0) if values.get("1D 95% VaR") is not None else None
+        holdings_text = f"{holdings} holdings"
+        if var_pct is not None:
+            holdings_text += f"  ·  1D 95% VaR {var_pct:.2f}%"
+        ax.text(0, 0.18, holdings_text, color=TEXT, fontsize=10, ha="left", va="center", weight="bold")
         ax.text(
             60, 0.18,
             state.upper(),
@@ -980,6 +995,249 @@ class ChartRenderer:
             caption=str(spec.get("caption") or ""),
             filename="earnings-relevance-strip.png",
         )
+
+    def render_yield_curve_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        tenors = [int(row["tenor"]) for row in rows]
+        today_vals = [float(row["today"]) for row in rows]
+        week_ago_vals = [float(row["week_ago"]) if row.get("week_ago") is not None else None for row in rows]
+
+        fig, ax = self._figure(8.8, 4.8)
+        ax.plot(tenors, today_vals, color=ACCENT, linewidth=2.8, marker="o", markersize=6, zorder=4, label="Today")
+        if any(v is not None for v in week_ago_vals):
+            wa = [v if v is not None else today_vals[i] for i, v in enumerate(week_ago_vals)]
+            ax.plot(tenors, wa, color=MUTED, linewidth=1.8, linestyle="--", marker="o", markersize=4, zorder=3, label="1W ago")
+            ax.fill_between(tenors, today_vals, wa, alpha=0.12, color=ACCENT, zorder=2)
+
+        ax.axhline(0, color=GRID, linewidth=0.8, alpha=0.6)
+        ax.set_xticks(tenors)
+        ax.set_xticklabels(["2Y", "5Y", "10Y", "30Y"], color=MUTED, fontsize=9)
+        for i, (tenor, val) in enumerate(zip(tenors, today_vals)):
+            change = rows[i].get("change_bps")
+            label = f"{val:.2f}%"
+            if change is not None:
+                sign = "+" if change >= 0 else ""
+                label += f"\n{sign}{change:.0f}bp"
+            ax.text(tenor, val + (max(today_vals) - min(today_vals)) * 0.06,
+                    label, ha="center", va="bottom", fontsize=8.2, color=ACCENT, weight="bold", zorder=5)
+
+        shape = str((spec.get("meta") or {}).get("shape") or "")
+        ax.legend(frameon=False, labelcolor=MUTED, fontsize=8.5)
+        self._style_axes(ax, title=str(spec.get("title") or "Yield Curve Shape"),
+                         xlabel="Tenor", ylabel="Yield (%)", grid_axis="y")
+        ax.text(0.01, 0.04, f"Shape: {shape.upper()}" if shape else "",
+                transform=ax.transAxes, color=MUTED, fontsize=8.2, weight="bold")
+        fig.subplots_adjust(left=0.10, right=0.96, top=0.86, bottom=0.18)
+        return self._to_asset(fig, key="yield_curve_shape",
+                              title=str(spec.get("title") or "Yield Curve Shape"),
+                              caption=str(spec.get("caption") or ""), filename="yield-curve.png")
+
+    def render_vix_term_structure_from_spec(self, spec: dict) -> ChartAsset | None:
+        series = list(spec.get("series") or [])
+        if not series:
+            return None
+        meta = dict(spec.get("meta") or {})
+        structure = str(meta.get("structure") or "unavailable")
+        structure_color = {
+            "backwardation": NEGATIVE,
+            "contango": POSITIVE,
+            "flat": MUTED,
+        }.get(structure, MUTED)
+
+        fig, ax = self._figure(8.8, 4.6)
+        colors_map = [ACCENT, NEUTRAL]
+        for idx, row in enumerate(series[:2]):
+            x = row.get("x") or []
+            y = row.get("y") or []
+            if not x or not y:
+                continue
+            col = colors_map[idx]
+            ax.plot(x, y, color=col, linewidth=2.4 if idx == 0 else 1.8, alpha=0.92)
+            ax.fill_between(x, y, min(y), color=col, alpha=0.07)
+            level = row.get("level")
+            if level is not None:
+                self._value_box(ax, x[-1] + 0.3, float(y[-1]),
+                                f"{row['name']} {float(level):.1f}",
+                                color=col, fontsize=8.2)
+
+        ax.text(0.5, 0.91, structure.upper(), transform=ax.transAxes,
+                color=structure_color, fontsize=11, weight="bold",
+                ha="center", va="top",
+                bbox={"facecolor": SUBTLE, "edgecolor": GRID, "linewidth": 0.5, "pad": 3})
+        self._style_axes(ax, title=str(spec.get("title") or "VIX Term Structure"),
+                         xlabel="Session", ylabel="VIX Level", grid_axis="y")
+        ax.margins(x=0.18, y=0.18)
+        fig.subplots_adjust(left=0.10, right=0.86, top=0.86, bottom=0.18)
+        return self._to_asset(fig, key="vix_term_structure",
+                              title=str(spec.get("title") or "VIX Term Structure"),
+                              caption=str(spec.get("caption") or ""), filename="vix-term-structure.png")
+
+    def render_pnl_waterfall_from_spec(self, spec: dict) -> ChartAsset | None:
+        bars = list(spec.get("series") or [])
+        if not bars:
+            return None
+        total = float((spec.get("annotations") or [{}])[0].get("value") or 0.0)
+
+        labels = [row["symbol"] for row in bars]
+        contribs = [float(row["contribution"]) for row in bars]
+        colors = [POSITIVE if c >= 0 else NEGATIVE for c in contribs]
+
+        # Append total bar
+        labels.append("TOTAL")
+        contribs.append(total)
+        colors.append(ACCENT)
+
+        fig, ax = self._figure(8.8, max(4.0, 0.55 * len(labels) + 1.5))
+        y_pos = list(range(len(labels)))
+
+        # Running base for waterfall
+        running = 0.0
+        bases = []
+        for i, c in enumerate(contribs[:-1]):
+            bases.append(running if c >= 0 else running + c)
+            running += c
+        bases.append(0.0)  # total bar starts at 0
+
+        ax.barh(y_pos, [abs(c) for c in contribs], left=bases,
+                color=colors, alpha=0.84, height=0.55, edgecolor=BG, linewidth=0.6)
+        ax.axvline(0, color=AXIS, linewidth=1.2, alpha=0.9)
+
+        x_range = max(abs(c) for c in contribs + bases) if contribs else 0.5
+        x_pad = max(0.05, x_range * 0.25)
+
+        for i, (contrib, base) in enumerate(zip(contribs, bases)):
+            x_label = base + contrib + (x_pad * 0.3 if contrib >= 0 else -x_pad * 0.3)
+            self._value_box(ax, x_label, i, f"{contrib:+.2f}%",
+                            ha="left" if contrib >= 0 else "right",
+                            color=colors[i], fontsize=8.2)
+
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, color=TEXT, fontsize=9, fontweight="bold")
+        ax.invert_yaxis()
+        self._style_axes(ax, title=str(spec.get("title") or "P&L Attribution"),
+                         xlabel="Weighted daily contribution (%)", grid_axis="x")
+        ax.grid(False)
+        fig.subplots_adjust(left=0.14, right=0.92, top=0.86, bottom=0.14)
+        return self._to_asset(fig, key="pnl_attribution_waterfall",
+                              title=str(spec.get("title") or "P&L Attribution"),
+                              caption=str(spec.get("caption") or ""), filename="pnl-attribution.png")
+
+    def render_rsi_heatmap_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        annotations = list(spec.get("annotations") or [])
+        overbought = next((float(a["value"]) for a in annotations if a.get("label") == "overbought"), 65.0)
+        oversold = next((float(a["value"]) for a in annotations if a.get("label") == "oversold"), 35.0)
+
+        symbols = [row["symbol"] for row in rows]
+        windows = ["RSI(5)", "RSI(21)", "RSI(63)"]
+        keys = ["rsi_5", "rsi_21", "rsi_63"]
+
+        n_rows = len(symbols)
+        n_cols = len(windows)
+        matrix = []
+        for row in rows:
+            matrix.append([row.get(k) for k in keys])
+
+        fig, ax = self._figure(8.0, max(2.8, 0.52 * n_rows + 1.4))
+        ax.set_facecolor(BG)
+        ax.axis("off")
+        ax.set_title(str(spec.get("title") or "Momentum / RSI"), loc="left",
+                     fontsize=14.5, weight="bold", color=TEXT, pad=10)
+
+        cell_w = 0.20
+        cell_h = 0.72 / max(n_rows, 1)
+        x0 = 0.30
+        y0 = 0.82
+
+        # Column headers
+        for j, win in enumerate(windows):
+            ax.text(x0 + j * cell_w + cell_w / 2, y0 + 0.05, win,
+                    transform=ax.transAxes, ha="center", va="bottom",
+                    fontsize=8.5, color=MUTED, weight="bold")
+
+        for i, (sym, vals) in enumerate(zip(symbols, matrix)):
+            y = y0 - i * cell_h
+            ax.text(x0 - 0.02, y - cell_h / 2, sym,
+                    transform=ax.transAxes, ha="right", va="center",
+                    fontsize=8.8, color=TEXT, weight="bold")
+            for j, val in enumerate(vals):
+                x = x0 + j * cell_w
+                if val is None:
+                    cell_color = SUBTLE
+                    label = "n/a"
+                    text_color = MUTED
+                elif val >= overbought:
+                    t = min(1.0, (val - overbought) / 20.0)
+                    cell_color = mcolors.to_hex(mcolors.to_rgba(NEGATIVE, 0.25 + t * 0.55))
+                    label = f"{val:.0f}"
+                    text_color = NEGATIVE
+                elif val <= oversold:
+                    t = min(1.0, (oversold - val) / 20.0)
+                    cell_color = mcolors.to_hex(mcolors.to_rgba(POSITIVE, 0.25 + t * 0.55))
+                    label = f"{val:.0f}"
+                    text_color = POSITIVE
+                else:
+                    cell_color = SUBTLE
+                    label = f"{val:.0f}"
+                    text_color = MUTED
+                rect = plt.Rectangle((x, y - cell_h), cell_w - 0.012, cell_h - 0.015,
+                                     transform=ax.transAxes,
+                                     facecolor=cell_color, edgecolor=GRID, linewidth=0.5)
+                ax.add_patch(rect)
+                ax.text(x + cell_w / 2, y - cell_h / 2, label,
+                        transform=ax.transAxes, ha="center", va="center",
+                        fontsize=8.5, color=text_color, weight="bold")
+
+        ax.text(0.01, 0.04, f"Red >={overbought:.0f} overbought  ·  Green <={oversold:.0f} oversold",
+                transform=ax.transAxes, color=MUTED, fontsize=7.8)
+        fig.subplots_adjust(left=0.04, right=0.98, top=0.88, bottom=0.06)
+        return self._to_asset(fig, key="rsi_momentum_heatmap",
+                              title=str(spec.get("title") or "Momentum / RSI"),
+                              caption=str(spec.get("caption") or ""), filename="rsi-heatmap.png")
+
+    def render_implied_move_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+
+        labels = [row["symbol"] for row in rows]
+        moves = [float(row["implied_move_pct"]) for row in rows]
+        tags = [str(row.get("relevance_tag") or "") for row in rows]
+        dates = [str(row.get("report_date") or "") for row in rows]
+        colors = [ACCENT if t == "portfolio" else (NEUTRAL if t == "watchlist" else MUTED) for t in tags]
+
+        fig, ax = self._figure(8.8, max(3.0, 0.55 * len(rows) + 1.4))
+        y_pos = list(range(len(rows)))
+
+        # Symmetric ± bars
+        ax.axvline(0, color=AXIS, linewidth=1.2, alpha=0.9)
+        ax.barh(y_pos, moves, color=colors, alpha=0.76, height=0.50, left=0)
+        ax.barh(y_pos, [-m for m in moves], color=colors, alpha=0.76, height=0.50, left=0)
+
+        x_max = max(moves) if moves else 5.0
+        x_pad = x_max * 0.25
+        for i, (move, date, col) in enumerate(zip(moves, dates, colors)):
+            self._value_box(ax, move + x_pad * 0.3, i,
+                            f"±{move:.1f}%  {date}", color=col,
+                            ha="left", fontsize=8.2)
+
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, color=TEXT, fontsize=9.3, fontweight="bold")
+        ax.invert_yaxis()
+        ax.set_xlim(-x_max - x_pad, x_max + x_pad * 2.5)
+        self._style_axes(ax, title=str(spec.get("title") or "Implied Earnings Moves"),
+                         xlabel="Options-implied ±move (%)", grid_axis="x")
+        ax.grid(False)
+        ax.text(0.01, 0.04, "Orange = portfolio  ·  Teal = watchlist  ·  ATM straddle / spot",
+                transform=ax.transAxes, color=MUTED, fontsize=7.8)
+        fig.subplots_adjust(left=0.14, right=0.88, top=0.86, bottom=0.16)
+        return self._to_asset(fig, key="implied_move_strip",
+                              title=str(spec.get("title") or "Implied Earnings Moves"),
+                              caption=str(spec.get("caption") or ""), filename="implied-move.png")
 
     @staticmethod
     def _to_asset(

@@ -6,6 +6,7 @@ Renderers consume these specs but do not decide visual hierarchy.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -42,6 +43,7 @@ def build_morning_chart_bundle(
     briefing: MorningBriefing,
     profile: UserProfile,
     market_data_service: Any,
+    yield_curve_points: list[MacroDataPoint] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     """Build deterministic chart specs + selected roles."""
     normalized = _normalize_inputs(
@@ -50,14 +52,50 @@ def build_morning_chart_bundle(
         briefing.macro_context,
     )
     regime_tags = _derive_regime_tags(normalized)
+
+    # Load user feedback weights to bias chart selection
+    feedback_weights: dict[str, float] = {}
+    try:
+        from app.web.app import get_chart_feedback_weights
+        feedback_weights = get_chart_feedback_weights(profile.name)
+    except Exception:
+        pass
+
     candidates = _build_candidates(
         briefing=briefing,
         profile=profile,
         market_data_service=market_data_service,
         normalized=normalized,
         regime_tags=regime_tags,
+        yield_curve_points=yield_curve_points,
     )
+
+    # Apply feedback weight multipliers to priorities
+    for item in candidates:
+        multiplier = feedback_weights.get(item.chart_key, 1.0)
+        if multiplier != 1.0:
+            item.priority = round(item.priority * multiplier, 4)
     selected = _select_candidates(candidates)
+
+    # Anomaly detection: flag unusually extreme impulse days
+    anomaly_meta: dict[str, Any] = {}
+    impulse_spec = next((item.spec for item in candidates if item.chart_key == "cross_asset_impulse_strip"), None)
+    if impulse_spec:
+        try:
+            from app.ml.anomaly_detector import build_impulse_vector_from_spec, detect_regime_anomaly
+            today_vec = build_impulse_vector_from_spec(impulse_spec)
+            # Use a simple rolling window from normalized metrics as proxy history
+            # In production this would be read from the market_snapshots DB table
+            dummy_history = [[0.0] * len(today_vec)] * 30  # placeholder until DB history available
+            anomaly_result = detect_regime_anomaly(today_vec, dummy_history)
+            anomaly_meta = {
+                "anomaly_score": anomaly_result.get("anomaly_score"),
+                "is_anomaly": anomaly_result.get("is_anomaly"),
+                "trigger_alert": anomaly_result.get("trigger_alert"),
+            }
+        except Exception:
+            pass
+
     bundle = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "regime_tags": regime_tags,
@@ -71,6 +109,7 @@ def build_morning_chart_bundle(
             "llm_email_enabled": bool(profile.delivery.get("llm_email_morning", True)),
             "llm_shadow_mode": bool(profile.delivery.get("llm_shadow_mode", True)),
             "data_confidence": _confidence_label(normalized),
+            **anomaly_meta,
         },
     }
     return bundle, selected
@@ -187,6 +226,7 @@ def _build_candidates(
     market_data_service: Any,
     normalized: dict[str, Any],
     regime_tags: list[str],
+    yield_curve_points: list[MacroDataPoint] | None = None,
 ) -> list[ChartCandidate]:
     specs: list[ChartCandidate] = []
 
@@ -286,7 +326,7 @@ def _build_candidates(
             chart_key="portfolio_concentration_risk_card",
             category="micro",
             priority=0.64 + (0.07 if profile.portfolio_holdings else 0.0),
-            spec=_concentration_risk_spec(profile),
+            spec=_concentration_risk_spec(profile, market_data_service),
             reason="Concentration and risk stance should stay visible every morning.",
         )
     )
@@ -298,6 +338,68 @@ def _build_candidates(
             priority=0.63 + (0.07 if briefing.earnings_calendar else 0.0),
             spec=_earnings_relevance_spec(briefing),
             reason="Near-term earnings load and portfolio overlap context.",
+        )
+    )
+
+    # --- New charts ---
+
+    specs.append(
+        ChartCandidate(
+            chart_key="yield_curve_shape",
+            category="support",
+            priority=0.72 + (0.10 if "rates_led" in regime_tags else 0.0),
+            spec=_yield_curve_spec(yield_curve_points or [], market_data_service),
+            reason="Yield curve shape and week-over-week shift in one glance.",
+        )
+    )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="vix_term_structure",
+            category="micro",
+            priority=0.65 + (0.10 if "defensive" in regime_tags else 0.0),
+            spec=_vix_term_structure_spec(
+                briefing.market_setup.macro_quotes,
+                market_data_service,
+            ),
+            reason="VIX term structure reveals whether near-term or long-term fear dominates.",
+        )
+    )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="pnl_attribution_waterfall",
+            category="portfolio",
+            priority=0.76 + (0.10 if briefing.portfolio_quotes else 0.0),
+            spec=_pnl_waterfall_spec(
+                briefing.portfolio_quotes or [],
+                profile,
+            ),
+            reason="Daily P&L contribution waterfall — where the portfolio return came from.",
+        )
+    )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="rsi_momentum_heatmap",
+            category="portfolio",
+            priority=0.62 + (0.05 if profile.portfolio_holdings else 0.0),
+            spec=_rsi_heatmap_spec(
+                briefing.portfolio_quotes or briefing.watchlist_quotes,
+                market_data_service,
+                profile,
+            ),
+            reason="RSI heatmap spots overbought/oversold positions across three timeframes.",
+        )
+    )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="implied_move_strip",
+            category="event",
+            priority=0.68 + (0.10 if briefing.earnings_calendar else 0.0),
+            spec=_implied_move_spec(briefing.earnings_calendar, market_data_service),
+            reason="Options-implied ±move for upcoming earnings keeps event-risk quantified.",
         )
     )
 
@@ -644,27 +746,56 @@ def _volatility_regime_spec(metrics: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _concentration_risk_spec(profile: UserProfile) -> dict[str, Any]:
+def _concentration_risk_spec(profile: UserProfile, market_data_service: Any = None) -> dict[str, Any]:
     weights = sorted([float(p.weight_pct or 0.0) for p in profile.portfolio_holdings if p.weight_pct is not None], reverse=True)
     top5 = sum(weights[:5]) if weights else 0.0
     largest = weights[0] if weights else 0.0
     count = len(weights)
     available = count > 0
     risk_state = "concentrated" if top5 >= 70 else ("balanced" if top5 <= 45 else "moderate")
+
+    # GARCH VaR: compute portfolio-level 1-day 95% VaR if market data available
+    portfolio_var: float | None = None
+    if market_data_service is not None and profile.portfolio_holdings:
+        try:
+            from app.ml.garch_var import portfolio_var as _portfolio_var
+            holdings_input = [
+                {"symbol": h.symbol, "weight": float(h.weight_pct or 0.0) / 100.0}
+                for h in profile.portfolio_holdings
+                if h.symbol and h.weight_pct
+            ]
+            price_histories: dict[str, list[float]] = {}
+            for h in holdings_input:
+                history = market_data_service.get_price_history(h["symbol"], period="1y", interval="1d") or []
+                if history:
+                    price_histories[h["symbol"]] = [float(p.close) for p in history]
+            var_result = _portfolio_var(holdings_input, price_histories)
+            portfolio_var = var_result.get("portfolio_var_pct")
+        except Exception:
+            pass
+
+    series = [
+        {"name": "Top 5 Weight", "value": top5, "unit": "pct"},
+        {"name": "Largest Position", "value": largest, "unit": "pct"},
+        {"name": "Active Holdings", "value": count, "unit": "count"},
+    ]
+    if portfolio_var is not None:
+        series.append({"name": "1D 95% VaR", "value": portfolio_var, "unit": "pct"})
+
+    caption = "Top-weight concentration and single-name risk posture."
+    if portfolio_var is not None:
+        caption += f" GARCH 1D VaR: {portfolio_var:.2f}%."
+
     return {
         "chart_key": "portfolio_concentration_risk_card",
         "variant": "top5_concentration",
         "available": available,
         "reason_if_hidden": None if available else "Portfolio holdings weights unavailable.",
         "title": "Portfolio Concentration",
-        "caption": "Top-weight concentration and single-name risk posture.",
-        "series": [
-            {"name": "Top 5 Weight", "value": top5, "unit": "pct"},
-            {"name": "Largest Position", "value": largest, "unit": "pct"},
-            {"name": "Active Holdings", "value": count, "unit": "count"},
-        ],
+        "caption": caption,
+        "series": series,
         "annotations": [{"label": "risk_state", "value": risk_state}],
-        "meta": {"risk_state": risk_state},
+        "meta": {"risk_state": risk_state, "portfolio_var_pct": portfolio_var},
         "email_dimensions": {"width": 8.0, "height": 2.9},
     }
 
@@ -690,6 +821,243 @@ def _earnings_relevance_spec(briefing: MorningBriefing) -> dict[str, Any]:
         "annotations": [],
         "meta": {},
         "email_dimensions": {"width": 8.0, "height": 2.9},
+    }
+
+
+# ---------------------------------------------------------------------------
+# New chart spec builders
+# ---------------------------------------------------------------------------
+
+def _yield_curve_spec(yield_curve_points: list[MacroDataPoint], market_data_service: Any) -> dict[str, Any]:
+    """Yield curve shape: today vs 1-week-ago snapshot for 2Y/5Y/10Y/30Y."""
+    TENOR_ORDER = {"DGS2": 2, "DGS5": 5, "DGS10": 10, "DGS30": 30}
+    today_rows: list[dict[str, Any]] = []
+    for point in yield_curve_points:
+        tenor = TENOR_ORDER.get(point.series_id)
+        if tenor is None or point.value is None:
+            continue
+        history = market_data_service.get_price_history(point.series_id, period="1mo", interval="1d") or []
+        week_ago_val = float(history[-6].close) if len(history) >= 6 else None
+        today_rows.append({
+            "series_id": point.series_id,
+            "tenor": tenor,
+            "today": round(float(point.value), 4),
+            "week_ago": round(week_ago_val, 4) if week_ago_val is not None else None,
+            "change_bps": round((float(point.value) - week_ago_val) * 100.0, 1) if week_ago_val is not None else None,
+        })
+    today_rows.sort(key=lambda r: r["tenor"])
+    available = len(today_rows) >= 2
+    inversion = (today_rows[0]["today"] > today_rows[-1]["today"]) if available else False
+    shape = "inverted" if inversion else "normal"
+    return {
+        "chart_key": "yield_curve_shape",
+        "variant": "curve_today_vs_week",
+        "available": available,
+        "reason_if_hidden": None if available else "Yield curve data unavailable.",
+        "title": "Yield Curve Shape",
+        "caption": f"{'Inverted' if inversion else 'Normal'} curve — 4-tenor snapshot vs 1 week ago.",
+        "series": today_rows,
+        "annotations": [{"label": "inversion", "value": inversion}],
+        "meta": {"shape": shape},
+        "email_dimensions": {"width": 1000, "height": 520},
+    }
+
+
+def _vix_term_structure_spec(macro_quotes: list[QuoteData], market_data_service: Any) -> dict[str, Any]:
+    """VIX vs VIX3M: contango (fear fading) vs backwardation (stress building)."""
+    vix = _find_quote(macro_quotes, ("vix",))
+    vix3m_history = market_data_service.get_price_history("^VIX3M", period="1mo", interval="1d") or []
+    vix_history = market_data_service.get_price_history("^VIX", period="1mo", interval="1d") or []
+
+    vix_level = float(vix.current_price) if vix else None
+    vix3m_level = float(vix3m_history[-1].close) if vix3m_history else None
+
+    # Build 20-day spark paths for both
+    vix_spark = [round(float(p.close), 2) for p in vix_history[-20:]]
+    vix3m_spark = [round(float(p.close), 2) for p in vix3m_history[-20:]]
+    x = list(range(max(len(vix_spark), len(vix3m_spark))))
+
+    structure = "unavailable"
+    if vix_level is not None and vix3m_level is not None:
+        ratio = vix_level / vix3m_level
+        structure = "backwardation" if ratio > 1.02 else ("contango" if ratio < 0.98 else "flat")
+
+    available = vix_level is not None and vix3m_level is not None
+    return {
+        "chart_key": "vix_term_structure",
+        "variant": "vix_vs_vix3m",
+        "available": available,
+        "reason_if_hidden": None if available else "VIX or VIX3M data unavailable.",
+        "title": "VIX Term Structure",
+        "caption": f"VIX {vix_level:.1f} vs VIX3M {vix3m_level:.1f} — {structure}." if available else "VIX term data unavailable.",
+        "series": [
+            {"name": "VIX (1M)", "x": x[:len(vix_spark)], "y": vix_spark, "level": vix_level},
+            {"name": "VIX3M (3M)", "x": x[:len(vix3m_spark)], "y": vix3m_spark, "level": vix3m_level},
+        ],
+        "annotations": [{"label": "structure", "value": structure}],
+        "meta": {"structure": structure, "vix": vix_level, "vix3m": vix3m_level},
+        "email_dimensions": {"width": 900, "height": 480},
+    }
+
+
+def _pnl_waterfall_spec(holdings_quotes: list[QuoteData], profile: UserProfile) -> dict[str, Any]:
+    """Daily P&L attribution waterfall: each position's contribution to portfolio move."""
+    weight_map: dict[str, float] = {}
+    for holding in profile.portfolio_holdings:
+        if holding.symbol and holding.weight_pct is not None:
+            weight_map[holding.symbol.upper()] = float(holding.weight_pct) / 100.0
+
+    bars: list[dict[str, Any]] = []
+    total_contrib = 0.0
+    for quote in holdings_quotes:
+        sym = quote.symbol.upper()
+        weight = weight_map.get(sym, 0.0)
+        if weight <= 0:
+            continue
+        contrib = round(weight * float(quote.change_percent or 0.0), 4)
+        bars.append({
+            "symbol": sym,
+            "name": quote.display_name or sym,
+            "weight": round(weight * 100.0, 2),
+            "change_pct": round(float(quote.change_percent or 0.0), 4),
+            "contribution": contrib,
+        })
+        total_contrib += contrib
+
+    bars.sort(key=lambda r: r["contribution"], reverse=True)
+    available = len(bars) >= 2
+    return {
+        "chart_key": "pnl_attribution_waterfall",
+        "variant": "daily_contribution",
+        "available": available,
+        "reason_if_hidden": None if available else "Insufficient weighted holdings for P&L attribution.",
+        "title": "P&L Attribution",
+        "caption": f"Portfolio daily contribution: {total_contrib:+.2f}% weighted total across {len(bars)} positions.",
+        "series": bars,
+        "annotations": [{"label": "total", "value": round(total_contrib, 4)}],
+        "meta": {"total_contribution": round(total_contrib, 4)},
+        "email_dimensions": {"width": 1000, "height": 560},
+    }
+
+
+def _rsi_heatmap_spec(holdings_quotes: list[QuoteData], market_data_service: Any, profile: UserProfile) -> dict[str, Any]:
+    """RSI across 5D/21D/63D windows for each held position — overbought/oversold grid."""
+    def _rsi(prices: list[float], period: int) -> float | None:
+        if len(prices) < period + 1:
+            return None
+        deltas = [prices[i + 1] - prices[i] for i in range(len(prices) - 1)]
+        gains = [max(0.0, d) for d in deltas[-period:]]
+        losses = [abs(min(0.0, d)) for d in deltas[-period:]]
+        avg_gain = sum(gains) / period
+        avg_loss = sum(losses) / period
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return round(100.0 - (100.0 / (1.0 + rs)), 1)
+
+    portfolio_symbols = set(profile.portfolio_symbols)
+    rows: list[dict[str, Any]] = []
+    for quote in holdings_quotes[:10]:
+        if quote.symbol not in portfolio_symbols:
+            continue
+        history = market_data_service.get_price_history(quote.symbol, period="6mo", interval="1d") or []
+        closes = [float(p.close) for p in history]
+        rsi_5 = _rsi(closes, 5)
+        rsi_21 = _rsi(closes, 21)
+        rsi_63 = _rsi(closes, 63)
+        if all(v is None for v in (rsi_5, rsi_21, rsi_63)):
+            continue
+        rows.append({
+            "symbol": quote.symbol,
+            "name": quote.display_name or quote.symbol,
+            "rsi_5": rsi_5,
+            "rsi_21": rsi_21,
+            "rsi_63": rsi_63,
+            "change_pct": round(float(quote.change_percent or 0.0), 4),
+        })
+
+    available = len(rows) >= 2
+    return {
+        "chart_key": "rsi_momentum_heatmap",
+        "variant": "rsi_grid",
+        "available": available,
+        "reason_if_hidden": None if available else "Insufficient price history for RSI computation.",
+        "title": "Momentum / RSI",
+        "caption": "RSI(5), RSI(21), RSI(63) heatmap — red >65 overbought, green <35 oversold.",
+        "series": rows,
+        "annotations": [{"label": "overbought", "value": 65}, {"label": "oversold", "value": 35}],
+        "meta": {},
+        "email_dimensions": {"width": 1000, "height": 560},
+    }
+
+
+def _implied_move_spec(earnings_calendar: list[Any], market_data_service: Any) -> dict[str, Any]:
+    """Options-implied move for upcoming earnings tickers (nearest ATM straddle / spot)."""
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for event in (earnings_calendar or [])[:15]:
+        sym = str(getattr(event, "symbol", "") or "").upper()
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        try:
+            import yfinance as yf
+            ticker = yf.Ticker(sym)
+            expirations = ticker.options
+            if not expirations:
+                continue
+            # Pick the nearest expiry that is at or after the report date
+            report_date = str(getattr(event, "report_date", "") or "")
+            exp = expirations[0]
+            for e in expirations[:4]:
+                if e >= report_date:
+                    exp = e
+                    break
+            chain = ticker.option_chain(exp)
+            spot_info = ticker.fast_info
+            spot = float(getattr(spot_info, "last_price", 0) or 0)
+            if spot <= 0:
+                continue
+            # Nearest ATM call + put IV average
+            calls = chain.calls
+            puts = chain.puts
+            calls = calls[(calls["strike"] - spot).abs().argsort()[:1]]
+            puts = puts[(puts["strike"] - spot).abs().argsort()[:1]]
+            if calls.empty or puts.empty:
+                continue
+            call_iv = float(calls["impliedVolatility"].iloc[0])
+            put_iv = float(puts["impliedVolatility"].iloc[0])
+            avg_iv = (call_iv + put_iv) / 2.0
+            # Approximate 1-event implied move: IV * sqrt(1/252) * sqrt(days_to_expiry)
+            # Simplified: use straddle price / spot
+            call_ask = float(calls["ask"].iloc[0]) if not calls["ask"].isna().iloc[0] else float(calls["lastPrice"].iloc[0])
+            put_ask = float(puts["ask"].iloc[0]) if not puts["ask"].isna().iloc[0] else float(puts["lastPrice"].iloc[0])
+            implied_move_pct = round(((call_ask + put_ask) / spot) * 100.0, 2)
+            rows.append({
+                "symbol": sym,
+                "name": getattr(event, "company_name", sym) or sym,
+                "report_date": report_date,
+                "implied_move_pct": implied_move_pct,
+                "avg_iv": round(avg_iv * 100.0, 1),
+                "expiry": exp,
+                "relevance_tag": getattr(event, "relevance_tag", "") or "",
+            })
+        except Exception:
+            continue
+
+    rows.sort(key=lambda r: r["report_date"])
+    available = len(rows) >= 1
+    return {
+        "chart_key": "implied_move_strip",
+        "variant": "atm_straddle",
+        "available": available,
+        "reason_if_hidden": None if available else "No upcoming earnings with options data found.",
+        "title": "Implied Earnings Moves",
+        "caption": f"Options-implied ±move for {len(rows)} upcoming earnings ({', '.join(r['symbol'] for r in rows[:3])}{' …' if len(rows) > 3 else ''})." if rows else "No earnings implied-move data.",
+        "series": rows,
+        "annotations": [],
+        "meta": {},
+        "email_dimensions": {"width": 1000, "height": 480},
     }
 
 

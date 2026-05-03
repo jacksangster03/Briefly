@@ -21,6 +21,38 @@ _LABEL_RE = re.compile(
 )
 _EMAIL_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
 
+# Regime → (background tint hex, accent hex, display label)
+_REGIME_STYLES: dict[str, tuple[str, str, str]] = {
+    "risk_on":          ("#071E10", "#00D4AA", "RISK ON"),
+    "defensive":        ("#1E0707", "#FF6B6B", "DEFENSIVE"),
+    "oil_shock":        ("#1E1007", "#FF6B00", "OIL SHOCK"),
+    "rates_led":        ("#071629", "#4A90E2", "RATES LED"),
+    "regional_split":   ("#0F0E1E", "#B08EFF", "REGIONAL SPLIT"),
+    "breadth_divergence": ("#0E1A1E", "#4A90E2", "BREADTH DIVERGENCE"),
+    "mixed":            ("#071629", "#7A8FA0", "MIXED"),
+}
+
+# Section header → anchor slug mapping
+_SECTION_ANCHORS: dict[str, str] = {
+    "market setup": "market",
+    "macro": "macro",
+    "portfolio": "portfolio",
+    "global news": "news",
+    "top themes": "themes",
+    "earnings": "earnings",
+    "watchlist": "watchlist",
+    "sector scan": "sectors",
+}
+
+# Jump-link nav labels (displayed at top of email)
+_NAV_ITEMS = [
+    ("market", "Market"),
+    ("portfolio", "Portfolio"),
+    ("news", "News"),
+    ("themes", "Themes"),
+    ("earnings", "Earnings"),
+]
+
 
 class EmailFormatter:
     """Render Outlook-safe HTML email while preserving Telegram narrative."""
@@ -57,15 +89,21 @@ class EmailFormatter:
         freshness = self._freshness_summary(briefing)
         generated_local = self._format_local(briefing.generated_at)
         title, date_label = self._split_subject(subject)
-        regime_text = " / ".join(str(tag).replace("_", " ").upper() for tag in regime_tags) or "MIXED"
         desk_read = self._top_desk_read(briefing)
+
+        # Regime banner: pick first matching tag for styling
+        primary_tag = next((t for t in regime_tags if t in _REGIME_STYLES), "mixed")
+        regime_bg, regime_accent, regime_label = _REGIME_STYLES.get(primary_tag, _REGIME_STYLES["mixed"])
+        all_tags_text = " · ".join(str(t).replace("_", " ").upper() for t in regime_tags) or "MIXED"
 
         parts = [
             f"<html><body style=\"margin:0;padding:0;background:#071629;font-family:{_EMAIL_FONT_STACK};color:#E8ECEF;\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#071629;\">",
             "<tr><td align=\"center\" style=\"padding:8px 4px;\">",
             "<table role=\"presentation\" width=\"680\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:680px;max-width:680px;background:#071629;border:1px solid #1F3447;\">",
-            "<tr><td style=\"height:3px;line-height:3px;font-size:0;background:#FF6B00;\">&nbsp;</td></tr>",
+            # Regime colour bar (3px top accent)
+            f"<tr><td style=\"height:3px;line-height:3px;font-size:0;background:{regime_accent};\">&nbsp;</td></tr>",
+            # Header row
             "<tr><td style=\"padding:13px 16px 11px 16px;border-bottom:1px solid #1F3447;background:#0B1D30;\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
             "<td valign=\"bottom\" style=\"width:62%;\">",
@@ -74,18 +112,32 @@ class EmailFormatter:
             "</td>",
             "<td valign=\"bottom\" align=\"right\" style=\"width:38%;\">",
             f"<div style=\"font-size:13px;line-height:1.2;font-weight:700;color:#E8ECEF;letter-spacing:-0.01em;\">{html.escape(date_label)}</div>",
-            f"<div style=\"margin-top:5px;font-size:10.5px;line-height:1.3;color:#7A8FA0;\">REGIME <span style=\"color:#FF6B00;font-weight:800;\">{html.escape(regime_text)}</span></div>",
             "</td></tr></table>",
             "</td></tr>",
+            # Full-width regime banner row
+            f"<tr><td style=\"padding:6px 16px;border-bottom:1px solid #1F3447;background:{regime_bg};\">",
+            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
+            f"<td style=\"font-size:11px;line-height:1.3;font-weight:800;color:{regime_accent};letter-spacing:0.06em;\">",
+            f"&#9646; REGIME: {html.escape(regime_label)}",
+            "</td>",
+            f"<td align=\"right\" style=\"font-size:9.5px;color:#7A8FA0;\">{html.escape(all_tags_text)}</td>",
+            "</tr></table>",
+            "</td></tr>",
+            # Meta row
             "<tr><td style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:#071629;\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
             f"<td style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">GENERATED</strong> {html.escape(generated_local)}</td>",
             f"<td align=\"center\" style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">PROFILE</strong> {html.escape(profile_name)}</td>",
-            f"<td align=\"right\" style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">MODE</strong> {html.escape(delivery_mode)} · LLM shadow {'on' if llm_shadow else 'off'} · <strong style=\"color:#E8ECEF;\">CONF</strong> {html.escape(confidence)}</td>",
+            f"<td align=\"right\" style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">MODE</strong> {html.escape(delivery_mode)} · <strong style=\"color:#E8ECEF;\">CONF</strong> {html.escape(confidence)}</td>",
             "</tr></table>",
             "</td></tr>",
+            # Source freshness row
             "<tr><td style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:#071629;\">",
             f"<div style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">SOURCE</strong> {html.escape(freshness)}</div>",
+            "</td></tr>",
+            # Jump-link nav row
+            "<tr><td style=\"padding:6px 16px 6px 16px;border-bottom:1px solid #1F3447;background:#0B1D30;\">",
+            self._nav_row(),
             "</td></tr>",
         ]
 
@@ -107,6 +159,15 @@ class EmailFormatter:
 
         parts.extend(["</table>", "</td></tr></table>", "</body></html>"])
         return "".join(parts)
+
+    @staticmethod
+    def _nav_row() -> str:
+        links = " &nbsp;|&nbsp; ".join(
+            f"<a href=\"#{slug}\" style=\"color:#7A8FA0;font-size:10px;font-weight:700;text-decoration:none;"
+            f"letter-spacing:0.04em;\">{html.escape(label).upper()}</a>"
+            for slug, label in _NAV_ITEMS
+        )
+        return f"<div style=\"line-height:1.5;\">{links}</div>"
 
     def _chart_modules(self, briefing: MorningBriefing) -> str:
         roles = {row.get("chart_key"): row.get("role") for row in (briefing.morning_chart_selection or [])}
@@ -146,20 +207,28 @@ class EmailFormatter:
         lines = section_html.split("\n")
         first = lines[0] if lines else ""
         header_match = _BOLD_HEADER_RE.match(first)
-        if header_match and len(lines) > 1:
+        anchor_id = ""
+        if header_match:
             header_text = header_match.group(1)
-            body = self._emphasize_market_labels("<br>".join(line for line in lines[1:] if line is not None))
-            return (
-                "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;\">"
-                "<tr><td style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;\">"
-                f"<div style=\"font-size:15px;line-height:1.18;font-weight:800;letter-spacing:-0.01em;color:#E8ECEF;margin:0 0 6px 0;\">{html.escape(header_text)}</div>"
-                f"{body}"
-                "</td></tr></table>"
+            slug = next(
+                (v for k, v in _SECTION_ANCHORS.items() if k in header_text.lower()),
+                None,
             )
+            if slug:
+                anchor_id = f" id=\"{slug}\""
+            if len(lines) > 1:
+                body = self._emphasize_market_labels("<br>".join(line for line in lines[1:] if line is not None))
+                return (
+                    f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;\">"
+                    f"<tr><td{anchor_id} style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;\">"
+                    f"<div style=\"font-size:15px;line-height:1.18;font-weight:800;letter-spacing:-0.01em;color:#E8ECEF;margin:0 0 6px 0;\">{html.escape(header_text)}</div>"
+                    f"{body}"
+                    "</td></tr></table>"
+                )
         body = self._emphasize_market_labels("<br>".join(lines))
         return (
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;\">"
-            "<tr><td style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;\">"
+            f"<tr><td{anchor_id} style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;\">"
             f"{body}"
             "</td></tr></table>"
         )
