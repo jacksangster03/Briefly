@@ -23,12 +23,12 @@ _EMAIL_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helveti
 
 # Regime → (background tint hex, accent hex, display label)
 _REGIME_STYLES: dict[str, tuple[str, str, str]] = {
-    "risk_on":          ("#071E10", "#00D4AA", "RISK ON"),
-    "defensive":        ("#1E0707", "#FF6B6B", "DEFENSIVE"),
-    "oil_shock":        ("#1E1007", "#FF6B00", "OIL SHOCK"),
+    "risk_on":          ("#071629", "#00D4AA", "RISK ON"),
+    "defensive":        ("#071629", "#FF6B6B", "DEFENSIVE"),
+    "oil_shock":        ("#071629", "#FF6B00", "OIL SHOCK"),
     "rates_led":        ("#071629", "#4A90E2", "RATES LED"),
-    "regional_split":   ("#0F0E1E", "#B08EFF", "REGIONAL SPLIT"),
-    "breadth_divergence": ("#0E1A1E", "#4A90E2", "BREADTH DIVERGENCE"),
+    "regional_split":   ("#071629", "#B08EFF", "REGIONAL SPLIT"),
+    "breadth_divergence": ("#071629", "#4A90E2", "BREADTH DIVERGENCE"),
     "mixed":            ("#071629", "#7A8FA0", "MIXED"),
 }
 
@@ -104,7 +104,7 @@ class EmailFormatter:
             # Regime colour bar (3px top accent)
             f"<tr><td style=\"height:3px;line-height:3px;font-size:0;background:{regime_accent};\">&nbsp;</td></tr>",
             # Header row
-            "<tr><td style=\"padding:13px 16px 11px 16px;border-bottom:1px solid #1F3447;background:#0B1D30;\">",
+            "<tr><td style=\"padding:13px 16px 11px 16px;border-bottom:1px solid #1F3447;background:#071629;\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
             "<td valign=\"bottom\" style=\"width:62%;\">",
             f"<div style=\"font-size:20px;line-height:1.08;font-weight:800;color:#E8ECEF;letter-spacing:-0.01em;\">{html.escape(title)}</div>",
@@ -136,7 +136,7 @@ class EmailFormatter:
             f"<div style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">SOURCE</strong> {html.escape(freshness)}</div>",
             "</td></tr>",
             # Jump-link nav row
-            "<tr><td style=\"padding:6px 16px 6px 16px;border-bottom:1px solid #1F3447;background:#0B1D30;\">",
+            "<tr><td style=\"padding:6px 16px 6px 16px;border-bottom:1px solid #1F3447;background:#071629;\">",
             self._nav_row(),
             "</td></tr>",
         ]
@@ -183,6 +183,7 @@ class EmailFormatter:
             pad_bottom = "13px" if is_hero else ("9px" if is_micro else "11px")
             read_line = self._chart_read_line(asset.caption)
             takeaway_line = self._chart_takeaway_line(asset.caption)
+            explain_line = self._chart_explainer_paragraph(asset.key, asset.caption)
             modules.append(
                 f"<tr><td style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid #1F3447;\">"
             )
@@ -198,6 +199,9 @@ class EmailFormatter:
             )
             modules.append(
                 f"<div style=\"font-size:11px;line-height:1.35;color:#9BA3AB;padding:7px 0 0 0;\">{html.escape(takeaway_line)}</div>"
+            )
+            modules.append(
+                f"<div style=\"font-size:12px;line-height:1.45;color:#B6C4D3;padding:6px 0 0 0;\">{html.escape(explain_line)}</div>"
             )
             modules.append("</td></tr>")
         modules.append("</table>")
@@ -252,6 +256,36 @@ class EmailFormatter:
         if len(words) > 30:
             text = " ".join(words[:30]).rstrip(".,;:") + "."
         return f"Takeaway: {text}"
+
+    @staticmethod
+    def _chart_explainer_paragraph(chart_key: str | None, caption: str | None) -> str:
+        key = str(chart_key or "").strip().lower()
+        base = (caption or "").strip()
+        if len(base.split()) > 34:
+            base = " ".join(base.split()[:34]).rstrip(".,;:") + "."
+        if key == "cross_asset_impulse_strip":
+            return (
+                "This strip ranks cross-asset shocks around a neutral zero line: right-side values signal positive impulse, "
+                "left-side values signal drag. Use it to identify whether rates, commodities, or risk gauges are driving the tape."
+            )
+        if key == "breadth_leadership_panel":
+            return (
+                "Breadth and leadership factors are shown on a bullish/bearish scale, so bar direction and magnitude both matter. "
+                "A positive cluster confirms participation, while mixed signs usually indicate fragile trend quality."
+            )
+        if key == "pnl_attribution_waterfall":
+            return (
+                "Each bar is a weighted contribution to daily portfolio return, not just raw move, so larger positions carry more influence. "
+                "Positive bars add to P&L and negative bars subtract, with the TOTAL line summarizing net impact."
+            )
+        if key == "event_linked_annotated_trend":
+            return (
+                "The dashed marker shows where the current catalyst window starts, and the shaded region tracks price response since that trigger. "
+                "This helps separate pre-event drift from event-driven follow-through."
+            )
+        if base:
+            return f"Interpretation: {base}"
+        return "Interpretation: Deterministic chart values are summarized here to explain direction, magnitude, and the current risk signal."
 
     def _top_desk_read(self, briefing: MorningBriefing) -> str:
         lines = [html.escape(line) for line in self._top_desk_read_lines(briefing)]
