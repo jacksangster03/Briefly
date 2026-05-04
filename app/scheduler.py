@@ -14,7 +14,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.logger import get_logger
-from app.main import run_breaking_check, run_intraday_update, run_morning_briefing
+from app.main import run_breaking_check, run_session_brief
 from app.settings import Settings, get_settings
 
 logger = get_logger("scheduler")
@@ -133,10 +133,10 @@ def _breaking_run_times(start: str, end: str, interval_minutes: int) -> list[tup
 
 
 def _run_morning_cadence_check(settings: Settings) -> None:
-    """Run morning flow only when cadence engine says send now."""
-    run_morning_briefing(settings, respect_cadence=True)
+    """Run session-aware cadence check across all windows."""
+    run_session_brief(settings, respect_cadence=True)
 
 
 def _run_intraday_cadence_check(settings: Settings) -> None:
-    """Run intraday flow only when cadence engine says send now."""
-    run_intraday_update(settings, respect_cadence=True)
+    """Run session-aware cadence check across all windows."""
+    run_session_brief(settings, respect_cadence=True)

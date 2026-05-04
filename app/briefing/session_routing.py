@@ -17,9 +17,9 @@ class SessionWindow:
 
 SESSION_WINDOWS: tuple[SessionWindow, ...] = (
     SessionWindow("morning", "Morning Briefing", time(6, 0), time(10, 30)),
-    SessionWindow("late_morning", "Late Morning Update", time(10, 30), time(13, 30)),
-    SessionWindow("pre_us_open", "Pre-US Open Update", time(13, 30), time(15, 25)),
-    SessionWindow("intraday", "Intraday Update", time(15, 30), time(17, 30)),
+    SessionWindow("europe_midday", "Europe Midday Check", time(10, 30), time(13, 30)),
+    SessionWindow("us_pre_open", "US Pre-Open Setup", time(13, 30), time(15, 25)),
+    SessionWindow("us_intraday_risk", "US Intraday Risk Check", time(15, 30), time(17, 30)),
     SessionWindow("into_close", "Into Close Update", time(17, 30), time(22, 0)),
 )
 
@@ -31,5 +31,28 @@ def resolve_session_window(*, now: datetime, timezone_name: str) -> SessionWindo
     for window in SESSION_WINDOWS:
         if window.start <= tod < window.end:
             return window
+    # Small handoff gap between pre-open and intraday belongs to pre-open context.
+    if time(15, 25) <= tod < time(15, 30):
+        return SessionWindow("us_pre_open", "US Pre-Open Setup", time(13, 30), time(15, 25))
+    # Pre-06:00 reads as previous-session wrap until the morning cycle starts.
+    if tod < time(6, 0):
+        return SessionWindow("closing_wrap", "Closing Wrap / Next-Day Setup", time(22, 0), time(23, 59))
     return SessionWindow("closing_wrap", "Closing Wrap / Next-Day Setup", time(22, 0), time(23, 59))
 
+
+def session_window_for_key(key: str) -> SessionWindow:
+    """Resolve canonical session metadata by key."""
+    normalised = (key or "").strip().lower()
+    aliases = {
+        "midday": "europe_midday",
+        "preopen": "us_pre_open",
+        "intraday": "us_intraday_risk",
+        "close": "into_close",
+    }
+    mapped = aliases.get(normalised, normalised)
+    for window in SESSION_WINDOWS:
+        if window.key == mapped:
+            return window
+    if mapped == "closing_wrap":
+        return SessionWindow("closing_wrap", "Closing Wrap / Next-Day Setup", time(22, 0), time(23, 59))
+    return SessionWindow("morning", "Morning Briefing", time(6, 0), time(10, 30))

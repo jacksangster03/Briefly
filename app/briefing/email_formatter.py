@@ -526,6 +526,12 @@ class EmailFormatter:
         lines.append(
             f"Risk posture: {posture.lower()}; US {us:+.2f}%, Europe {eu:+.2f}%, Asia {asia:+.2f} ({regional})."
         )
+        if briefing.session_key in {"us_pre_open", "us_intraday_risk", "into_close"}:
+            charts = {str(row.get("chart_key")): row for row in (briefing.morning_chart_bundle or {}).get("charts", [])}
+            setup_card = charts.get("setup_confirmation_card") or {}
+            setup_line = str(setup_card.get("caption") or "").strip()
+            if setup_line:
+                lines.append(f"Setup confirmation: {setup_line}")
         if briefing.geo_risk_summary:
             lines.append(f"Geo lens: {briefing.geo_risk_summary}")
         if briefing.portfolio_action_posture:

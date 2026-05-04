@@ -87,6 +87,42 @@ def intraday(ctx):
 
 @cli.command()
 @click.pass_context
+def midday(ctx):
+    """Run a Europe Midday Check briefing."""
+    from app.main import run_morning_briefing
+    run_morning_briefing(
+        ctx.obj["settings"],
+        auto_route_session=False,
+        session_override="europe_midday",
+    )
+
+
+@cli.command()
+@click.pass_context
+def preopen(ctx):
+    """Run a US Pre-Open Setup briefing."""
+    from app.main import run_morning_briefing
+    run_morning_briefing(
+        ctx.obj["settings"],
+        auto_route_session=False,
+        session_override="us_pre_open",
+    )
+
+
+@cli.command()
+@click.pass_context
+def close(ctx):
+    """Run an Into Close Update briefing."""
+    from app.main import run_morning_briefing
+    run_morning_briefing(
+        ctx.obj["settings"],
+        auto_route_session=False,
+        session_override="into_close",
+    )
+
+
+@cli.command()
+@click.pass_context
 def breaking(ctx):
     """Run a single breaking alert check."""
     from app.main import run_breaking_check

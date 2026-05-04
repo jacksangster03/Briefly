@@ -226,6 +226,12 @@ class ChartRenderer:
             return self.render_regional_divergence_from_spec(spec)
         if key == "oil_transmission_card":
             return self.render_oil_transmission_from_spec(spec)
+        if key == "watchlist_movers_card":
+            return self.render_watchlist_movers_from_spec(spec)
+        if key == "setup_confirmation_card":
+            return self.render_setup_confirmation_from_spec(spec)
+        if key == "what_changed_card":
+            return self.render_what_changed_from_spec(spec)
         return None
 
     def render_market_snapshot(self, quotes: list[QuoteData]) -> ChartAsset | None:
@@ -1596,6 +1602,88 @@ class ChartRenderer:
         return self._to_asset(fig, key="implied_move_strip",
                               title=str(spec.get("title") or "Implied Earnings Moves"),
                               caption=str(spec.get("caption") or ""), filename="implied-move.png")
+
+    def render_watchlist_movers_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        labels = [str(row.get("symbol") or row.get("name") or "") for row in rows]
+        values = [float(row.get("value") or 0.0) for row in rows]
+        colors = [POSITIVE if val >= 0 else NEGATIVE for val in values]
+        fig, ax = self._figure(8.8, max(3.1, 0.55 * len(rows) + 1.5))
+        y = list(range(len(rows)))
+        bars = ax.barh(y, values, color=colors, alpha=0.82, height=0.54)
+        ax.axvline(0, color=AXIS, linewidth=1.2, alpha=0.9)
+        for i, (bar, val) in enumerate(zip(bars, values)):
+            x = val + (0.08 if val >= 0 else -0.08)
+            align = "left" if val >= 0 else "right"
+            ax.text(x, i, f"{val:+.2f}%", color=TEXT, fontsize=8.7, va="center", ha=align, fontweight="bold")
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels, color=TEXT, fontsize=9.3, fontweight="bold")
+        ax.invert_yaxis()
+        self._style_axes(ax, title="", xlabel="Daily move (%)", grid_axis="x", lock_y_ticks=True)
+        fig.subplots_adjust(left=0.16, right=0.92, top=0.86, bottom=0.16)
+        return self._to_asset(
+            fig,
+            key="watchlist_movers_card",
+            title=str(spec.get("title") or "Watchlist Movers"),
+            caption=str(spec.get("caption") or ""),
+            filename="watchlist-movers.png",
+        )
+
+    def render_setup_confirmation_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        fig, ax = self._figure(8.8, 4.6)
+        ax.axis("off")
+        ax.set_facecolor(BG)
+        fig.patch.set_facecolor(BG)
+        ax.text(0.03, 0.92, "Setup Confirmation", color=TEXT, fontsize=15, fontweight="bold", transform=ax.transAxes)
+        y = 0.80
+        for row in rows[:6]:
+            name = str(row.get("name") or "")
+            state = str(row.get("state") or "").upper()
+            value = float(row.get("value") or 0.0)
+            if any(tok in state.lower() for tok in ("confirm", "holding")):
+                color = POSITIVE
+            elif any(tok in state.lower() for tok in ("fade", "fail", "diverg")):
+                color = NEGATIVE
+            else:
+                color = NEUTRAL
+            ax.text(0.05, y, name, color=TEXT, fontsize=10.2, fontweight="bold", transform=ax.transAxes)
+            ax.text(0.58, y, state, color=color, fontsize=10.0, fontweight="bold", transform=ax.transAxes)
+            ax.text(0.92, y, f"{value:+.2f}", color=MUTED, fontsize=9.4, ha="right", transform=ax.transAxes)
+            y -= 0.12
+        return self._to_asset(
+            fig,
+            key="setup_confirmation_card",
+            title=str(spec.get("title") or "Setup Confirmation"),
+            caption=str(spec.get("caption") or ""),
+            filename="setup-confirmation.png",
+        )
+
+    def render_what_changed_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        fig, ax = self._figure(8.8, 4.6)
+        ax.axis("off")
+        ax.set_facecolor(BG)
+        fig.patch.set_facecolor(BG)
+        ax.text(0.03, 0.92, "What Changed", color=TEXT, fontsize=15, fontweight="bold", transform=ax.transAxes)
+        y = 0.80
+        for row in rows[:6]:
+            line = str(row.get("name") or "")
+            ax.text(0.05, y, f"• {line}", color=TEXT, fontsize=9.6, transform=ax.transAxes)
+            y -= 0.12
+        return self._to_asset(
+            fig,
+            key="what_changed_card",
+            title=str(spec.get("title") or "What Changed"),
+            caption=str(spec.get("caption") or ""),
+            filename="what-changed.png",
+        )
 
     @staticmethod
     def _to_asset(

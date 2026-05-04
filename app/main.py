@@ -22,16 +22,17 @@ except ImportError:  # pragma: no cover - non-Unix fallback
 from app.briefing.email_formatter import EmailFormatter
 from app.briefing.formatter import TelegramFormatter
 from app.briefing.breaking_generator import BreakingAlertGenerator
-from app.briefing.intraday_generator import IntradayGenerator
 from app.briefing.llm_email_renderer import LLMEmailRenderer
 from app.briefing.morning_generator import MorningBriefingGenerator
-from app.briefing.session_routing import resolve_session_window
-from app.briefing.session_snapshot import persist_snapshot, snapshot_metrics
+from app.briefing.session_materiality import compute_materiality
+from app.briefing.session_routing import resolve_session_window, session_window_for_key
+from app.briefing.session_snapshot import load_previous_snapshot, persist_snapshot, snapshot_metrics
 from app.cadence.engine import DecisionEngine
 from app.cadence.state_store import (
     breaking_sends_last_hour,
     close_breaking_story,
     due_breaking_followups,
+    has_cadence_marker,
     record_cadence_marker,
     recent_storyline_send_exists,
     upsert_breaking_story_initial,
@@ -48,7 +49,7 @@ from app.messaging.email import EmailMessenger
 from app.messaging.telegram import TelegramMessenger
 from app.personalization.user_profile import UserProfile, load_user_profile
 from app.processing.event_store import record_sent_events
-from app.schemas.briefings import BreakingAlert, BreakingClassification, IntradayUpdate
+from app.schemas.briefings import BreakingAlert, BreakingClassification
 from app.schemas.events import NormalisedEvent
 from app.settings import Settings, get_settings
 from app.universe.sector_universe import SectorUniverse, load_sector_universe
@@ -72,6 +73,19 @@ def _resolve_llm_delivery_overrides(profile: UserProfile) -> tuple[bool | None, 
     enabled = enabled_raw if isinstance(enabled_raw, bool) else None
     shadow = shadow_raw if isinstance(shadow_raw, bool) else None
     return enabled, shadow
+
+
+def _allowed_sessions_for_mode(mode: str) -> set[str]:
+    normalised = (mode or "default").strip().lower()
+    if normalised == "quiet":
+        return {"morning"}
+    if normalised == "active":
+        return {"morning", "europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"}
+    return {"morning", "us_pre_open"}
+
+
+def _session_marker_key(session_key: str, local_now: datetime) -> str:
+    return f"session:{session_key}:{local_now.date().isoformat()}"
 
 
 def _get_messengers(settings: Settings, profile: UserProfile, *, message_type: str = ""):
@@ -537,6 +551,7 @@ def run_morning_briefing(
     respect_cadence: bool = False,
     force_morning: bool = False,
     auto_route_session: bool = True,
+    session_override: str | None = None,
 ) -> None:
     """Generate and deliver the morning briefing."""
     settings = settings or get_settings()
@@ -548,7 +563,11 @@ def run_morning_briefing(
     session_window = resolve_session_window(now=now_utc, timezone_name=profile.timezone or settings.timezone)
     session_key = "morning"
     session_title = "Morning Briefing"
-    if auto_route_session and not force_morning:
+    if session_override:
+        explicit = session_window_for_key(session_override)
+        session_key = explicit.key
+        session_title = explicit.title
+    elif auto_route_session and not force_morning:
         session_key = session_window.key
         session_title = session_window.title
         if session_key != "morning":
@@ -561,16 +580,23 @@ def run_morning_briefing(
         profile_name=profile.name,
         local_timezone=profile.timezone or settings.timezone,
     )
+    local_now = decision_engine.cadence.now_local()
+    session_marker = _session_marker_key(session_key, local_now)
     if respect_cadence:
-        morning_decision = decision_engine.decide_morning(
-            target_hhmm=profile.morning_brief_time or "08:45",
-        )
-        logger.info(
-            "Cadence decision (morning): %s | %s",
-            morning_decision.action_type,
-            morning_decision.reason,
-        )
-        if morning_decision.action_type != "send_morning":
+        allowed = _allowed_sessions_for_mode(profile.session_mode)
+        always_send = set(profile.always_send_sessions)
+        if session_key not in allowed and session_key not in always_send:
+            logger.info(
+                "Cadence decision (session): suppress | session=%s mode=%s reason=not_in_mode_schedule",
+                session_key,
+                profile.session_mode,
+            )
+            return
+        if has_cadence_marker(profile.name, session_marker):
+            logger.info(
+                "Cadence decision (session): suppress | session=%s reason=already_sent_today",
+                session_key,
+            )
             return
 
     universe = load_sector_universe(settings)
@@ -587,6 +613,43 @@ def run_morning_briefing(
 
     briefing = generator.generate(session_key=session_key, session_title=session_title)
     _apply_morning_section_preferences(briefing, profile)
+    previous_ts, previous_snapshot = load_previous_snapshot(
+        profile_name=profile.name,
+        session_key=briefing.session_key,
+        before=briefing.generated_at,
+    )
+
+    if respect_cadence:
+        always_send = set(profile.always_send_sessions)
+        materiality = compute_materiality(briefing, previous=previous_snapshot)
+        logger.info(
+            "Session materiality | session=%s score=%d decision=%s reasons=%s",
+            briefing.session_key,
+            materiality.score,
+            materiality.decision,
+            "; ".join(materiality.reasons),
+        )
+        if (
+            profile.suppress_low_materiality
+            and briefing.session_key != "morning"
+            and briefing.session_key not in always_send
+        ):
+            if materiality.decision in {"suppress", "hold_for_next_session"}:
+                logger.info(
+                    "Cadence decision (session): %s | session=%s next_eligible_session=next_window",
+                    materiality.decision,
+                    briefing.session_key,
+                )
+                return
+            if materiality.decision == "breaking_alert":
+                logger.info(
+                    "Cadence decision (session): escalate_to_breaking | session=%s score=%d",
+                    briefing.session_key,
+                    materiality.score,
+                )
+                run_breaking_check(settings)
+                return
+
     formatter = TelegramFormatter(profile.timezone)
     messages = formatter.format_morning_briefing(briefing)
     email_content = EmailFormatter(profile.timezone).format_morning_briefing(briefing)
@@ -701,13 +764,13 @@ def run_morning_briefing(
         local_now = decision_engine.cadence.now_local()
         record_cadence_marker(
             profile_name=profile.name,
-            marker_key=f"morning:{local_now.date().isoformat()}",
-            action_type="morning",
+            marker_key=session_marker,
+            action_type=briefing.session_key,
             local_date=local_now.date(),
             local_timezone=profile.timezone or settings.timezone,
             sent_at_local=local_now,
         )
-    if delivered_ok and not settings.dry_run:
+    if delivered_ok and (not settings.dry_run or settings.persist_dry_run_session_snapshots):
         try:
             persist_snapshot(
                 profile_name=profile.name,
@@ -726,73 +789,25 @@ def run_morning_briefing(
     )
 
 
-def run_session_brief(settings: Settings | None = None) -> None:
+def run_session_brief(settings: Settings | None = None, *, respect_cadence: bool = False) -> None:
     """Render the correct session-aware briefing for local time."""
-    run_morning_briefing(settings, force_morning=False, auto_route_session=True)
+    run_morning_briefing(
+        settings,
+        force_morning=False,
+        auto_route_session=True,
+        respect_cadence=respect_cadence,
+    )
 
 
 # -- Intraday Update ----------------------------------------------------------
 
 def run_intraday_update(settings: Settings | None = None, *, respect_cadence: bool = False) -> None:
-    """Fetch new events, dedupe against recent history, send top items."""
-    settings = settings or get_settings()
-    init_db()
-
-    logger.info("Starting intraday update...")
-    profile = load_user_profile(settings)
-    decision_engine = DecisionEngine(
+    """Render a session-based US intraday risk check."""
+    run_morning_briefing(
         settings,
-        profile_name=profile.name,
-        local_timezone=profile.timezone or settings.timezone,
-    )
-    if respect_cadence:
-        intraday_decision = decision_engine.decide_intraday()
-        logger.info(
-            "Cadence decision (intraday): %s | %s",
-            intraday_decision.action_type,
-            intraday_decision.reason,
-        )
-        if intraday_decision.action_type != "send_intraday":
-            return
-
-    universe = load_sector_universe(settings)
-    market_svc, news_svc, _ = _build_services(settings)
-    generator = IntradayGenerator(
-        settings=settings,
-        profile=profile,
-        universe=universe,
-        market_data=market_svc,
-        news_data=news_svc,
-    )
-    update = generator.generate()
-
-    formatter = TelegramFormatter(profile.timezone)
-    messages = formatter.format_intraday_update(update)
-
-    messengers = _get_messengers(settings, profile, message_type="intraday")
-    delivered_ok = _deliver(messengers, messages, "intraday", update.new_events, settings=settings)
-
-    if respect_cadence and delivered_ok and not settings.dry_run:
-        local_now = decision_engine.cadence.now_local()
-        marker_key = (
-            (intraday_decision.metadata or {}).get("marker_key")
-            if respect_cadence
-            else None
-        ) or f"intraday:{local_now.date().isoformat()}"
-        record_cadence_marker(
-            profile_name=profile.name,
-            marker_key=str(marker_key),
-            action_type="intraday",
-            local_date=local_now.date(),
-            local_timezone=profile.timezone or settings.timezone,
-            sent_at_local=local_now,
-        )
-
-    logger.info(
-        "Intraday update: %d fetched, %d deduped, %d sent",
-        update.events_fetched,
-        update.events_after_dedup,
-        update.events_sent,
+        respect_cadence=respect_cadence,
+        auto_route_session=False,
+        session_override="us_intraday_risk",
     )
 
 

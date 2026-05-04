@@ -119,6 +119,28 @@ class UserProfile:
         return self.delivery.get("intraday_global_risk_enabled", True)
 
     @property
+    def session_mode(self) -> str:
+        """Delivery cadence mode: quiet | default | active."""
+        raw = str(self.delivery.get("session_mode", "default")).strip().lower()
+        return raw if raw in {"quiet", "default", "active"} else "default"
+
+    @property
+    def always_send_sessions(self) -> list[str]:
+        raw = self.delivery.get("always_send_sessions", [])
+        if not isinstance(raw, list):
+            return []
+        return [str(item).strip().lower() for item in raw if str(item).strip()]
+
+    @property
+    def suppress_low_materiality(self) -> bool:
+        return bool(self.delivery.get("suppress_low_materiality", True))
+
+    @property
+    def email_density_mode(self) -> str:
+        raw = str(self.delivery.get("email_density_mode", "auto")).strip().lower()
+        return raw if raw in {"desk", "full", "auto", "medium"} else "auto"
+
+    @property
     def quiet_hours(self) -> tuple[str, str]:
         return (
             self.delivery.get("quiet_hours_start", "23:00"),
@@ -281,6 +303,9 @@ def _load_profile_overrides(profile: UserProfile) -> None:
             "delivery.quiet_hours_start",
             "delivery.quiet_hours_end",
             "delivery.email_density_mode",
+            "delivery.session_mode",
+            "delivery.always_send_sessions",
+            "delivery.suppress_low_materiality",
         }:
             profile.delivery[key.replace("delivery.", "")] = value
             continue

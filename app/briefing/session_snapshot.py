@@ -124,10 +124,18 @@ def persist_snapshot(*, profile_name: str, session_key: str, generated_at: datet
 def _comparable_session_keys(session_key: str) -> tuple[str, ...]:
     key = (session_key or "morning").strip().lower()
     if key == "morning":
-        return ("morning", "late_morning", "pre_us_open")
-    if key in {"late_morning", "pre_us_open", "intraday", "into_close"}:
-        return ("intraday", "pre_us_open", "late_morning", "into_close", "morning")
-    return (key, "into_close", "intraday", "pre_us_open", "late_morning", "morning")
+        return ("closing_wrap", "morning")
+    if key == "europe_midday":
+        return ("morning", "europe_midday")
+    if key == "us_pre_open":
+        return ("europe_midday", "morning", "us_pre_open")
+    if key == "us_intraday_risk":
+        return ("us_pre_open", "europe_midday", "morning", "us_intraday_risk")
+    if key == "into_close":
+        return ("us_intraday_risk", "us_pre_open", "morning", "into_close")
+    if key == "closing_wrap":
+        return ("into_close", "us_intraday_risk", "us_pre_open", "morning", "closing_wrap")
+    return (key, "into_close", "us_intraday_risk", "us_pre_open", "europe_midday", "morning", "closing_wrap")
 
 
 def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, float]) -> list[str]:

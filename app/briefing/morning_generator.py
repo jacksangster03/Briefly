@@ -588,16 +588,97 @@ class MorningBriefingGenerator:
         return briefing
 
     def _apply_session_profile(self, briefing: MorningBriefing) -> None:
-        """Scale content density by session type so intraday updates stay concise."""
+        """Scale content density by session type so non-morning briefs stay concise."""
         key = (briefing.session_key or "morning").lower()
         if key == "morning":
             return
-        # Non-morning sessions should stay tighter by default.
-        briefing.global_news = list(briefing.global_news[:4])
-        briefing.top_themes = list(briefing.top_themes[:3])
-        briefing.portfolio_focus = list(briefing.portfolio_focus[:4])
-        briefing.watchlist_events = list(briefing.watchlist_events[:3])
-        briefing.earnings_calendar = list(briefing.earnings_calendar[:8])
+        watch_symbols = {symbol.upper() for symbol in (self.profile.all_watchlist_tickers + self.profile.portfolio_symbols)}
+        local_now = briefing.generated_at.astimezone(timezone.utc)
+        today = local_now.date()
+        tomorrow = today + timedelta(days=1)
+
+        # Session-specific earnings scope: next 24h + watchlist/portfolio relevance.
+        filtered_earnings: list[EarningsEvent] = []
+        for evt in briefing.earnings_calendar:
+            is_relevant = bool(evt.is_relevant or evt.symbol.upper() in watch_symbols or evt.relevance_tag in {"portfolio", "watchlist"})
+            if not evt.report_date:
+                if is_relevant:
+                    filtered_earnings.append(evt)
+                continue
+            try:
+                report_date = datetime.strptime(evt.report_date, "%Y-%m-%d").date()
+            except Exception:
+                report_date = today
+            if report_date in {today, tomorrow} and is_relevant:
+                filtered_earnings.append(evt)
+        briefing.earnings_calendar = filtered_earnings[:8]
+
+        if key == "europe_midday":
+            briefing.global_news = list(briefing.global_news[:3])
+            briefing.top_themes = list(briefing.top_themes[:2])
+            briefing.portfolio_focus = list(briefing.portfolio_focus[:3])
+            briefing.watchlist_events = list(briefing.watchlist_events[:3])
+            briefing.sector_scan = []
+            briefing.macro_context = []
+            briefing.commodity_strip = list(briefing.commodity_strip[:3])
+            self._trim_market_snapshot_quotes(briefing, max_index=7, max_macro=4)
+            return
+
+        if key == "us_pre_open":
+            briefing.global_news = list(briefing.global_news[:3])
+            briefing.top_themes = list(briefing.top_themes[:3])
+            briefing.portfolio_focus = list(briefing.portfolio_focus[:3])
+            briefing.watchlist_events = list(briefing.watchlist_events[:4])
+            briefing.sector_scan = []
+            briefing.macro_context = list(briefing.macro_context[:4])
+            briefing.commodity_strip = list(briefing.commodity_strip[:3])
+            self._trim_market_snapshot_quotes(briefing, max_index=8, max_macro=5)
+            return
+
+        if key in {"us_intraday_risk", "into_close"}:
+            briefing.global_news = list(briefing.global_news[:2])
+            briefing.top_themes = list(briefing.top_themes[:2])
+            briefing.portfolio_focus = list(briefing.portfolio_focus[:3])
+            briefing.watchlist_events = list(briefing.watchlist_events[:4])
+            briefing.sector_scan = []
+            briefing.macro_context = []
+            briefing.commodity_strip = list(briefing.commodity_strip[:2])
+            self._trim_market_snapshot_quotes(briefing, max_index=6, max_macro=4)
+            return
+
+        if key == "closing_wrap":
+            briefing.global_news = list(briefing.global_news[:4])
+            briefing.top_themes = list(briefing.top_themes[:3])
+            briefing.portfolio_focus = list(briefing.portfolio_focus[:4])
+            briefing.watchlist_events = list(briefing.watchlist_events[:4])
+            briefing.macro_context = list(briefing.macro_context[:4])
+            briefing.commodity_strip = list(briefing.commodity_strip[:3])
+            self._trim_market_snapshot_quotes(briefing, max_index=8, max_macro=5)
+            return
+
+    @staticmethod
+    def _trim_market_snapshot_quotes(briefing: MorningBriefing, *, max_index: int, max_macro: int) -> None:
+        """Keep a concise, session-focused market snapshot table."""
+        priority_index_tokens = ("S&P", "NASDAQ", "DOW", "RUSSELL", "STOXX", "DAX", "NIKKEI", "HANG SENG", "VIX")
+        priority_macro_tokens = ("10Y", "2Y", "WTI", "BRENT", "GOLD", "USD")
+
+        def _rank(name: str, tokens: tuple[str, ...]) -> int:
+            text = (name or "").upper()
+            for idx, token in enumerate(tokens):
+                if token in text:
+                    return idx
+            return len(tokens) + 1
+
+        index_quotes = sorted(
+            briefing.market_setup.index_quotes,
+            key=lambda q: (_rank(q.display_name or q.symbol, priority_index_tokens), abs(float(q.change_percent or 0.0)) * -1),
+        )
+        macro_quotes = sorted(
+            briefing.market_setup.macro_quotes,
+            key=lambda q: (_rank(q.display_name or q.symbol, priority_macro_tokens), abs(float(q.change_percent or 0.0)) * -1),
+        )
+        briefing.market_setup.index_quotes = index_quotes[:max_index]
+        briefing.market_setup.macro_quotes = macro_quotes[:max_macro]
 
     @staticmethod
     def _harmonize_dominant_driver(briefing: MorningBriefing) -> str:
@@ -1032,6 +1113,7 @@ class MorningBriefingGenerator:
                 if any(tok in (q.display_name or q.symbol or "").upper() for tok in ("STOXX", "FTSE", "DAX", "CAC", "IBEX"))
             ]
             europe_avg = (sum(europe_moves) / len(europe_moves)) if europe_moves else 0.0
+            vix_display = f"{vix_level:.2f}" if vix_level is not None else "n/a"
             vix_rising = (vix_level or 0.0) >= 17.0 and any(
                 "VIX" in (q.display_name or q.symbol or "").upper() and float(q.change_percent or 0.0) >= 2.0
                 for q in briefing.market_setup.index_quotes + briefing.market_setup.macro_quotes
@@ -1039,7 +1121,7 @@ class MorningBriefingGenerator:
             if density is None and vix_rising and europe_avg <= -0.5:
                 level = "LOW-TO-MODERATE"
                 summary = (
-                    f"Geo risk LOW-TO-MODERATE, market-contained: VIX {vix_level:.2f} is rising and Europe is weak ({europe_avg:+.2f}%), "
+                    f"Geo risk LOW-TO-MODERATE, market-contained: VIX {vix_display} is rising and Europe is weak ({europe_avg:+.2f}%), "
                     f"but oil ({oil_delta:+.2f}%) and haven signals do not confirm a fresh shock."
                 )
             energy_channel_active = (
@@ -1054,7 +1136,7 @@ class MorningBriefingGenerator:
                 summary = (
                     f"Geo risk LOW-TO-MODERATE, market-contained: WTI {oil_delta:+.2f}% / Brent {brent_delta:+.2f}%"
                     f"{' / NatGas ' + format(natgas_delta, '+.2f') + '%' if natgas_delta else ''}, "
-                    f"VIX {vix_level:.2f}, gold {gold_delta:+.2f}%, with recent Middle East/Hormuz context still active."
+                    f"VIX {vix_display}, gold {gold_delta:+.2f}%, with recent Middle East/Hormuz context still active."
                 )
 
         return level, raw_level, summary

@@ -138,7 +138,7 @@ def build_morning_chart_bundle(
             "llm_email_enabled": bool(profile.delivery.get("llm_email_morning", True)),
             "llm_shadow_mode": bool(profile.delivery.get("llm_shadow_mode", True)),
             "email_density_mode": _chart_density_mode(profile, briefing),
-            "chart_stack_key": _stack_key_for_regime(briefing, normalized, regime_tags),
+            "chart_stack_key": _stack_key_for_session_regime(briefing, normalized, regime_tags),
             "selected_charts": selection_meta.get("selected_charts", []),
             "suppressed_charts": selection_meta.get("suppressed_charts", []),
             "required_charts_missing": selection_meta.get("required_charts_missing", []),
@@ -151,7 +151,7 @@ def build_morning_chart_bundle(
         logger.warning(
             "Chart stack missing required coverage | mode=%s stack=%s tags=%s selected=%s missing=%s",
             _chart_density_mode(profile, briefing),
-            _stack_key_for_regime(briefing, normalized, regime_tags),
+            _stack_key_for_session_regime(briefing, normalized, regime_tags),
             regime_tags,
             selection_meta.get("selected_charts"),
             selection_meta.get("required_charts_missing"),
@@ -159,7 +159,7 @@ def build_morning_chart_bundle(
     logger.info(
         "Chart stack mode=%s stack=%s selected=%s suppressed=%s",
         _chart_density_mode(profile, briefing),
-        _stack_key_for_regime(briefing, normalized, regime_tags),
+        _stack_key_for_session_regime(briefing, normalized, regime_tags),
         selection_meta.get("selected_charts"),
         selection_meta.get("suppressed_charts"),
     )
@@ -289,6 +289,8 @@ def _derive_regime_tags(metrics: dict[str, Any]) -> list[str]:
         tags.append("rates_led")
     if oil_delta is not None and abs(float(oil_delta)) >= 3.5:
         tags.append("oil_shock")
+    if oil_delta is not None and abs(float(oil_delta)) >= 1.2 and vix_delta is not None and float(vix_delta) >= 1.0:
+        tags.append("geo_energy")
     if abs(us - eu) >= 0.9:
         tags.append("regional_split")
     if abs(float(metrics.get("small_vs_large") or 0.0)) >= 0.6:
@@ -383,6 +385,36 @@ def _build_candidates(
                 reason="Regional spread score surfaces where dispersion is widest.",
             )
         )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="watchlist_movers_card",
+            category="support",
+            priority=0.7 + (0.1 if briefing.watchlist_quotes else 0.0),
+            spec=_watchlist_movers_spec(briefing),
+            reason="Watchlist leaders/laggards show where live single-name risk is concentrated.",
+        )
+    )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="setup_confirmation_card",
+            category="support",
+            priority=0.72 + (0.08 if briefing.session_key in {"us_pre_open", "us_intraday_risk", "into_close"} else 0.0),
+            spec=_setup_confirmation_spec(briefing, normalized, regime_tags),
+            reason="Setup confirmation card tracks whether the morning thesis is confirming or fading.",
+        )
+    )
+
+    specs.append(
+        ChartCandidate(
+            chart_key="what_changed_card",
+            category="support",
+            priority=0.74 + (0.08 if briefing.session_key in {"europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"} else 0.0),
+            spec=_what_changed_spec(briefing),
+            reason="What changed card highlights session deltas since the prior comparable snapshot.",
+        )
+    )
 
     if _feature_on("FEATURE_GEO_CONFIRMATION_LADDER", True):
         specs.append(
@@ -561,12 +593,18 @@ def _select_candidates(
         return selected, meta
 
     density_mode = _chart_density_mode(profile, briefing)
-    target_charts = 5 if density_mode == "desk" else 8
-    min_charts = 4 if density_mode == "desk" else 7
-    stack_key = _stack_key_for_regime(briefing, normalized, regime_tags)
-    desired = _stack_policy(stack_key)
-    required_groups = _required_chart_groups(regime_tags, normalized)
-    hard_groups = _hard_required_groups(regime_tags)
+    target_charts = 8
+    min_charts = 7
+    if density_mode == "desk":
+        target_charts = 5
+        min_charts = 4
+    elif density_mode == "medium":
+        target_charts = 6
+        min_charts = 5
+    stack_key = _stack_key_for_session_regime(briefing, normalized, regime_tags)
+    desired = _stack_policy(stack_key, briefing)
+    required_groups = _required_chart_groups(briefing, regime_tags, normalized)
+    hard_groups = _hard_required_groups(briefing, regime_tags)
 
     selection_keys: list[str] = []
     available_keys = {item.chart_key for item in available}
@@ -597,18 +635,19 @@ def _select_candidates(
         selection_keys.append(candidate)
         required_selected.append(candidate)
 
-    portfolio_keys = [key for key in _portfolio_required_keys() if key in available_keys]
+    portfolio_keys = [key for key in _portfolio_required_keys(briefing) if key in available_keys]
     for must_key in portfolio_keys:
         if must_key not in selection_keys:
             selection_keys.append(must_key)
 
     # If mandatory coverage exceeds desk cap, drop soft required groups first.
     if density_mode == "desk" and len(selection_keys) > target_charts:
+        hard_group_keys = {key for group in hard_groups for key in group}
         soft_required_keys = [
             key for group in required_groups
             if group not in hard_groups
             for key in group
-            if key in selection_keys
+            if key in selection_keys and key not in hard_group_keys
         ]
         for key in list(dict.fromkeys(soft_required_keys)):
             if len(selection_keys) <= target_charts:
@@ -632,6 +671,42 @@ def _select_candidates(
         representative = next((key for key in selection_keys if key in group), None)
         if representative:
             protected_keys.add(representative)
+    if density_mode == "desk" and len(selection_keys) > target_charts:
+        # Desk mode hard cap: prioritize session-critical + live-risk + portfolio P&L.
+        hard_representatives: list[str] = []
+        for group in required_groups:
+            if group not in hard_groups:
+                continue
+            rep = next((key for key in selection_keys if key in group), None)
+            if rep and rep not in hard_representatives:
+                hard_representatives.append(rep)
+        for key in portfolio_keys:
+            if key not in hard_representatives:
+                hard_representatives.append(key)
+        priority_order = [
+            "what_changed_card",
+            "setup_confirmation_card",
+            "watchlist_movers_card",
+            "pnl_attribution_waterfall",
+            "portfolio_concentration_risk_card",
+            "regional_divergence_score",
+            "global_relative_performance",
+            "yield_curve_shape",
+            "cross_asset_impulse_strip",
+            "volatility_regime_card",
+            "breadth_leadership_panel",
+            "geo_confirmation_ladder",
+            "oil_transmission_card",
+        ]
+        selected_ranked = hard_representatives + [key for key in priority_order if key in selection_keys and key not in hard_representatives]
+        # Keep deterministic fallback ordering for any unranked keys.
+        selected_ranked.extend([key for key in selection_keys if key not in selected_ranked])
+        keep = selected_ranked[:target_charts]
+        for key in selection_keys:
+            if key not in keep:
+                suppressed.append(f"{key}:desk_priority_trim")
+        selection_keys = keep
+        protected_keys = set(selection_keys)
     while len(selection_keys) > target_charts:
         removed = False
         for idx in range(len(selection_keys) - 1, -1, -1):
@@ -687,22 +762,39 @@ def _select_candidates(
 def _chart_density_mode(profile: UserProfile, briefing: MorningBriefing) -> str:
     if not _feature_on("FEATURE_EMAIL_DENSITY_MODE", True):
         return "full"
-    raw_pref = profile.delivery.get("email_density_mode")
-    default_mode = "full" if (briefing.session_key or "morning") == "morning" else "desk"
-    raw = str(raw_pref if raw_pref is not None else default_mode).strip().lower()
-    return raw if raw in {"desk", "full"} else "desk"
+    raw_pref = str(profile.delivery.get("email_density_mode", "auto")).strip().lower()
+    session_key = (briefing.session_key or "morning").lower()
+    if raw_pref in {"desk", "full", "medium"}:
+        return raw_pref
+    # Auto policy by session.
+    if session_key == "morning":
+        return "full"
+    if session_key == "closing_wrap":
+        return "medium"
+    return "desk"
 
 
-def _stack_key_for_regime(
+def _stack_key_for_session_regime(
     briefing: MorningBriefing,
     normalized: dict[str, Any],
     regime_tags: list[str],
 ) -> str:
+    session_key = (briefing.session_key or "morning").lower()
     tags = {str(t).lower() for t in regime_tags}
     oil_move = abs(float(normalized.get("oil_delta_pct") or 0.0))
     ten_y = abs(float(normalized.get("ten_y_change") or 0.0))
     dispersion = float(normalized.get("dispersion") or 0.0)
     vix_delta = float(normalized.get("vix_delta_pct") or 0.0)
+    if session_key == "europe_midday":
+        return "europe_midday"
+    if session_key == "us_pre_open":
+        return "us_pre_open"
+    if session_key == "us_intraday_risk":
+        return "us_intraday_risk"
+    if session_key == "into_close":
+        return "into_close"
+    if session_key == "closing_wrap":
+        return "closing_wrap"
     if "oil_shock" in tags or (oil_move >= 2.0 and vix_delta >= 1.0):
         return "energy_geo"
     if "rates_led" in tags or ten_y >= 0.025:
@@ -714,8 +806,51 @@ def _stack_key_for_regime(
     return "balanced"
 
 
-def _stack_policy(stack_key: str) -> list[str]:
+def _stack_policy(stack_key: str, briefing: MorningBriefing) -> list[str]:
     policies: dict[str, list[str]] = {
+        "europe_midday": [
+            "what_changed_card",
+            "regional_divergence_score",
+            "cross_asset_impulse_strip",
+            "volatility_regime_card",
+            "pnl_attribution_waterfall",
+        ],
+        "us_pre_open": [
+            "what_changed_card",
+            "setup_confirmation_card",
+            "regional_divergence_score",
+            "watchlist_movers_card",
+            "yield_curve_shape",
+            "cross_asset_impulse_strip",
+            "volatility_regime_card",
+            "earnings_relevance_strip",
+            "pnl_attribution_waterfall",
+        ],
+        "us_intraday_risk": [
+            "what_changed_card",
+            "setup_confirmation_card",
+            "volatility_regime_card",
+            "watchlist_movers_card",
+            "cross_asset_impulse_strip",
+            "pnl_attribution_waterfall",
+        ],
+        "into_close": [
+            "what_changed_card",
+            "breadth_leadership_panel",
+            "volatility_regime_card",
+            "watchlist_movers_card",
+            "pnl_attribution_waterfall",
+            "cross_asset_impulse_strip",
+        ],
+        "closing_wrap": [
+            "regional_divergence_score",
+            "breadth_leadership_panel",
+            "cross_asset_impulse_strip",
+            "watchlist_movers_card",
+            "pnl_attribution_waterfall",
+            "portfolio_concentration_risk_card",
+            "earnings_relevance_strip",
+        ],
         "energy_geo": [
             "cross_asset_impulse_strip",
             "geo_confirmation_ladder",
@@ -761,6 +896,7 @@ def _stack_policy(stack_key: str) -> list[str]:
         "balanced": [
             "global_relative_performance",
             "regional_divergence_score",
+            "watchlist_movers_card",
             "cross_asset_impulse_strip",
             "breadth_leadership_panel",
             "pnl_attribution_waterfall",
@@ -770,16 +906,41 @@ def _stack_policy(stack_key: str) -> list[str]:
             "rates_curve_micro_panel",
         ],
     }
-    return policies.get(stack_key, policies["balanced"])
+    policy = list(policies.get(stack_key, policies["balanced"]))
+    # Intraday sessions should avoid static concentration unless relevant.
+    if (briefing.session_key or "").lower() in {"us_intraday_risk", "into_close"}:
+        concentration_relevant = any(
+            abs(float(q.change_percent or 0.0)) >= 3.0
+            for q in (briefing.portfolio_quotes or [])
+        )
+        if not concentration_relevant:
+            policy = [key for key in policy if key != "portfolio_concentration_risk_card"]
+    return policy
 
 
-def _portfolio_required_keys() -> tuple[str, str]:
+def _portfolio_required_keys(briefing: MorningBriefing) -> tuple[str, ...]:
+    session_key = (briefing.session_key or "morning").lower()
+    if session_key in {"us_intraday_risk", "into_close"}:
+        return ("pnl_attribution_waterfall",)
     return ("pnl_attribution_waterfall", "portfolio_concentration_risk_card")
 
 
-def _required_chart_groups(regime_tags: list[str], normalized: dict[str, Any]) -> list[tuple[str, ...]]:
+def _required_chart_groups(
+    briefing: MorningBriefing,
+    regime_tags: list[str],
+    normalized: dict[str, Any],
+) -> list[tuple[str, ...]]:
     tags = {str(tag).lower() for tag in regime_tags}
     required: list[tuple[str, ...]] = []
+    session_key = (briefing.session_key or "morning").lower()
+
+    if session_key in {"us_pre_open", "us_intraday_risk", "into_close"}:
+        required.append(("watchlist_movers_card",))
+    if session_key in {"us_pre_open", "us_intraday_risk", "into_close", "europe_midday", "closing_wrap"}:
+        required.append(("what_changed_card", "setup_confirmation_card"))
+    if session_key in {"us_intraday_risk", "into_close"}:
+        required.append(("setup_confirmation_card",))
+
     if "regional_split" in tags:
         required.append(("regional_divergence_score", "global_relative_performance"))
     if "breadth_divergence" in tags:
@@ -787,21 +948,32 @@ def _required_chart_groups(regime_tags: list[str], normalized: dict[str, Any]) -
     if "rates_led" in tags:
         required.append(("yield_curve_shape", "rates_curve_micro_panel"))
         required.append(("cross_asset_impulse_strip",))
-    if "oil_shock" in tags:
+    if "oil_shock" in tags or "geo_energy" in tags:
         required.append(("geo_confirmation_ladder", "oil_transmission_card"))
     if "volatility_watch" in tags:
         required.append(("volatility_regime_card",))
     return required
 
 
-def _hard_required_groups(regime_tags: list[str]) -> set[tuple[str, ...]]:
+def _hard_required_groups(briefing: MorningBriefing, regime_tags: list[str]) -> set[tuple[str, ...]]:
     tags = {str(tag).lower() for tag in regime_tags}
     hard: set[tuple[str, ...]] = set()
+    session_key = (briefing.session_key or "morning").lower()
+    if session_key in {"us_pre_open", "us_intraday_risk", "into_close"}:
+        hard.add(("watchlist_movers_card",))
+    if session_key in {"us_intraday_risk", "into_close"}:
+        hard.add(("setup_confirmation_card",))
     if "regional_split" in tags:
         hard.add(("regional_divergence_score", "global_relative_performance"))
+    if "breadth_divergence" in tags:
+        hard.add(("breadth_leadership_panel",))
     if "rates_led" in tags:
         hard.add(("yield_curve_shape", "rates_curve_micro_panel"))
         hard.add(("cross_asset_impulse_strip",))
+    if "oil_shock" in tags or "geo_energy" in tags:
+        hard.add(("geo_confirmation_ladder", "oil_transmission_card"))
+    if "volatility_watch" in tags:
+        hard.add(("volatility_regime_card",))
     return hard
 
 
@@ -1049,6 +1221,106 @@ def _regional_divergence_score_spec(metrics: dict[str, Any]) -> dict[str, Any]:
         "series": rows,
         "annotations": [{"label": "spread", "value": spread}],
         "meta": {"spread": spread},
+        "email_dimensions": {"width": 900, "height": 460},
+    }
+
+
+def _watchlist_movers_spec(briefing: MorningBriefing) -> dict[str, Any]:
+    quotes = list(briefing.watchlist_quotes or briefing.portfolio_quotes or [])
+    ranked = sorted(
+        [q for q in quotes if q.current_price is not None],
+        key=lambda q: float(q.change_percent or 0.0),
+        reverse=True,
+    )
+    leaders = ranked[:3]
+    laggards = list(reversed(ranked[-3:])) if len(ranked) > 3 else []
+    rows = []
+    for row in leaders + laggards:
+        rows.append(
+            {
+                "name": (row.display_name or row.symbol or "").strip()[:28],
+                "symbol": row.symbol,
+                "value": round(float(row.change_percent or 0.0), 3),
+            }
+        )
+    available = len(rows) >= 2
+    if leaders and laggards:
+        caption = (
+            f"Leaders: {leaders[0].symbol} {float(leaders[0].change_percent or 0.0):+.2f}% | "
+            f"Laggards: {laggards[0].symbol} {float(laggards[0].change_percent or 0.0):+.2f}%."
+        )
+    else:
+        caption = "Watchlist mover context is limited in this cycle."
+    return {
+        "chart_key": "watchlist_movers_card",
+        "variant": "leaders_laggards",
+        "available": available,
+        "reason_if_hidden": None if available else "Watchlist quote set too small.",
+        "title": "Watchlist Movers",
+        "caption": caption,
+        "series": rows,
+        "annotations": [],
+        "meta": {"leader_count": len(leaders), "laggard_count": len(laggards)},
+        "email_dimensions": {"width": 900, "height": 460},
+    }
+
+
+def _setup_confirmation_spec(
+    briefing: MorningBriefing,
+    metrics: dict[str, Any],
+    regime_tags: list[str],
+) -> dict[str, Any]:
+    us = float(metrics.get("us_avg") or 0.0)
+    eu = float(metrics.get("eu_avg") or 0.0)
+    asia = float(metrics.get("asia_avg") or 0.0)
+    breadth = float(metrics.get("breadth") or 0.0)
+    ten_y_change = float(metrics.get("ten_y_change") or 0.0)
+    nasdaq = _avg_change(briefing.market_setup.index_quotes, ("nasdaq", "ixic"))
+    spx = _avg_change(briefing.market_setup.index_quotes, ("s&p", "spx"))
+
+    def _status(value: float, *, pos_threshold: float = 0.2, neg_threshold: float = -0.2) -> str:
+        if value >= pos_threshold:
+            return "confirmed"
+        if value <= neg_threshold:
+            return "faded"
+        return "mixed"
+
+    rows = [
+        {"name": "US confirmation", "state": _status(us), "value": round(us, 3)},
+        {"name": "Europe weakness", "state": "confirmed" if eu <= -0.3 else "faded", "value": round(eu, 3)},
+        {"name": "Rates pressure", "state": "confirmed" if ten_y_change >= 0.025 else "mixed" if ten_y_change > 0 else "faded", "value": round(ten_y_change, 4)},
+        {"name": "Tech cushion", "state": "holding" if nasdaq >= spx else "failing", "value": round(nasdaq - spx, 3)},
+        {"name": "Breadth", "state": "confirming" if breadth >= 0.6 else "diverging" if breadth <= 0.4 else "mixed", "value": round(breadth * 100.0, 2)},
+    ]
+    tag_label = ", ".join(regime_tags[:3]) if regime_tags else "mixed"
+    return {
+        "chart_key": "setup_confirmation_card",
+        "variant": "status_matrix",
+        "available": True,
+        "reason_if_hidden": None,
+        "title": "Setup Confirmation",
+        "caption": f"Session setup check across US/Europe/Asia, rates, and breadth (tags: {tag_label}).",
+        "series": rows,
+        "annotations": [],
+        "meta": {"tag_label": tag_label},
+        "email_dimensions": {"width": 900, "height": 460},
+    }
+
+
+def _what_changed_spec(briefing: MorningBriefing) -> dict[str, Any]:
+    lines = [str(line).strip() for line in (briefing.what_changed_lines or []) if str(line).strip()]
+    available = bool(lines) and not lines[0].lower().startswith("no prior comparable snapshot")
+    rows = [{"name": line[:74], "value": idx + 1} for idx, line in enumerate(lines[:6])]
+    return {
+        "chart_key": "what_changed_card",
+        "variant": "delta_summary",
+        "available": available,
+        "reason_if_hidden": None if available else "No prior comparable snapshot available.",
+        "title": "What Changed",
+        "caption": lines[0] if lines else "No prior comparable snapshot available.",
+        "series": rows,
+        "annotations": [],
+        "meta": {"line_count": len(lines)},
         "email_dimensions": {"width": 900, "height": 460},
     }
 
@@ -1419,11 +1691,25 @@ def _pnl_waterfall_spec(holdings_quotes: list[QuoteData], profile: UserProfile) 
 
     bars.sort(key=lambda r: r["contribution"], reverse=True)
     available = len(bars) >= 2
-    top_pos = next((row for row in bars if float(row.get("contribution") or 0.0) > 0.0), None)
+    top_pos = max(bars, key=lambda row: float(row.get("contribution") or 0.0), default=None)
     top_neg = min(bars, key=lambda row: float(row.get("contribution") or 0.0), default=None)
     lens_hint = ""
     if top_pos and top_neg:
-        lens_hint = f" Lead: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}%; drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%."
+        if total_contrib < 0:
+            lens_hint = (
+                f" Main drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%; "
+                f"largest positive offset: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}%."
+            )
+        elif total_contrib > 0:
+            lens_hint = (
+                f" Main contributor: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}%; "
+                f"largest drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%."
+            )
+        else:
+            lens_hint = (
+                f" Offsetting sleeves: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}% "
+                f"vs {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%."
+            )
     return {
         "chart_key": "pnl_attribution_waterfall",
         "variant": "daily_contribution",
@@ -1616,7 +1902,7 @@ def _impulse_read_line(points: list[dict[str, Any]]) -> str:
     if strongest_pos and strongest_neg:
         return (
             f"On a normalised impulse basis, upside is {_fmt(strongest_pos)} and downside is {_fmt(strongest_neg)}. "
-            "Raw bp and % moves are normalised before comparison."
+            "Units are normalised before comparison."
         )
     driver = max(points, key=lambda row: abs(float(row.get("impulse") or 0.0)))
     return f"On a normalised impulse basis, the largest move is {_fmt(driver)}; the rest of the strip is comparatively muted."
