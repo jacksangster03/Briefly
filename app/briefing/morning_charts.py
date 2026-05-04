@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from app.logger import get_logger
 from app.personalization.user_profile import UserProfile
 from app.processing.cleaners import truncate
 from app.schemas.briefings import MorningBriefing
@@ -41,6 +42,8 @@ CHART_SPEC_REQUIRED_KEYS = (
     "annotations",
     "email_dimensions",
 )
+
+logger = get_logger("morning_charts")
 
 
 def _feature_on(name: str, default: bool = True) -> bool:
@@ -94,7 +97,7 @@ def build_morning_chart_bundle(
         multiplier = feedback_weights.get(item.chart_key, 1.0)
         if multiplier != 1.0:
             item.priority = round(item.priority * multiplier, 4)
-    selected = _select_candidates(
+    selected, selection_meta = _select_candidates(
         candidates,
         profile=profile,
         briefing=briefing,
@@ -134,13 +137,32 @@ def build_morning_chart_bundle(
             "delivery_mode": "deterministic",
             "llm_email_enabled": bool(profile.delivery.get("llm_email_morning", True)),
             "llm_shadow_mode": bool(profile.delivery.get("llm_shadow_mode", True)),
-            "email_density_mode": _chart_density_mode(profile),
+            "email_density_mode": _chart_density_mode(profile, briefing),
             "chart_stack_key": _stack_key_for_regime(briefing, normalized, regime_tags),
+            "selected_charts": selection_meta.get("selected_charts", []),
+            "suppressed_charts": selection_meta.get("suppressed_charts", []),
+            "required_charts_missing": selection_meta.get("required_charts_missing", []),
             "data_confidence": _confidence_label(normalized),
             "contract_errors": contract_errors,
             **anomaly_meta,
         },
     }
+    if selection_meta.get("required_charts_missing"):
+        logger.warning(
+            "Chart stack missing required coverage | mode=%s stack=%s tags=%s selected=%s missing=%s",
+            _chart_density_mode(profile, briefing),
+            _stack_key_for_regime(briefing, normalized, regime_tags),
+            regime_tags,
+            selection_meta.get("selected_charts"),
+            selection_meta.get("required_charts_missing"),
+        )
+    logger.info(
+        "Chart stack mode=%s stack=%s selected=%s suppressed=%s",
+        _chart_density_mode(profile, briefing),
+        _stack_key_for_regime(briefing, normalized, regime_tags),
+        selection_meta.get("selected_charts"),
+        selection_meta.get("suppressed_charts"),
+    )
     return bundle, selected
 
 
@@ -271,6 +293,9 @@ def _derive_regime_tags(metrics: dict[str, Any]) -> list[str]:
         tags.append("regional_split")
     if abs(float(metrics.get("small_vs_large") or 0.0)) >= 0.6:
         tags.append("breadth_divergence")
+    # Keep volatility-watch explicit so required chart gating is tag-driven.
+    if vix_level is not None and (float(vix_level) >= 20.0 or (float(vix_level) >= 18.0 and float(vix_delta or 0.0) >= 3.0)):
+        tags.append("volatility_watch")
     if not tags:
         tags.append("mixed")
     return tags
@@ -508,12 +533,14 @@ def _select_candidates(
     briefing: MorningBriefing,
     normalized: dict[str, Any],
     regime_tags: list[str],
-) -> list[dict[str, str]]:
+) -> tuple[list[dict[str, str]], dict[str, list[str]]]:
     by_key = {item.chart_key: item for item in candidates}
     available = [item for item in candidates if bool(item.spec.get("available"))]
     if not available:
         fallback = next(iter(by_key.values()), None)
-        return [{"chart_key": fallback.chart_key, "role": "hero", "reason": "Fallback due to missing availability."}] if fallback else []
+        selected = [{"chart_key": fallback.chart_key, "role": "hero", "reason": "Fallback due to missing availability."}] if fallback else []
+        meta = {"selected_charts": [row["chart_key"] for row in selected], "suppressed_charts": [], "required_charts_missing": []}
+        return selected, meta
 
     if not _feature_on("FEATURE_DYNAMIC_CHART_STACK", True):
         selected: list[dict[str, str]] = []
@@ -530,15 +557,20 @@ def _select_candidates(
         micro = [item for item in available if item.category == "micro" and item.chart_key not in {row["chart_key"] for row in selected}]
         for idx, item in enumerate(micro[:2], start=1):
             selected.append({"chart_key": item.chart_key, "role": f"micro_{idx}", "reason": item.reason})
-        return selected
+        meta = {"selected_charts": [row["chart_key"] for row in selected], "suppressed_charts": [], "required_charts_missing": []}
+        return selected, meta
 
-    density_mode = _chart_density_mode(profile)
-    max_charts = 5 if density_mode == "desk" else 8
+    density_mode = _chart_density_mode(profile, briefing)
+    target_charts = 5 if density_mode == "desk" else 8
+    min_charts = 4 if density_mode == "desk" else 7
     stack_key = _stack_key_for_regime(briefing, normalized, regime_tags)
     desired = _stack_policy(stack_key)
+    required_groups = _required_chart_groups(regime_tags, normalized)
+    hard_groups = _hard_required_groups(regime_tags)
 
     selection_keys: list[str] = []
     available_keys = {item.chart_key for item in available}
+    suppressed: list[str] = []
     for key in desired:
         if key in available_keys:
             # Hide low-value event chart in desk mode when catalyst label is unavailable.
@@ -546,30 +578,78 @@ def _select_candidates(
                 spec = by_key.get(key).spec if by_key.get(key) else {}
                 event_name = str((spec.get("meta") or {}).get("event_name") or "").strip().lower()
                 if not event_name or "unavailable" in event_name:
+                    suppressed.append(f"{key}:desk_mode_unavailable_event_label")
                     continue
             if key not in selection_keys:
                 selection_keys.append(key)
-        if len(selection_keys) >= max_charts:
+        if len(selection_keys) >= target_charts:
             break
 
-    # Portfolio relevance is mandatory in all stacks.
-    for must_key in ("pnl_attribution_waterfall", "portfolio_concentration_risk_card"):
-        if must_key in available_keys and must_key not in selection_keys:
-            if len(selection_keys) >= max_charts:
-                # Replace the last non-portfolio chart if capacity is full.
-                for idx in range(len(selection_keys) - 1, -1, -1):
-                    if selection_keys[idx] not in {"pnl_attribution_waterfall", "portfolio_concentration_risk_card"}:
-                        selection_keys[idx] = must_key
-                        break
-            else:
-                selection_keys.append(must_key)
+    required_selected: list[str] = []
+    for group in required_groups:
+        selected_for_group = next((key for key in selection_keys if key in group), None)
+        if selected_for_group is not None:
+            required_selected.append(selected_for_group)
+            continue
+        candidate = next((key for key in group if key in available_keys), None)
+        if candidate is None:
+            continue
+        selection_keys.append(candidate)
+        required_selected.append(candidate)
+
+    portfolio_keys = [key for key in _portfolio_required_keys() if key in available_keys]
+    for must_key in portfolio_keys:
+        if must_key not in selection_keys:
+            selection_keys.append(must_key)
+
+    # If mandatory coverage exceeds desk cap, drop soft required groups first.
+    if density_mode == "desk" and len(selection_keys) > target_charts:
+        soft_required_keys = [
+            key for group in required_groups
+            if group not in hard_groups
+            for key in group
+            if key in selection_keys
+        ]
+        for key in list(dict.fromkeys(soft_required_keys)):
+            if len(selection_keys) <= target_charts:
+                break
+            try:
+                selection_keys.remove(key)
+                suppressed.append(f"{key}:desk_overflow_soft_required")
+            except ValueError:
+                continue
 
     # Fill remaining capacity with highest-priority available charts.
-    if len(selection_keys) < max_charts:
+    if len(selection_keys) < target_charts:
         for item in sorted(available, key=lambda row: row.priority, reverse=True):
             if item.chart_key not in selection_keys:
                 selection_keys.append(item.chart_key)
-            if len(selection_keys) >= max_charts:
+            if len(selection_keys) >= target_charts:
+                break
+    protected_keys: set[str] = set(portfolio_keys)
+    for group in required_groups:
+        # Protect one selected representative per group.
+        representative = next((key for key in selection_keys if key in group), None)
+        if representative:
+            protected_keys.add(representative)
+    while len(selection_keys) > target_charts:
+        removed = False
+        for idx in range(len(selection_keys) - 1, -1, -1):
+            key = selection_keys[idx]
+            if key in protected_keys:
+                continue
+            selection_keys.pop(idx)
+            suppressed.append(f"{key}:density_cap")
+            removed = True
+            break
+        if not removed:
+            break
+
+    if len(selection_keys) < min_charts:
+        for item in sorted(available, key=lambda row: row.priority, reverse=True):
+            if item.chart_key not in selection_keys:
+                selection_keys.append(item.chart_key)
+            if len(selection_keys) >= min_charts:
                 break
 
     roles: list[dict[str, str]] = []
@@ -590,13 +670,26 @@ def _select_candidates(
         else:
             role = "support"
         roles.append({"chart_key": key, "role": role, "reason": item.reason})
-    return roles
+    selected_set = set(selection_keys)
+    required_missing = [
+        "/".join(group)
+        for group in required_groups
+        if not any(key in selected_set for key in group)
+    ]
+    meta = {
+        "selected_charts": selection_keys,
+        "suppressed_charts": suppressed,
+        "required_charts_missing": required_missing,
+    }
+    return roles, meta
 
 
-def _chart_density_mode(profile: UserProfile) -> str:
+def _chart_density_mode(profile: UserProfile, briefing: MorningBriefing) -> str:
     if not _feature_on("FEATURE_EMAIL_DENSITY_MODE", True):
         return "full"
-    raw = str(profile.delivery.get("email_density_mode", "desk")).strip().lower()
+    raw_pref = profile.delivery.get("email_density_mode")
+    default_mode = "full" if (briefing.session_key or "morning") == "morning" else "desk"
+    raw = str(raw_pref if raw_pref is not None else default_mode).strip().lower()
     return raw if raw in {"desk", "full"} else "desk"
 
 
@@ -634,6 +727,8 @@ def _stack_policy(stack_key: str) -> list[str]:
             "global_relative_performance",
         ],
         "rates_repricing": [
+            "global_relative_performance",
+            "regional_divergence_score",
             "yield_curve_shape",
             "cross_asset_impulse_strip",
             "volatility_regime_card",
@@ -665,6 +760,7 @@ def _stack_policy(stack_key: str) -> list[str]:
         ],
         "balanced": [
             "global_relative_performance",
+            "regional_divergence_score",
             "cross_asset_impulse_strip",
             "breadth_leadership_panel",
             "pnl_attribution_waterfall",
@@ -675,6 +771,38 @@ def _stack_policy(stack_key: str) -> list[str]:
         ],
     }
     return policies.get(stack_key, policies["balanced"])
+
+
+def _portfolio_required_keys() -> tuple[str, str]:
+    return ("pnl_attribution_waterfall", "portfolio_concentration_risk_card")
+
+
+def _required_chart_groups(regime_tags: list[str], normalized: dict[str, Any]) -> list[tuple[str, ...]]:
+    tags = {str(tag).lower() for tag in regime_tags}
+    required: list[tuple[str, ...]] = []
+    if "regional_split" in tags:
+        required.append(("regional_divergence_score", "global_relative_performance"))
+    if "breadth_divergence" in tags:
+        required.append(("breadth_leadership_panel",))
+    if "rates_led" in tags:
+        required.append(("yield_curve_shape", "rates_curve_micro_panel"))
+        required.append(("cross_asset_impulse_strip",))
+    if "oil_shock" in tags:
+        required.append(("geo_confirmation_ladder", "oil_transmission_card"))
+    if "volatility_watch" in tags:
+        required.append(("volatility_regime_card",))
+    return required
+
+
+def _hard_required_groups(regime_tags: list[str]) -> set[tuple[str, ...]]:
+    tags = {str(tag).lower() for tag in regime_tags}
+    hard: set[tuple[str, ...]] = set()
+    if "regional_split" in tags:
+        hard.add(("regional_divergence_score", "global_relative_performance"))
+    if "rates_led" in tags:
+        hard.add(("yield_curve_shape", "rates_curve_micro_panel"))
+        hard.add(("cross_asset_impulse_strip",))
+    return hard
 
 
 def _bundle_summary(normalized: dict[str, Any], regime_tags: list[str]) -> str:
@@ -1068,11 +1196,11 @@ def _volatility_regime_spec(metrics: dict[str, Any]) -> dict[str, Any]:
     elif vix_level < 15:
         regime = "calm"
     elif vix_level < 20:
-        regime = "normal"
-    elif vix_level < 27:
-        regime = "elevated"
-    else:
+        regime = "watchful"
+    elif vix_level < 30:
         regime = "stress"
+    else:
+        regime = "shock"
     available = vix_level is not None
     return {
         "chart_key": "volatility_regime_card",
@@ -1080,7 +1208,11 @@ def _volatility_regime_spec(metrics: dict[str, Any]) -> dict[str, Any]:
         "available": available,
         "reason_if_hidden": None if available else "VIX quote unavailable.",
         "title": "Volatility Regime",
-        "caption": "Current implied-volatility bucket with daily change context.",
+        "caption": (
+            f"VIX is {float(vix_level):.2f}, {float(vix_delta or 0.0):+.2f}%, in the {regime} zone."
+            if available
+            else "VIX quote unavailable."
+        ),
         "series": [
             {"name": "VIX Level", "value": vix_level, "unit": "index"},
             {"name": "VIX Delta", "value": vix_delta, "unit": "pct"},
@@ -1127,7 +1259,10 @@ def _concentration_risk_spec(profile: UserProfile, market_data_service: Any = No
     if portfolio_var is not None:
         series.append({"name": "1D 95% VaR", "value": portfolio_var, "unit": "pct"})
 
-    caption = "Top-weight concentration and single-name risk posture."
+    if top5 >= 75.0 or largest >= 15.0:
+        caption = "High top-weight concentration means daily P&L can be dominated by a small number of sleeves."
+    else:
+        caption = "Portfolio concentration is moderate; monitor whether returns are broad or sleeve-driven."
     if portfolio_var is not None:
         caption += f" GARCH 1D VaR: {portfolio_var:.2f}%."
 
@@ -1193,16 +1328,30 @@ def _yield_curve_spec(yield_curve_points: list[MacroDataPoint], market_data_serv
     available = len(today_rows) >= 2
     inversion = (today_rows[0]["today"] > today_rows[-1]["today"]) if available else False
     shape = "inverted" if inversion else "normal"
+    row_map = {int(row["tenor"]): row for row in today_rows}
+    two = row_map.get(2, {}).get("today")
+    ten = row_map.get(10, {}).get("today")
+    thirty = row_map.get(30, {}).get("today")
+    spread_10_2 = ((ten - two) * 100.0) if (ten is not None and two is not None) else None
+    if available and two is not None and ten is not None:
+        read = (
+            f"{'Inverted' if inversion else 'Normal'} curve: 2Y {two:.2f}%, 10Y {ten:.2f}%"
+            + (f", 30Y {thirty:.2f}%" if thirty is not None else "")
+        )
+        if spread_10_2 is not None:
+            read += f"; 10Y-2Y spread {spread_10_2:+.0f} bp."
+    else:
+        read = "Yield curve data unavailable."
     return {
         "chart_key": "yield_curve_shape",
         "variant": "curve_today_vs_week",
         "available": available,
         "reason_if_hidden": None if available else "Yield curve data unavailable.",
         "title": "Yield Curve Shape",
-        "caption": f"{'Inverted' if inversion else 'Normal'} curve — 4-tenor snapshot vs previous fix.",
+        "caption": read,
         "series": today_rows,
         "annotations": [{"label": "inversion", "value": inversion}],
-        "meta": {"shape": shape},
+        "meta": {"shape": shape, "spread_10_2_bps": spread_10_2, "two": two, "ten": ten, "thirty": thirty},
         "email_dimensions": {"width": 1000, "height": 520},
     }
 
@@ -1466,11 +1615,11 @@ def _impulse_read_line(points: list[dict[str, Any]]) -> str:
 
     if strongest_pos and strongest_neg:
         return (
-            f"Upside impulse: {_fmt(strongest_pos)}; downside impulse: {_fmt(strongest_neg)}. "
-            "Read this as the primary cross-asset push/pull."
+            f"On a normalised impulse basis, upside is {_fmt(strongest_pos)} and downside is {_fmt(strongest_neg)}. "
+            "Raw bp and % moves are normalised before comparison."
         )
     driver = max(points, key=lambda row: abs(float(row.get("impulse") or 0.0)))
-    return f"Largest impulse is {_fmt(driver)}; the rest of the strip is comparatively muted."
+    return f"On a normalised impulse basis, the largest move is {_fmt(driver)}; the rest of the strip is comparatively muted."
 
 
 def _holdings_read_line(rows: list[dict[str, Any]]) -> str:

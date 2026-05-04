@@ -62,7 +62,9 @@ class TelegramFormatter:
 
         # Header
         date_str = briefing.generated_at.strftime("%a %d %b %Y")
-        if briefing.session_mode == "saturday":
+        if briefing.session_title and briefing.session_key not in {"morning", ""}:
+            header = briefing.session_title.upper()
+        elif briefing.session_mode == "saturday":
             header = SECTION_HEADERS["weekend_title_saturday"]
         elif briefing.session_mode == "sunday":
             header = SECTION_HEADERS["weekend_title_sunday"]

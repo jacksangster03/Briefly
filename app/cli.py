@@ -51,11 +51,30 @@ def cli(ctx, dry_run, show_output, email_only, telegram_only):
 
 
 @cli.command()
+@click.option(
+    "--force-morning",
+    is_flag=True,
+    default=False,
+    help="Render Morning Briefing even outside 06:00-10:30 local window.",
+)
 @click.pass_context
-def morning(ctx):
+def morning(ctx, force_morning: bool):
     """Generate and send the morning briefing."""
     from app.main import run_morning_briefing
+    # Preserve backward-compatible call shape for tests/monkeypatches while
+    # still supporting explicit morning override.
+    if force_morning:
+        run_morning_briefing(ctx.obj["settings"], force_morning=True, auto_route_session=True)
+        return
     run_morning_briefing(ctx.obj["settings"])
+
+
+@cli.command("brief")
+@click.pass_context
+def brief(ctx):
+    """Generate and send the correct session-aware briefing for current local time."""
+    from app.main import run_session_brief
+    run_session_brief(ctx.obj["settings"])
 
 
 @cli.command()

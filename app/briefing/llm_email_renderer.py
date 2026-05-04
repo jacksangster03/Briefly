@@ -228,7 +228,7 @@ class LLMEmailRenderer:
             # --- Regime & quality signals ---
             "geo_risk_level": briefing.geo_risk_level or "UNKNOWN",
             "geo_risk_summary": briefing.geo_risk_summary or "",
-            "dominant_tape_driver": briefing.dominant_tape_driver or "No single dominant driver identified.",
+            "dominant_tape_driver": briefing.dominant_tape_driver or "No single equity catalyst dominates; cross-asset pressure is the main driver.",
             "session_quality_bucket": briefing.session_quality_bucket or "MIXED",
             "session_quality_label": briefing.session_quality_label or "Mixed tape",
             "regime_snapshot": briefing.regime_snapshot,

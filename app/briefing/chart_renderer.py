@@ -840,7 +840,7 @@ class ChartRenderer:
         for ann in (spec.get("annotations") or []):
             if ann.get("label") == "event_window_start":
                 x_mark = int(ann.get("x") or 0)
-                event_label = str(ann.get("event_name") or "event")
+                event_label = str(ann.get("event_name") or "latest catalyst unavailable")
                 # Shaded vertical band from event start to chart end
                 ax.axvspan(x_mark, max(x), color=ACCENT, alpha=0.10, zorder=1)
                 ax.axvline(x_mark, color=ACCENT, linewidth=1.4, linestyle="--", alpha=0.75, zorder=4)
@@ -1189,9 +1189,9 @@ class ChartRenderer:
         regime = str(meta.get("regime") or "unavailable").lower()
         regime_color = {
             "calm": POSITIVE,
-            "normal": ACCENT,
-            "elevated": WARNING,
-            "stress": NEGATIVE,
+            "watchful": ACCENT,
+            "stress": WARNING,
+            "shock": NEGATIVE,
         }.get(regime, NEUTRAL)
         fig, ax = self._figure(8.0, 2.9)
         ax.axis("off")

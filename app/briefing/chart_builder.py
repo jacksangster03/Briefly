@@ -59,6 +59,7 @@ class MorningChartBuilder:
             if legacy_macro:
                 rendered.append(legacy_macro)
 
-        density = str(self.profile.delivery.get("email_density_mode", "desk")).strip().lower()
+        default_mode = "full" if (briefing.session_key or "morning") == "morning" else "desk"
+        density = str(self.profile.delivery.get("email_density_mode", default_mode)).strip().lower()
         cap = 5 if density == "desk" else 9
         return rendered[:cap]

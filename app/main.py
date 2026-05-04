@@ -25,6 +25,8 @@ from app.briefing.breaking_generator import BreakingAlertGenerator
 from app.briefing.intraday_generator import IntradayGenerator
 from app.briefing.llm_email_renderer import LLMEmailRenderer
 from app.briefing.morning_generator import MorningBriefingGenerator
+from app.briefing.session_routing import resolve_session_window
+from app.briefing.session_snapshot import persist_snapshot, snapshot_metrics
 from app.cadence.engine import DecisionEngine
 from app.cadence.state_store import (
     breaking_sends_last_hour,
@@ -529,13 +531,31 @@ def _evaluate_followup_confirmation(
 
 # -- Morning Briefing ---------------------------------------------------------
 
-def run_morning_briefing(settings: Settings | None = None, *, respect_cadence: bool = False) -> None:
+def run_morning_briefing(
+    settings: Settings | None = None,
+    *,
+    respect_cadence: bool = False,
+    force_morning: bool = False,
+    auto_route_session: bool = True,
+) -> None:
     """Generate and deliver the morning briefing."""
     settings = settings or get_settings()
     init_db()
 
-    logger.info("Starting morning briefing pipeline...")
+    logger.info("Starting session briefing pipeline...")
     profile = load_user_profile(settings)
+    now_utc = datetime.now(timezone.utc)
+    session_window = resolve_session_window(now=now_utc, timezone_name=profile.timezone or settings.timezone)
+    session_key = "morning"
+    session_title = "Morning Briefing"
+    if auto_route_session and not force_morning:
+        session_key = session_window.key
+        session_title = session_window.title
+        if session_key != "morning":
+            logger.info(
+                "Outside morning window. Rendering %s; use --force-morning to override.",
+                session_title,
+            )
     decision_engine = DecisionEngine(
         settings,
         profile_name=profile.name,
@@ -565,13 +585,14 @@ def run_morning_briefing(settings: Settings | None = None, *, respect_cadence: b
         macro_data=macro_svc,
     )
 
-    briefing = generator.generate()
+    briefing = generator.generate(session_key=session_key, session_title=session_title)
     _apply_morning_section_preferences(briefing, profile)
     formatter = TelegramFormatter(profile.timezone)
     messages = formatter.format_morning_briefing(briefing)
     email_content = EmailFormatter(profile.timezone).format_morning_briefing(briefing)
 
-    delivery_plan = _delivery_channel_plan(settings=settings, profile=profile, message_type="morning")
+    message_type = "morning" if session_key == "morning" else "intraday"
+    delivery_plan = _delivery_channel_plan(settings=settings, profile=profile, message_type=message_type)
     messengers = [item["messenger"] for item in delivery_plan if item.get("attempted") and item.get("messenger")]
     display_events = []
     seen_tracking_ids = set()
@@ -686,11 +707,28 @@ def run_morning_briefing(settings: Settings | None = None, *, respect_cadence: b
             local_timezone=profile.timezone or settings.timezone,
             sent_at_local=local_now,
         )
+    if delivered_ok and not settings.dry_run:
+        try:
+            persist_snapshot(
+                profile_name=profile.name,
+                session_key=briefing.session_key,
+                generated_at=briefing.generated_at,
+                metrics=snapshot_metrics(briefing),
+            )
+        except Exception:
+            logger.debug("Failed to persist session snapshot", exc_info=True)
 
     logger.info(
-        "Morning briefing delivered: %d messages, %d events",
-        len(messages), briefing.events_sent,
+        "%s delivered: %d messages, %d events",
+        briefing.session_title,
+        len(messages),
+        briefing.events_sent,
     )
+
+
+def run_session_brief(settings: Settings | None = None) -> None:
+    """Render the correct session-aware briefing for local time."""
+    run_morning_briefing(settings, force_morning=False, auto_route_session=True)
 
 
 # -- Intraday Update ----------------------------------------------------------

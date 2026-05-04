@@ -52,6 +52,8 @@ class MorningBriefing(BaseModel):
 
     generated_at: datetime = Field(default_factory=datetime.now)
     session_mode: SessionMode = "weekday"
+    session_key: str = "morning"
+    session_title: str = "Morning Briefing"
     market_setup: MarketSetup = Field(default_factory=MarketSetup)
     market_setup_analysis: str = ""
     dominant_tape_driver: str = ""
@@ -85,6 +87,7 @@ class MorningBriefing(BaseModel):
     session_quality_label: str = ""
     section_confidence: dict[str, str] = Field(default_factory=dict)
     data_freshness: dict[str, str] = Field(default_factory=dict)
+    what_changed_lines: list[str] = Field(default_factory=list)
     contract_warnings: list[str] = Field(default_factory=list)
     canonical_prices: dict[str, dict] = Field(default_factory=dict)
     morning_chart_bundle: dict = Field(default_factory=dict)

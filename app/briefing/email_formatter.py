@@ -81,6 +81,17 @@ _NAV_ITEMS = [
 ]
 
 
+def _avg_region_move(briefing: MorningBriefing, tokens: tuple[str, ...]) -> float:
+    moves = [
+        float(q.change_percent or 0.0)
+        for q in briefing.market_setup.index_quotes
+        if any(tok in (q.display_name or q.symbol or "").upper() for tok in tokens)
+    ]
+    if not moves:
+        return 0.0
+    return sum(moves) / len(moves)
+
+
 class EmailFormatter:
     """Render Outlook-safe HTML email while preserving Telegram narrative."""
 
@@ -105,6 +116,8 @@ class EmailFormatter:
 
     def _subject(self, briefing: MorningBriefing) -> str:
         date_str = briefing.generated_at.strftime("%a %d %b")
+        if briefing.session_title and briefing.session_key not in {"", "morning"}:
+            return f"{briefing.session_title} | {date_str}"
         if briefing.session_mode in {"saturday", "sunday"}:
             return f"Weekend Briefing | {date_str}"
         return f"Morning Briefing | {date_str}"
@@ -117,6 +130,8 @@ class EmailFormatter:
         llm_shadow = bool(bundle_meta.get("llm_shadow_mode", True))
         profile_name = str(bundle_meta.get("profile_name") or "default_user")
         confidence = self._confidence_summary(briefing, bundle_meta)
+        density_mode = str(bundle_meta.get("email_density_mode") or "desk")
+        chart_count = len(briefing.chart_assets or [])
         lead = "Deterministic market stack, portfolio lens, and high-signal narrative."
         generated_local = self._format_local(briefing.generated_at)
         section_conf_lines = self._section_confidence_lines(briefing)
@@ -171,7 +186,7 @@ class EmailFormatter:
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
             f"<td style=\"font-size:10.5px;line-height:1.35;color:{_TEXT_SECONDARY};\"><strong style=\"color:{_TEXT_PRIMARY};\">GENERATED</strong> {html.escape(generated_local)}</td>",
             f"<td align=\"center\" style=\"font-size:10.5px;line-height:1.35;color:{_TEXT_SECONDARY};\"><strong style=\"color:{_TEXT_PRIMARY};\">PROFILE</strong> {html.escape(profile_name)}</td>",
-            f"<td align=\"right\" style=\"font-size:10.5px;line-height:1.35;color:{_TEXT_SECONDARY};\"><strong style=\"color:{_TEXT_PRIMARY};\">MODE</strong> {html.escape(delivery_mode)} · <strong style=\"color:{_TEXT_PRIMARY};\">CONF</strong> {html.escape(confidence)}</td>",
+            f"<td align=\"right\" style=\"font-size:10.5px;line-height:1.35;color:{_TEXT_SECONDARY};\"><strong style=\"color:{_TEXT_PRIMARY};\">MODE</strong> {html.escape(delivery_mode)} · <strong style=\"color:{_TEXT_PRIMARY};\">CONF</strong> {html.escape(confidence)}<br><strong style=\"color:{_TEXT_PRIMARY};\">VISUAL</strong> {html.escape(density_mode)} · {chart_count} charts</td>",
             "</tr></table>",
             "</td></tr>",
             # Section confidence row
@@ -416,6 +431,10 @@ class EmailFormatter:
                 "Cross-asset impulse is centered on zero, so leadership is defined by which sleeve shows the largest absolute displacement. "
                 "Today’s read is best treated as a transmission map for where macro pressure is entering the tape first."
             )
+        if key == "yield_curve_shape":
+            return "A higher 10Y usually increases discount-rate pressure for growth equities and duration-sensitive assets."
+        if key == "volatility_regime_card":
+            return "A rising VIX below 20 signals caution and fragility, but not full panic by itself."
         if key == "breadth_leadership_panel":
             return (
                 "Breadth is a confirmation test, not a direction forecast: clustered positives support trend durability, while split signals "
@@ -431,10 +450,9 @@ class EmailFormatter:
                 "The event marker separates pre-catalyst drift from post-catalyst repricing; persistence after the marker matters more than the "
                 "initial spike. Sustained slope suggests a regime handoff rather than a one-session reaction."
             )
-        if key == "portfolio_concentration_risk":
+        if key in {"portfolio_concentration_risk", "portfolio_concentration_risk_card"}:
             return (
-                "Concentration is a fragility gauge: when top-weight exposure is elevated, idiosyncratic headline risk can override "
-                "macro tape and amplify both upside and drawdown paths."
+                "High top-weight concentration means daily P&L can be dominated by a small number of sleeves rather than broad market direction."
             )
         if key == "global_relative_performance":
             return (
@@ -461,7 +479,11 @@ class EmailFormatter:
         key = str(chart_key or "").strip().lower()
         base = (caption or "").strip()
         if key == "cross_asset_impulse_strip":
-            return "Macro leadership usually transmits first through rates, energy, and volatility sleeves before broad index confirmation."
+            return "Rates pressure maps first to BND/IEF/LQD and then to long-duration growth exposure."
+        if key == "yield_curve_shape":
+            return "Watch BND/IEF/LQD for duration drag and QQQ/growth sleeves if yields keep rising."
+        if key == "volatility_regime_card":
+            return "Watch whether volatility confirms the regional/rates pressure before reducing risk."
         if key == "breadth_leadership_panel":
             return "If breadth remains split, avoid treating headline index strength as broad risk confirmation."
         if key == "pnl_attribution_waterfall":
@@ -471,7 +493,7 @@ class EmailFormatter:
             return "Use top contributor vs top drag to decide whether the day is concentrated or broad."
         if key == "event_linked_annotated_trend":
             return "Persistence after the catalyst window matters more than the first-day reaction when sizing follow-through risk."
-        if key == "portfolio_concentration_risk":
+        if key in {"portfolio_concentration_risk", "portfolio_concentration_risk_card"}:
             return "High top-weight concentration means daily P&L can be top-sleeve driven until contribution breadth broadens."
         if key == "global_relative_performance":
             return "Regional leaders should align with portfolio geography; widening spreads can lift tracking-error risk."
@@ -498,7 +520,12 @@ class EmailFormatter:
         lines = [f"Desk read: {driver}"]
         if briefing.market_setup_analysis:
             lines.append(f"Setup read: {briefing.market_setup_analysis}")
-        lines.append(f"Risk posture: {posture}. Regional split: {regional}.")
+        us = _avg_region_move(briefing, ("S&P", "NASDAQ", "DOW", "RUSSELL"))
+        eu = _avg_region_move(briefing, ("STOXX", "FTSE", "DAX", "CAC", "IBEX"))
+        asia = _avg_region_move(briefing, ("NIKKEI", "HANG SENG", "HSI"))
+        lines.append(
+            f"Risk posture: {posture.lower()}; US {us:+.2f}%, Europe {eu:+.2f}%, Asia {asia:+.2f} ({regional})."
+        )
         if briefing.geo_risk_summary:
             lines.append(f"Geo lens: {briefing.geo_risk_summary}")
         if briefing.portfolio_action_posture:
@@ -550,6 +577,8 @@ class EmailFormatter:
 
     @staticmethod
     def _what_changed_lines(briefing: MorningBriefing) -> list[str]:
+        if briefing.what_changed_lines:
+            return list(briefing.what_changed_lines)
         if not briefing.regime_shift:
             return ["No prior comparable snapshot available."]
         lines: list[str] = []

@@ -37,7 +37,7 @@ def interpret_market_setup(
     total = risk_score + rates_score + commodity_score + region_score
     confidence = _confidence_label(total=total, signals=[risk_score, rates_score, commodity_score, region_score])
 
-    tone = _tone_phrase(total)
+    tone = _tone_phrase(total, index_quotes=index_quotes)
     breadth = _breadth_phrase(setup=setup, index_quotes=index_quotes, region_score=region_score)
     divergence = _regional_divergence_phrase(index_quotes)
     vol = _volatility_phrase(index_quotes)
@@ -150,10 +150,16 @@ def _cross_region_confirmation(index_quotes) -> int:
     return 0
 
 
-def _tone_phrase(total: int) -> str:
+def _tone_phrase(total: int, *, index_quotes) -> str:
+    positive = sum(1 for q in index_quotes if float(q.change_percent or 0.0) > 0.0)
+    total_quotes = max(1, len(index_quotes))
+    vix_quote = next((q for q in index_quotes if "VIX" in (q.display_name or q.symbol or "").upper()), None)
+    vix_level = float(vix_quote.current_price or 0.0) if vix_quote else None
     if total >= 3:
         return "Market tone is broadly risk-on."
     if total <= -3:
+        if positive >= int(total_quotes * 0.4) and (vix_level is None or vix_level < 20.0):
+            return "Market tone is mixed-to-cautious rather than full risk-off."
         return "Market tone is defensive and risk-off."
     return "Market tone is mixed with no single dominant impulse."
 
@@ -378,6 +384,18 @@ def _dominant_tape_driver(
         ten_y_change = float(setup.treasury_10y.change or 0.0)
     if ten_y_change is not None and abs(ten_y_change) >= 0.035:
         direction = "higher" if ten_y_change > 0 else "lower"
+        us_avg = _region_avg(setup.index_quotes or [], ("S&P", "NASDAQ", "DOW", "RUSSELL"))
+        eu_avg = _region_avg(setup.index_quotes or [], ("STOXX", "FTSE", "DAX", "CAC", "IBEX"))
+        asia_avg = _region_avg(setup.index_quotes or [], ("NIKKEI", "HANG SENG"))
+        has_split = (
+            us_avg is not None and eu_avg is not None and asia_avg is not None
+            and max(us_avg, eu_avg, asia_avg) - min(us_avg, eu_avg, asia_avg) >= 0.8
+        )
+        if has_split:
+            return (
+                f"Rates repricing plus regional divergence are driving the tape "
+                f"(US 10Y {direction} {ten_y_change:+.3f})."
+            )
         return f"Rates repricing is the lead driver (US 10Y {direction} {ten_y_change:+.3f})."
 
     vix_quote = _find_quote(setup.index_quotes or [], ("VIX",))

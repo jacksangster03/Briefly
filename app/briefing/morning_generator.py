@@ -4,7 +4,7 @@ and assembly of the pre-market morning briefing.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import re
 
 from app.data_sources.macro_data import MacroDataService
@@ -17,6 +17,7 @@ from app.briefing.portfolio_impact import build_portfolio_impact
 from app.briefing.regime_context import build_regime_context, compute_geo_risk_level
 from app.briefing.regime_tracker import classify_regime, persist_regime_snapshot
 from app.briefing.session_quality import compute_session_quality
+from app.briefing.session_snapshot import build_what_changed_lines, load_previous_snapshot, snapshot_metrics
 from app.briefing.trust_contract import (
     active_index_quotes,
     freshness_block,
@@ -27,6 +28,7 @@ from app.briefing.trust_contract import (
 from app.briefing.regional_lens import build_regional_lens
 from app.briefing.theme_builder import build_top_themes
 from app.logger import get_logger
+from app.db.session import get_session
 from app.personalization.delivery_rules import load_alert_rules
 from app.personalization.user_profile import UserProfile
 from app.processing.article_quality import (
@@ -389,13 +391,20 @@ class MorningBriefingGenerator:
         self.macro_svc = macro_data
         self.rules = load_alert_rules(settings).morning
 
-    def generate(self) -> MorningBriefing:
+    def generate(
+        self,
+        *,
+        session_key: str = "morning",
+        session_title: str = "Morning Briefing",
+    ) -> MorningBriefing:
         """Generate the full morning briefing."""
-        logger.info("Generating morning briefing...")
-        now = datetime.now()
+        logger.info("Generating %s...", (session_title or "Morning Briefing"))
+        now = datetime.now(timezone.utc)
         briefing = MorningBriefing(
             generated_at=now,
             session_mode=session_mode_for(now),
+            session_key=session_key,
+            session_title=session_title,
         )
 
         # 1. Market setup (quotes for indices + macro instruments)
@@ -464,6 +473,7 @@ class MorningBriefingGenerator:
         briefing.watchlist_events = self._filter_watchlist_events(eligible)
         briefing.watchlist_quotes = self._fetch_watchlist_quotes()
         briefing.portfolio_quotes = self._fetch_portfolio_quotes()
+        self._apply_session_profile(briefing)
         active_setup = self._active_market_setup_view(briefing)
         setup_interpretation = interpret_market_setup(
             active_setup,
@@ -540,6 +550,16 @@ class MorningBriefingGenerator:
             briefing,
             timezone_name=self.profile.timezone,
         )
+        current_snapshot = snapshot_metrics(briefing)
+        _prev_ts, previous_snapshot = load_previous_snapshot(
+            profile_name=self.profile.name,
+            session_key=briefing.session_key,
+            before=briefing.generated_at,
+        )
+        briefing.what_changed_lines = build_what_changed_lines(
+            previous=previous_snapshot,
+            current=current_snapshot,
+        )
         provider_health = self._provider_health_summary()
         if provider_health:
             briefing.data_freshness["Provider Health"] = provider_health
@@ -557,7 +577,8 @@ class MorningBriefingGenerator:
         briefing.events_sent = len(sent_ids)
 
         logger.info(
-            "Morning briefing ready: %d fetched, %d deduped, %d themes, %d sectors, watchlist_events=%d",
+            "%s ready: %d fetched, %d deduped, %d themes, %d sectors, watchlist_events=%d",
+            (briefing.session_title or "Morning Briefing"),
             briefing.events_fetched,
             briefing.events_after_dedup,
             len(briefing.top_themes),
@@ -565,6 +586,18 @@ class MorningBriefingGenerator:
             len(briefing.watchlist_events),
         )
         return briefing
+
+    def _apply_session_profile(self, briefing: MorningBriefing) -> None:
+        """Scale content density by session type so intraday updates stay concise."""
+        key = (briefing.session_key or "morning").lower()
+        if key == "morning":
+            return
+        # Non-morning sessions should stay tighter by default.
+        briefing.global_news = list(briefing.global_news[:4])
+        briefing.top_themes = list(briefing.top_themes[:3])
+        briefing.portfolio_focus = list(briefing.portfolio_focus[:4])
+        briefing.watchlist_events = list(briefing.watchlist_events[:3])
+        briefing.earnings_calendar = list(briefing.earnings_calendar[:8])
 
     @staticmethod
     def _harmonize_dominant_driver(briefing: MorningBriefing) -> str:
@@ -919,11 +952,19 @@ class MorningBriefingGenerator:
         oil_level = 0.0
         gold_delta = 0.0
         usd_delta = 0.0
+        brent_delta = 0.0
+        brent_level = 0.0
+        natgas_delta = 0.0
         for quote in briefing.market_setup.macro_quotes:
             text = f"{quote.display_name} {quote.symbol}".lower()
             if "wti" in text or "crude" in text:
                 oil_delta = float(quote.change_percent or 0.0)
                 oil_level = float(quote.current_price or 0.0)
+            elif "brent" in text:
+                brent_delta = float(quote.change_percent or 0.0)
+                brent_level = float(quote.current_price or 0.0)
+            elif "natural gas" in text or "ng1:com" in text or "ng=f" in text:
+                natgas_delta = float(quote.change_percent or 0.0)
             elif "gold" in text:
                 gold_delta = float(quote.change_percent or 0.0)
             elif "usd" in text or "dollar" in text or "dxy" in text:
@@ -953,6 +994,7 @@ class MorningBriefingGenerator:
                     geo_hits += max(1, int(event.cluster_size or 1))
                     has_geo_headlines = True
             density = geo_hits / max(1.0, float(sum(max(1, int(evt.cluster_size or 1)) for evt in events)))
+        recent_geo_context = self._recent_geo_headline_context(hours=18)
 
         raw_level, summary = compute_geo_risk_level(
             vix_level=vix_level,
@@ -1000,8 +1042,45 @@ class MorningBriefingGenerator:
                     f"Geo risk LOW-TO-MODERATE, market-contained: VIX {vix_level:.2f} is rising and Europe is weak ({europe_avg:+.2f}%), "
                     f"but oil ({oil_delta:+.2f}%) and haven signals do not confirm a fresh shock."
                 )
+            energy_channel_active = (
+                oil_level > 90
+                or brent_level > 100
+                or oil_delta >= 1.0
+                or brent_delta >= 1.0
+                or natgas_delta >= 4.0
+            )
+            if recent_geo_context and energy_channel_active and (vix_rising or europe_avg <= -0.4):
+                level = "LOW-TO-MODERATE"
+                summary = (
+                    f"Geo risk LOW-TO-MODERATE, market-contained: WTI {oil_delta:+.2f}% / Brent {brent_delta:+.2f}%"
+                    f"{' / NatGas ' + format(natgas_delta, '+.2f') + '%' if natgas_delta else ''}, "
+                    f"VIX {vix_level:.2f}, gold {gold_delta:+.2f}%, with recent Middle East/Hormuz context still active."
+                )
 
         return level, raw_level, summary
+
+    def _recent_geo_headline_context(self, *, hours: int = 18) -> bool:
+        """Geo lookback memory so stale cycle density doesn't erase same-day risk context."""
+        try:
+            from app.db.models import NormalisedEvent as NormalisedEventRow
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=max(1, hours))
+            geo_terms = ("iran", "israel", "hormuz", "blockade", "missile", "ceasefire", "sanction", "shipping", "war", "attack", "strike", "invasion")
+            with get_session() as session:
+                rows = (
+                    session.query(NormalisedEventRow.title, NormalisedEventRow.summary)
+                    .filter(NormalisedEventRow.published_at.isnot(None))
+                    .filter(NormalisedEventRow.published_at >= cutoff)
+                    .order_by(NormalisedEventRow.published_at.desc(), NormalisedEventRow.id.desc())
+                    .limit(200)
+                    .all()
+                )
+            for title, summary in rows:
+                text = f"{title or ''} {summary or ''}".lower()
+                if any(term in text for term in geo_terms):
+                    return True
+        except Exception:
+            return False
+        return False
 
     def _build_earnings_relevance(self, earnings: list) -> dict[str, str]:
         portfolio = {holding.symbol.upper() for holding in self.profile.portfolio_holdings}
@@ -1449,5 +1528,11 @@ class MorningBriefingGenerator:
         contributions = dict(stats.get("provider_contributions", {}) or {})
         if not contributions:
             return ""
-        pieces = [f"{name}:{count}" for name, count in sorted(contributions.items())]
-        return ", ".join(pieces)
+        unavailable = sorted(name for name, count in contributions.items() if int(count or 0) <= 0)
+        active = sorted(name for name, count in contributions.items() if int(count or 0) > 0)
+        notes: list[str] = []
+        if unavailable:
+            notes.append("Unavailable: " + ", ".join(unavailable[:3]))
+        if active:
+            notes.append("Core providers active")
+        return " · ".join(notes) if notes else ""
