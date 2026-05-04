@@ -1087,16 +1087,24 @@ def _global_read_line(series: list[dict[str, Any]]) -> str:
 def _impulse_read_line(points: list[dict[str, Any]]) -> str:
     if not points:
         return "Macro impulse strip unavailable because rates and commodity inputs are missing."
-    ranked = sorted(points, key=lambda row: abs(float(row.get("impulse") or 0.0)), reverse=True)
-    driver = ranked[0]
-    follower = ranked[1] if len(ranked) > 1 else None
-    unit = "bp" if driver.get("unit") == "bps" else "%"
-    leader = f"{driver['name']} {float(driver.get('impulse') or 0.0):+.2f}{unit}"
-    if follower is None:
-        return f"Largest impulse is {leader}; cross-asset tone is otherwise muted."
-    follower_unit = "bp" if follower.get("unit") == "bps" else "%"
-    second = f"{follower['name']} {float(follower.get('impulse') or 0.0):+.2f}{follower_unit}"
-    return f"Largest impulses: {leader}, then {second}; read this as the morning macro transmission path."
+    positives = [row for row in points if float(row.get("impulse") or 0.0) >= 0.0]
+    negatives = [row for row in points if float(row.get("impulse") or 0.0) < 0.0]
+    strongest_pos = max(positives, key=lambda row: float(row.get("impulse") or 0.0), default=None)
+    strongest_neg = min(negatives, key=lambda row: float(row.get("impulse") or 0.0), default=None)
+
+    def _fmt(row: dict[str, Any] | None) -> str:
+        if row is None:
+            return "none"
+        unit = "bp" if row.get("unit") == "bps" else "%"
+        return f"{row['name']} {float(row.get('impulse') or 0.0):+.2f}{unit}"
+
+    if strongest_pos and strongest_neg:
+        return (
+            f"Upside impulse: {_fmt(strongest_pos)}; downside impulse: {_fmt(strongest_neg)}. "
+            "Read this as the primary cross-asset push/pull."
+        )
+    driver = max(points, key=lambda row: abs(float(row.get("impulse") or 0.0)))
+    return f"Largest impulse is {_fmt(driver)}; the rest of the strip is comparatively muted."
 
 
 def _holdings_read_line(rows: list[dict[str, Any]]) -> str:
@@ -1105,9 +1113,10 @@ def _holdings_read_line(rows: list[dict[str, Any]]) -> str:
     ranked = sorted(rows, key=lambda row: float(row.get("excess_pct") or 0.0), reverse=True)
     leader = ranked[0]
     laggard = ranked[-1]
+    spread = float(leader.get("excess_pct") or 0.0) - float(laggard.get("excess_pct") or 0.0)
     return (
         f"{leader['symbol']} leads at {float(leader.get('excess_pct') or 0.0):+.2f}% excess; "
-        f"{laggard['symbol']} lags at {float(laggard.get('excess_pct') or 0.0):+.2f}%."
+        f"{laggard['symbol']} lags at {float(laggard.get('excess_pct') or 0.0):+.2f}% (dispersion {spread:.2f} pts)."
     )
 
 

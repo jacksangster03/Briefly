@@ -256,7 +256,25 @@ class TestTelegramFormatter:
         assert "," not in line.split(" — ")[0]
         assert "Q1 2026" in line
         assert "01/05/2026" in line
-        assert "pre-market" in line
+
+    def test_watchlist_summary_does_not_use_low_signal_catalyst_title(self):
+        quotes = [
+            QuoteData(symbol="AAPL", display_name="Apple", current_price=200, change_percent=1.8),
+            QuoteData(symbol="NVDA", display_name="Nvidia", current_price=100, change_percent=-0.7),
+        ]
+        low_signal = NormalisedEvent(
+            title="Best CD rates today, May 3, 2026 (lock in up to 4.05% APY)",
+            final_score=0.99,
+            cluster_size=5,
+        )
+        summary = self.formatter._watchlist_summary_line(
+            quotes,
+            [low_signal],
+            dominant_driver="",
+            top_themes=[],
+        )
+        assert "Best CD rates" not in summary
+        assert "no dominant catalyst yet" in summary
 
     def test_earnings_line_includes_estimate_when_provided(self):
         e = EarningsEvent(

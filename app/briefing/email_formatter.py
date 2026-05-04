@@ -182,6 +182,7 @@ class EmailFormatter:
             pad_top = "0" if idx == 0 else ("8px" if is_micro else "11px")
             pad_bottom = "13px" if is_hero else ("9px" if is_micro else "11px")
             read_line = self._chart_read_line(asset.caption)
+            takeaway_line = self._chart_takeaway_line(asset.caption)
             modules.append(
                 f"<tr><td style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid #1F3447;\">"
             )
@@ -194,6 +195,9 @@ class EmailFormatter:
             modules.append(
                 f"<img src=\"cid:{html.escape(asset.content_id)}\" alt=\"{html.escape(asset.title)}\" "
                 "width=\"640\" style=\"display:block;width:100%;max-width:640px;height:auto;margin-top:0;border:0;\">"
+            )
+            modules.append(
+                f"<div style=\"font-size:11px;line-height:1.35;color:#9BA3AB;padding:7px 0 0 0;\">{html.escape(takeaway_line)}</div>"
             )
             modules.append("</td></tr>")
         modules.append("</table>")
@@ -240,6 +244,14 @@ class EmailFormatter:
         if len(words) > 20:
             text = " ".join(words[:20]).rstrip(".,;:") + "."
         return text
+
+    @staticmethod
+    def _chart_takeaway_line(caption: str | None) -> str:
+        text = (caption or "Interpretation uses deterministic chart values and fixed market rules.").strip()
+        words = text.split()
+        if len(words) > 30:
+            text = " ".join(words[:30]).rstrip(".,;:") + "."
+        return f"Takeaway: {text}"
 
     def _top_desk_read(self, briefing: MorningBriefing) -> str:
         lines = [html.escape(line) for line in self._top_desk_read_lines(briefing)]

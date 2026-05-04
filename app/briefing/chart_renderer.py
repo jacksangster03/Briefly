@@ -507,7 +507,7 @@ class ChartRenderer:
         labels = [
             self._truncate_label(
                 self._compact_impulse_label(str(row.get("name") or row.get("symbol") or "")),
-                max_len=28,
+                max_len=24,
             )
             for row in points
         ]
@@ -527,7 +527,7 @@ class ChartRenderer:
         ax.hlines(y=y_pos, xmin=[0 for _ in display_values], xmax=display_values, color=colors, linewidth=2.8, alpha=0.88)
         ax.scatter(display_values, y_pos, color=colors, s=88, edgecolor=BG, linewidth=1.1, zorder=3)
         ax.set_yticks(y_pos)
-        ax.set_yticklabels(labels, color=TEXT, fontsize=9.2, fontweight="bold")
+        ax.set_yticklabels(labels, color=TEXT, fontsize=8.8, fontweight="bold")
         ax.invert_yaxis()
 
         x_pad = max(1.0, cap * 0.22)
@@ -545,7 +545,7 @@ class ChartRenderer:
             suffix = "bp" if unit == "bps" else "%"
             dv = display_values[idx]
             # Keep value boxes inside the plot area to avoid overlapping y-axis labels.
-            x_text = dv + (x_pad * 0.28 if dv >= 0 else x_pad * 0.18)
+            x_text = dv + (x_pad * 0.28 if dv >= 0 else -x_pad * 0.20)
             label_text = f"{value:+.2f}{suffix}" + (" ▶" if abs(value) > cap else "")
             self._value_box(
                 ax,
@@ -553,7 +553,7 @@ class ChartRenderer:
                 idx,
                 label_text,
                 color=colors[idx],
-                ha="left",
+                ha="left" if dv >= 0 else "right",
                 fontsize=8.5,
             )
         subtitle = "Rates · Commodities · Risk gauges  |  zero = neutral"
@@ -584,6 +584,10 @@ class ChartRenderer:
     def _compact_impulse_label(label: str) -> str:
         base = (label or "").strip()
         lower = base.lower()
+        if "10y us treasury" in lower:
+            return "US 10Y Yield"
+        if "2y us treasury" in lower:
+            return "US 2Y Yield"
         if "treasury yield" in lower and "10y" in lower:
             return "US 10Y Yield"
         if "wti crude" in lower:

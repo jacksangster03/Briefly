@@ -1010,6 +1010,28 @@ class MorningBriefingGenerator:
             str(event.raw_data.get("source_name", "")),
             event.url,
         )
+        trusted_source = source_quality in {"tier1_wire", "tier1_press", "sec_filing"}
+
+        if section == "top_themes":
+            # Hard-stop low-signal editorial formats unless they are directly relevant
+            # and strongly corroborated by a trusted source.
+            if article_type in {"listicle", "seo", "opinion"}:
+                if not (has_relevant_ticker and has_catalyst and trusted_source):
+                    return False
+            if article_type == "preview" and not has_relevant_ticker:
+                return False
+            if source_quality == "blog" and not (has_relevant_ticker and has_catalyst):
+                return False
+            if (
+                not has_relevant_ticker
+                and not trusted_source
+                and event.cluster_size < 3
+                and not has_catalyst
+            ):
+                return False
+            if event.event_type == "news_search" and not has_relevant_ticker and not has_catalyst:
+                return False
+
         if (
             is_low_quality_for_section(article_type, source_quality)
             and not has_relevant_ticker
@@ -1028,8 +1050,8 @@ class MorningBriefingGenerator:
 
         if (
             section == "top_themes"
-            and not has_relevant_ticker
             and any(pattern in text_lower for pattern in TRUST_PERSONAL_FINANCE_PATTERNS)
+            and not has_catalyst
         ):
             return False
 

@@ -639,9 +639,23 @@ class TelegramFormatter:
         """Pick the strongest watchlist catalyst while suppressing low-signal headlines."""
         if not events:
             return None
+        def _score(evt: NormalisedEvent) -> float:
+            text = f"{evt.title} {evt.summary}".lower()
+            quality = 0.0
+            article_type = classify_article_type(evt.title, evt.summary, evt.url)
+            if article_type == "hard_news":
+                quality += 0.5
+            elif article_type == "preview":
+                quality -= 0.25
+            elif article_type in {"seo", "listicle", "opinion"}:
+                quality -= 0.6
+            if any(term in text for term in ("earnings", "guidance", "fomc", "fed", "inflation", "yield", "oil", "hormuz", "iran")):
+                quality += 0.3
+            return float(evt.final_score or 0.0) + quality + (min(5, int(evt.cluster_size or 1)) * 0.03)
+
         ranked = sorted(
             events,
-            key=lambda evt: (float(evt.final_score or 0.0), int(evt.cluster_size or 1)),
+            key=_score,
             reverse=True,
         )
         for event in ranked:
@@ -651,7 +665,7 @@ class TelegramFormatter:
             if self._is_low_signal_catalyst_title(title):
                 continue
             return event
-        return ranked[0] if ranked else None
+        return None
 
     @staticmethod
     def _is_low_signal_catalyst_title(title: str) -> bool:

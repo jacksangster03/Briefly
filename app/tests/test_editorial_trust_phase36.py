@@ -155,3 +155,37 @@ def test_cross_section_dedupe_keeps_story_once():
     assert briefing.top_themes == []
     assert briefing.sector_scan[0].top_events == []
     assert briefing.watchlist_events == []
+
+
+def test_top_themes_blocks_personal_finance_seo_headline():
+    generator = _build_generator()
+    weak = NormalisedEvent(
+        title="Best CD rates today, May 3, 2026 (lock in up to 4.05% APY)",
+        summary="Low-signal personal finance recap with no market catalyst.",
+        source="newsapi",
+        source_type="news",
+        event_type="news_search",
+        tickers=[],
+        sectors=[],
+        personal_relevance_score=0.82,
+        factual_confidence_score=0.62,
+        cluster_size=1,
+        final_score=0.84,
+        raw_data={"source_name": "Some Blog"},
+    )
+    strong = NormalisedEvent(
+        title="US naval blockade squeezes Iran's oil exports",
+        summary="Shipping routes disrupted and crude risk premium rises.",
+        source="finnhub",
+        event_type="geopolitical",
+        tickers=["XLE"],
+        sectors=["energy"],
+        personal_relevance_score=0.78,
+        factual_confidence_score=0.82,
+        cluster_size=7,
+        final_score=0.79,
+        raw_data={"source_name": "Reuters"},
+    )
+    themes = generator._build_top_themes([weak, strong], session_mode="saturday")
+    assert themes
+    assert all("best cd rates" not in evt.title.lower() for evt in themes)
