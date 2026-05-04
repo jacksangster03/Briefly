@@ -67,6 +67,8 @@ def _market_relevance_line(event: HealthcareEvent) -> str:
         return "Regulatory outcomes can reprice revenue trajectories, risk premiums, and peer valuation multiples."
     if event.event_type in {"clinical_data", "trial_halt", "trial_start", "trial_completion"}:
         return "Clinical readouts and trial status changes are high-beta catalysts for biotech risk and sector leadership."
+    if event.event_type == "biotech_financing":
+        return "Biotech financing conditions influence development runway risk and risk appetite across small/mid-cap healthcare."
     if event.event_type in {"manufacturing_capacity", "api_supply_chain", "shortage"}:
         return "Supply-chain and capacity constraints can cap realized demand even when therapeutic demand remains strong."
     if event.event_type in {"m_and_a", "licensing_deal"}:
@@ -84,9 +86,10 @@ def _portfolio_lens_line(event: HealthcareEvent, *, holdings: set[str], watchlis
     if tickers & watchlist:
         focus = ", ".join(sorted(tickers & watchlist)[:3])
         return f"Watchlist relevance: {focus}. Track follow-through versus peers and sector ETF response."
+    if event.event_type == "biotech_financing":
+        return "Financing sensitivity: funding conditions can drive biotech beta and dispersion even without immediate clinical data."
     if {"GLP-1", "peptide"} & set(event.modality):
         return "Theme relevance: GLP-1/peptide momentum remains a major healthcare earnings and capacity driver."
     if {"CDMO", "API", "manufacturing"} & set(event.modality):
         return "Theme relevance: manufacturing throughput and API availability can drive realization risk across obesity pipelines."
     return ""
-

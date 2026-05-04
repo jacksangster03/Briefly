@@ -27,6 +27,8 @@ class HealthcareEvent(BaseModel):
     relevance_score: float = 0.0
     market_relevance: str = ""
     portfolio_lens: str = ""
+    healthcare_classification_reason: str = ""
+    healthcare_suppression_reason: str = ""
 
 
 class HealthcareBriefingItem(BaseModel):
@@ -41,6 +43,7 @@ class HealthcareBriefingItem(BaseModel):
     portfolio_lens: str = ""
     source_line: str = ""
     published_at: datetime | None = None
+    healthcare_classification_reason: str = ""
 
 
 class HealthcareBriefingSection(BaseModel):
@@ -52,4 +55,3 @@ class HealthcareBriefingSection(BaseModel):
     source_count: int = 0
     suppressed_count: int = 0
     unavailable_reason: str = ""
-

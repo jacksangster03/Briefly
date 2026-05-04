@@ -14,6 +14,7 @@ HEALTHCARE_EVENT_TYPES: tuple[str, ...] = (
     "earnings_guidance",
     "m_and_a",
     "licensing_deal",
+    "biotech_financing",
     "manufacturing_capacity",
     "api_supply_chain",
     "shortage",
@@ -86,6 +87,7 @@ EVENT_SEVERITY = {
     "earnings_guidance": "medium",
     "m_and_a": "high",
     "licensing_deal": "medium",
+    "biotech_financing": "medium",
     "manufacturing_capacity": "medium",
     "api_supply_chain": "medium",
     "shortage": "high",
@@ -102,4 +104,3 @@ CRITICAL_EVENT_TYPES = {
     "clinical_data",
     "m_and_a",
 }
-

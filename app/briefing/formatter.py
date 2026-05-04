@@ -81,31 +81,52 @@ class TelegramFormatter:
 
         session_key = (briefing.session_key or "morning").lower()
         is_morning = session_key == "morning"
-        is_intraday_like = session_key in {"us_intraday_risk", "into_close"}
+        is_midday = session_key == "europe_midday"
+        is_preopen = session_key == "us_pre_open"
+        is_intraday = session_key == "us_intraday_risk"
+        is_into_close = session_key == "into_close"
+        is_closing = session_key == "closing_wrap"
+        is_intraday_like = is_intraday or is_into_close
+
+        if is_closing:
+            verdict = briefing.market_setup_analysis or briefing.dominant_tape_driver or "Session closed with mixed cross-asset signals."
+            sections.append("\n".join(["<b>DAY VERDICT</b>", truncate(verdict, 240)]))
+            tags = [str(tag).replace("_", " ").upper() for tag in (briefing.market_setup_signal_tags or [])[:4]]
+            driver_line = " | ".join(tags) if tags else "No single driver tag dominated; cross-asset context remained mixed."
+            sections.append("\n".join(["<b>CONFIRMED DRIVERS</b>", "- " + driver_line]))
 
         if not is_morning:
             what_changed = self._format_what_changed(briefing.what_changed_lines)
             if what_changed:
                 sections.append(what_changed)
 
-        setup = self._format_market_setup(briefing)
+        setup = self._format_market_setup(briefing) if (is_morning or is_preopen or is_closing) else self._format_session_snapshot(briefing)
         if setup:
             sections.append(setup)
 
-        if is_morning or session_key in {"us_pre_open", "closing_wrap"}:
+        if is_morning or is_preopen or is_closing:
             macro = self._format_macro(briefing.macro_context)
             if macro:
                 sections.append(macro)
 
-        if is_morning or session_key in {"us_pre_open", "closing_wrap"}:
+        if is_morning or is_preopen or is_closing:
             commodities = self._format_commodity_strip(briefing.commodity_strip)
             if commodities:
                 sections.append(commodities)
 
-        regional = self._format_regional_lens(briefing.regional_lens, briefing.regional_skew_summary)
+        show_regional = is_morning or is_midday or is_preopen or is_closing
+        if not show_regional and briefing.regional_skew_summary:
+            skew_lower = briefing.regional_skew_summary.lower()
+            show_regional = any(token in skew_lower for token in ("split", "diverg", "regional"))
+        regional = self._format_regional_lens(briefing.regional_lens, briefing.regional_skew_summary) if show_regional else ""
         if regional:
             sections.append(regional)
 
+        impact_header = SECTION_HEADERS["portfolio_impact"]
+        if is_intraday or is_into_close:
+            impact_header = "PORTFOLIO CHECK"
+        elif is_closing:
+            impact_header = "PORTFOLIO ATTRIBUTION"
         impact = self._format_portfolio_impact(
             briefing.portfolio_impact_bullets,
             briefing.portfolio_action_posture,
@@ -114,6 +135,7 @@ class TelegramFormatter:
             briefing.geo_risk_level,
             briefing.geo_risk_summary,
             briefing.regime_shift,
+            heading=impact_header,
         )
         if impact:
             sections.append(impact)
@@ -122,17 +144,17 @@ class TelegramFormatter:
         if trigger_block:
             sections.append(trigger_block)
 
-        if is_morning or session_key in {"us_pre_open", "closing_wrap"}:
+        if is_morning or is_preopen or is_closing:
             global_news = self._format_global_news(briefing.global_news)
             if global_news:
                 sections.append(global_news)
 
         themes = self._format_themes_for_mode(briefing.top_themes, briefing.session_mode)
-        if themes and (is_morning or session_key in {"us_pre_open", "closing_wrap"}):
+        if themes and (is_morning or is_preopen or is_closing):
             sections.append(themes)
 
         portfolio_focus = self._format_portfolio_focus(briefing.portfolio_focus)
-        if portfolio_focus and (is_morning or session_key in {"us_pre_open", "closing_wrap"}):
+        if portfolio_focus and (is_morning or is_preopen or is_closing):
             sections.append(portfolio_focus)
 
         healthcare = self._format_healthcare_intelligence(briefing.healthcare_intelligence, session_key=session_key)
@@ -144,13 +166,13 @@ class TelegramFormatter:
             if week_ahead:
                 sections.append(week_ahead)
 
-        if is_morning or session_key == "closing_wrap":
+        if is_morning or is_closing:
             sector = self._format_sector_scan(briefing.sector_scan, briefing.session_mode)
             if sector:
                 sections.append(sector)
 
         earnings = self._format_earnings(briefing.earnings_calendar, briefing.earnings_relevance)
-        if earnings and not is_intraday_like:
+        if earnings and (is_morning or is_preopen or is_closing):
             sections.append(earnings)
 
         # Watchlist
@@ -191,6 +213,14 @@ class TelegramFormatter:
         session_key = (briefing.session_key or "morning").lower()
         if session_key == "morning":
             return ""
+        if session_key == "closing_wrap":
+            header = "TOMORROW SETUP"
+        elif session_key in {"us_intraday_risk", "into_close"}:
+            header = "WATCH INTO CLOSE"
+        elif session_key == "us_pre_open":
+            header = "OPENING TRIGGERS"
+        else:
+            header = "SESSION TRIGGERS"
         index_quotes = briefing.market_setup.index_quotes + briefing.market_setup.macro_quotes
         vix = next((float(q.current_price or 0.0) for q in index_quotes if "VIX" in (q.display_name or q.symbol or "").upper()), None)
         ten_y = next((float(q.current_price or 0.0) for q in index_quotes if "10Y" in (q.display_name or q.symbol or "").upper()), None)
@@ -210,7 +240,7 @@ class TelegramFormatter:
         if oil is not None and oil < 107.0:
             triggers.append(f"WTI > $107 would signal escalating energy pressure (now ${oil:.2f}).")
         triggers.append("Nasdaq turning negative would indicate the growth cushion is fading.")
-        return "\n".join([f"<b>WATCH INTO CLOSE</b>"] + [f"- {line}" for line in triggers[:4]])
+        return "\n".join([f"<b>{header}</b>"] + [f"- {line}" for line in triggers[:4]])
 
     def _format_healthcare_intelligence(
         self,
@@ -505,6 +535,7 @@ class TelegramFormatter:
         geo_risk_level: str = "",
         geo_risk_summary: str = "",
         regime_shift: dict[str, str] | None = None,
+        heading: str | None = None,
     ) -> str:
         if (
             not bullets
@@ -515,7 +546,7 @@ class TelegramFormatter:
             and not (regime_shift or {})
         ):
             return ""
-        lines = [f"<b>{SECTION_HEADERS['portfolio_impact']}</b>"]
+        lines = [f"<b>{heading or SECTION_HEADERS['portfolio_impact']}</b>"]
         if posture:
             lines.append(f"Action posture: {posture.replace('_', ' ')}")
         for bullet in bullets[:3]:
@@ -913,6 +944,25 @@ class TelegramFormatter:
             for q in quotes
         ]
         return " | ".join(lines)
+
+    def _format_session_snapshot(self, briefing: MorningBriefing) -> str:
+        """Compact snapshot for non-morning session updates."""
+        priority_index: list[QuoteData] = []
+        for quote in briefing.market_setup.index_quotes:
+            name = (quote.display_name or quote.symbol or "").upper()
+            if any(token in name for token in ("S&P", "NASDAQ", "STOXX", "DAX", "NIKKEI", "VIX")):
+                priority_index.append(quote)
+        if not priority_index:
+            priority_index = list(briefing.market_setup.index_quotes[:5])
+        priority_macro: list[QuoteData] = []
+        for quote in briefing.market_setup.macro_quotes:
+            name = (quote.display_name or quote.symbol or "").upper()
+            if any(token in name for token in ("WTI", "BRENT", "GOLD", "10Y", "USD")):
+                priority_macro.append(quote)
+        line = self._format_intraday_market_snapshot(priority_index[:6] + priority_macro[:4])
+        if not line:
+            return ""
+        return "\n".join(["<b>MARKET SNAPSHOT</b>", line])
 
     @staticmethod
     def _friendly_instrument_label(label: str, symbol: str) -> str:

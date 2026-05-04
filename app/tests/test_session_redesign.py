@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from click.testing import CliRunner
 
@@ -11,13 +11,17 @@ from app.briefing.session_routing import next_session_window, resolve_session_wi
 from app.cli import cli
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MarketSetup, MorningBriefing
-from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, QuoteData, SectorSnapshot
+from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, PricePoint, QuoteData, SectorSnapshot
 from app.schemas.portfolio import PortfolioHolding
 
 
 class _StubMarketData:
     def get_price_history(self, symbol: str, period: str = "3mo", interval: str = "1d"):
-        return []
+        start = datetime(2026, 4, 1, tzinfo=timezone.utc)
+        return [
+            PricePoint(symbol=symbol, timestamp=start + timedelta(days=i), close=100.0 + i)
+            for i in range(30)
+        ]
 
     def get_quotes(self, symbols: list[str]):
         return [
@@ -156,6 +160,20 @@ def test_vix_174_is_watchful():
     assert chart_map["volatility_regime_card"]["meta"]["regime"] == "watchful"
 
 
+def test_morning_full_includes_global_equity_leadership():
+    briefing = _sample_briefing("morning")
+    briefing.session_title = "Morning Briefing"
+    profile = _sample_profile(density="full")
+    bundle, selected = build_morning_chart_bundle(
+        briefing=briefing,
+        profile=profile,
+        market_data_service=_StubMarketData(),
+    )
+    selected_keys = {row["chart_key"] for row in selected}
+    assert bundle["meta"]["email_density_mode"] == "full"
+    assert "global_relative_performance" in selected_keys
+
+
 def test_intraday_output_is_shorter_and_omits_full_calendar():
     formatter = TelegramFormatter("Europe/Madrid")
     morning = _sample_briefing("morning")
@@ -183,6 +201,20 @@ def test_intraday_output_is_shorter_and_omits_full_calendar():
     assert intraday_text.count("<b>") < morning_text.count("<b>")
     assert "WHAT CHANGED" in intraday_text
     assert "EARNINGS CALENDAR" not in intraday_text
+    assert "MARKET SNAPSHOT" in intraday_text
+
+
+def test_closing_wrap_uses_closing_language():
+    formatter = TelegramFormatter("Europe/Madrid")
+    closing = _sample_briefing("closing_wrap")
+    closing.session_title = "Closing Wrap / Next-Day Setup"
+    closing.session_mode = "weekday"
+    closing.market_setup_analysis = "Regional divergence persisted into the close while rates pressure stayed elevated."
+    rendered = "\n".join(formatter.format_morning_briefing(closing))
+    assert "DAY VERDICT" in rendered
+    assert "CONFIRMED DRIVERS" in rendered
+    assert "TOMORROW SETUP" in rendered
+    assert "WATCH INTO CLOSE" not in rendered
 
 
 def test_provider_health_note_user_facing():

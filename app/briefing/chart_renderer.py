@@ -1365,19 +1365,24 @@ class ChartRenderer:
         ax.plot(tenors, today_vals, color=ACCENT, linewidth=2.8, marker="o", markersize=6, zorder=4, label="Today")
         if any(v is not None for v in week_ago_vals):
             wa = [v if v is not None else today_vals[i] for i, v in enumerate(week_ago_vals)]
-            ax.plot(tenors, wa, color=MUTED, linewidth=1.8, linestyle="--", marker="o", markersize=4, zorder=3, label="1W ago")
+            ax.plot(tenors, wa, color=MUTED, linewidth=2.0, linestyle="--", marker="o", markersize=4, zorder=3, label="1W ago")
             ax.fill_between(tenors, today_vals, wa, alpha=0.12, color=ACCENT, zorder=2)
+            ax.text(tenors[-1], wa[-1], "1W ago", color=MUTED, fontsize=8.0, ha="left", va="bottom")
 
         ax.axhline(0, color=GRID, linewidth=0.8, alpha=0.6)
         ax.set_xticks(tenors)
-        ax.set_xticklabels(["2Y", "5Y", "10Y", "30Y"], color=MUTED, fontsize=9)
+        ax.set_xticklabels([f"{tenor}Y" for tenor in tenors], color=MUTED, fontsize=9)
+        y_min = min(today_vals + [v for v in week_ago_vals if v is not None])
+        y_max = max(today_vals + [v for v in week_ago_vals if v is not None])
+        pad = max(0.12, (y_max - y_min) * 0.25)
+        ax.set_ylim(y_min - pad, y_max + pad)
         for i, (tenor, val) in enumerate(zip(tenors, today_vals)):
             change = rows[i].get("change_bps")
             label = f"{val:.2f}%"
             if change is not None:
                 sign = "+" if change >= 0 else ""
                 label += f"\n{sign}{change:.0f}bp"
-            ax.text(tenor, val + (max(today_vals) - min(today_vals)) * 0.06,
+            ax.text(tenor, val + max(0.03, (y_max - y_min) * 0.08),
                     label, ha="center", va="bottom", fontsize=8.2, color=ACCENT, weight="bold", zorder=5)
 
         shape = str((spec.get("meta") or {}).get("shape") or "")

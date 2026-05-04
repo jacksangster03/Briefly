@@ -1485,6 +1485,11 @@ class MorningBriefingGenerator:
         if section == "sector_scan":
             if section_fit not in {"sector_signals", "portfolio_watchlist"} and not has_catalyst:
                 return False
+            if article_type in {"preview", "opinion", "seo", "listicle"}:
+                if not (has_catalyst and has_relevant_ticker and trusted_source):
+                    return False
+            if "hard catalyst update under review" in text_lower:
+                return False
 
         if (
             is_low_quality_for_section(article_type, source_quality)

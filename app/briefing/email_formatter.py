@@ -428,9 +428,18 @@ class EmailFormatter:
                 bias = "mixed"
         if key == "cross_asset_impulse_strip":
             return (
-                "Cross-asset impulse is centered on zero, so leadership is defined by which sleeve shows the largest absolute displacement. "
-                "Today’s read is best treated as a transmission map for where macro pressure is entering the tape first."
+                "Cross-asset pressure shows where macro stress is entering first: rates, commodities, or risk gauges."
             )
+        if key == "geo_confirmation_ladder":
+            return "Geo risk is more credible when oil, volatility, and equities confirm the same stress direction."
+        if key == "oil_transmission_card":
+            return "Oil shocks can reprice inflation expectations, margins, transport costs, and equity risk premia."
+        if key == "regional_divergence_score":
+            return "Regional divergence shows whether risk appetite is global or concentrated in one session."
+        if key == "watchlist_movers_card":
+            return "Watchlist dispersion shows whether portfolio-relevant risk is broad or concentrated in one or two names."
+        if key == "setup_confirmation_card":
+            return "This checks whether the session is confirming or fading the original setup across regions, rates, volatility, and breadth."
         if key == "yield_curve_shape":
             return "A higher 10Y usually increases discount-rate pressure for growth equities and duration-sensitive assets."
         if key == "volatility_regime_card":
@@ -462,7 +471,7 @@ class EmailFormatter:
         if base:
             short = " ".join(base.split()[:26]).rstrip(".,;:")
             return f"Signal context is {bias}: {short}."
-        return "Signal context is mixed: treat this panel as a directional cue only when confirmed by breadth and cross-asset alignment."
+        return "Use this panel as context alongside breadth and cross-asset confirmation."
 
     def _chart_copy_triplet(self, chart_key: str | None, caption: str | None) -> tuple[str, str, str]:
         read_line = self._chart_read_line(caption)
@@ -480,6 +489,16 @@ class EmailFormatter:
         base = (caption or "").strip()
         if key == "cross_asset_impulse_strip":
             return "Rates pressure maps first to BND/IEF/LQD and then to long-duration growth exposure."
+        if key == "geo_confirmation_ladder":
+            return "Use this as macro risk context for ACWI/SPY/QQQ and energy-sensitive exposures, not as a standalone trade signal."
+        if key == "oil_transmission_card":
+            return "Watch whether energy strength worsens equity weakness or remains isolated to commodity-sensitive sleeves."
+        if key == "regional_divergence_score":
+            return "Europe/global equity sleeves are most exposed when Europe leads the downside."
+        if key == "watchlist_movers_card":
+            return "Separate index-level pressure from single-name idiosyncratic moves before changing posture."
+        if key == "setup_confirmation_card":
+            return "If setup confirmation weakens, treat intraday strength as lower quality until breadth and rates stabilise."
         if key == "yield_curve_shape":
             return "Watch BND/IEF/LQD for duration drag and QQQ/growth sleeves if yields keep rising."
         if key == "volatility_regime_card":
@@ -498,8 +517,8 @@ class EmailFormatter:
         if key == "global_relative_performance":
             return "Regional leaders should align with portfolio geography; widening spreads can lift tracking-error risk."
         if base:
-            return "Anchor this signal to current exposures before changing posture; avoid reacting to one chart in isolation."
-        return "Use this panel with the setup read and dominant driver before changing portfolio posture."
+            return "Anchor this signal to current exposures before changing posture."
+        return "Use this panel with the setup read and dominant driver before changing posture."
 
     def _top_desk_read(self, briefing: MorningBriefing) -> str:
         lines = [html.escape(line) for line in self._top_desk_read_lines(briefing)]

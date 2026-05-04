@@ -30,7 +30,7 @@ _THEME_ALIASES = {
     "oncology": ("oncology", "tumor", "tumour", "cancer"),
     "rare disease": ("rare disease", "orphan drug"),
     "immunology": ("immunology", "autoimmune", "inflammation"),
-    "API": ("api manufacturing", "api supply", "active pharmaceutical ingredient", "api"),
+    "API": ("api manufacturing", "api supply", "active pharmaceutical ingredient"),
     "CDMO": ("cdmo", "contract development and manufacturing", "contract manufacturing", "fill-finish", "sterile manufacturing"),
     "manufacturing": ("capacity expansion", "fill-finish", "sterile", "manufacturing"),
     "RNA": ("mrna", "rna"),
@@ -58,6 +58,42 @@ _HEALTHCARE_TOKENS = (
     "clinical",
 )
 
+_HEALTHCARE_SUBSECTOR_TERMS = (
+    "pharma",
+    "biotech",
+    "medtech",
+    "diagnostic",
+    "hospital",
+    "payer",
+    "reimbursement",
+    "api",
+    "cdmo",
+    "fill-finish",
+    "sterile manufacturing",
+    "drug shortage",
+)
+
+_CLINICAL_ANCHOR_TERMS = (
+    "phase 1",
+    "phase 2",
+    "phase 3",
+    "pivotal",
+    "topline",
+    "endpoint",
+    "trial halt",
+    "safety signal",
+)
+
+_GENERIC_TECH_HEALTH_NOISE = (
+    "openai",
+    "anthropic",
+    "power crunch",
+    "grid",
+    "radiologist",
+    "radiology jobs",
+    "replace radiologists",
+)
+
 
 def classify_healthcare_event(
     event: NormalisedEvent,
@@ -73,12 +109,36 @@ def classify_healthcare_event(
     tickers_cfg = {str(item).strip().upper() for item in healthcare_prefs.get("tickers", []) if str(item).strip()}
     assets_cfg = [str(item).strip().lower() for item in healthcare_prefs.get("assets", []) if str(item).strip()]
 
+    event_type = _infer_event_type(event, text_lower)
     has_healthcare_signal = any(token in text_lower for token in _HEALTHCARE_TOKENS)
     cfg_ticker_hit = any(ticker in tickers_cfg for ticker in event.tickers)
+    if event_type == "biotech_financing":
+        has_healthcare_signal = True
     if not has_healthcare_signal and not cfg_ticker_hit:
         return None
 
-    event_type = _infer_event_type(event, text_lower)
+    ticker_healthcare_hit = any(_is_healthcare_company_ticker(ticker) for ticker in event.tickers)
+    regulator_anchor = any(rx.search(text) for rx in _REGULATOR_PATTERNS.values())
+    clinical_anchor = any(term in text_lower for term in _CLINICAL_ANCHOR_TERMS)
+    subsector_anchor = any(term in text_lower for term in _HEALTHCARE_SUBSECTOR_TERMS)
+    anchor_reason_parts: list[str] = []
+    if cfg_ticker_hit:
+        anchor_reason_parts.append("configured healthcare ticker")
+    if ticker_healthcare_hit:
+        anchor_reason_parts.append("healthcare company ticker")
+    if regulator_anchor:
+        anchor_reason_parts.append("regulator term")
+    if clinical_anchor:
+        anchor_reason_parts.append("clinical term")
+    if subsector_anchor:
+        anchor_reason_parts.append("healthcare subsector term")
+
+    has_hard_anchor = bool(anchor_reason_parts)
+    if any(term in text_lower for term in _GENERIC_TECH_HEALTH_NOISE) and not has_hard_anchor:
+        return None
+    if not has_hard_anchor and not has_healthcare_signal:
+        return None
+
     severity = EVENT_SEVERITY.get(event_type, "low")
     source_quality = _infer_source_quality(event)
     trial_phase = _infer_trial_phase(text)
@@ -98,7 +158,7 @@ def classify_healthcare_event(
     theme_match = bool(themes)
     asset_match = bool(asset_names)
     severity_rank = SEVERITY_ORDER.index(severity) if severity in SEVERITY_ORDER else 0
-    allow_generic = cfg_ticker_hit or theme_match or asset_match or severity_rank >= SEVERITY_ORDER.index("high")
+    allow_generic = has_hard_anchor or theme_match or asset_match or severity_rank >= SEVERITY_ORDER.index("high")
     if low_signal_like and not allow_generic:
         return None
     if source_quality in {"generic_news", "low_signal"} and not allow_generic:
@@ -122,6 +182,7 @@ def classify_healthcare_event(
         severity=severity,
         source_quality=source_quality,
         relevance_score=0.0,
+        healthcare_classification_reason=", ".join(anchor_reason_parts) if anchor_reason_parts else "theme keyword match",
     )
 
 
@@ -145,6 +206,8 @@ def _infer_event_type(event: NormalisedEvent, text_lower: str) -> str:
         return "trial_completion"
     if evt_type in {"m_and_a", "acquisition", "merger"} or "acquire" in text_lower or "merger" in text_lower:
         return "m_and_a"
+    if any(token in text_lower for token in ("public offering", "secondary offering", "follow-on offering", "private placement", "registered direct")):
+        return "biotech_financing"
     if "license" in text_lower or "licensing" in text_lower or "collaboration" in text_lower:
         return "licensing_deal"
     if "capacity" in text_lower and any(token in text_lower for token in ("cdmo", "api", "manufactur", "fill-finish", "sterile")):
@@ -235,3 +298,24 @@ def _infer_geography(text_lower: str) -> str:
         return "US"
     return ""
 
+
+def _is_healthcare_company_ticker(ticker: str) -> bool:
+    symbol = str(ticker or "").upper().strip()
+    if not symbol:
+        return False
+    company = company_name_for_ticker(symbol).lower()
+    if not company or company == symbol.lower():
+        return False
+    healthcare_markers = (
+        "pharma",
+        "biotech",
+        "therapeutics",
+        "biosciences",
+        "biopharma",
+        "medical",
+        "health",
+        "diagnostic",
+        "laboratories",
+        "lifesciences",
+    )
+    return any(marker in company for marker in healthcare_markers)

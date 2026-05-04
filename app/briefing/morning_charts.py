@@ -72,6 +72,7 @@ def build_morning_chart_bundle(
         briefing.market_setup.index_quotes,
         briefing.market_setup.macro_quotes,
         briefing.macro_context,
+        briefing.canonical_prices or {},
     )
     regime_tags = _derive_regime_tags(normalized)
 
@@ -232,7 +233,19 @@ def _normalize_inputs(
     index_quotes: list[QuoteData],
     macro_quotes: list[QuoteData],
     macro_context: list[MacroDataPoint],
+    canonical_prices: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    canon = dict(canonical_prices or {})
+
+    def _canon_float(asset_key: str, field: str) -> float | None:
+        row = dict(canon.get(asset_key) or {})
+        if field not in row or row.get(field) is None:
+            return None
+        try:
+            return float(row.get(field))
+        except Exception:
+            return None
+
     us = _avg_change(index_quotes, US_INDEX_KEYS)
     eu = _avg_change(index_quotes, EU_INDEX_KEYS)
     asia = _avg_change(index_quotes, ASIA_INDEX_KEYS)
@@ -242,6 +255,7 @@ def _normalize_inputs(
 
     vix = _find_quote(index_quotes + macro_quotes, VIX_KEYS)
     oil = _find_quote(macro_quotes, OIL_KEYS)
+    brent = _find_quote(macro_quotes, ("brent", "bz=f", "co1:com"))
     gold = _find_quote(macro_quotes, GOLD_KEYS)
     ten_y = _find_macro(macro_context, "10Y")
     two_y = _find_macro(macro_context, "2Y")
@@ -261,10 +275,11 @@ def _normalize_inputs(
         "dispersion": dispersion,
         "small_vs_large": small_large,
         "growth_vs_defensive": growth_defensive,
-        "vix_level": float(vix.current_price) if vix else None,
-        "vix_delta_pct": float(vix.change_percent) if vix else None,
-        "oil_delta_pct": float(oil.change_percent) if oil else None,
-        "gold_delta_pct": float(gold.change_percent) if gold else None,
+        "vix_level": _canon_float("VIX", "value") if _canon_float("VIX", "value") is not None else (float(vix.current_price) if vix else None),
+        "vix_delta_pct": _canon_float("VIX", "change_percent") if _canon_float("VIX", "change_percent") is not None else (float(vix.change_percent) if vix else None),
+        "oil_delta_pct": _canon_float("WTI", "change_percent") if _canon_float("WTI", "change_percent") is not None else (float(oil.change_percent) if oil else None),
+        "brent_delta_pct": _canon_float("BRENT", "change_percent") if _canon_float("BRENT", "change_percent") is not None else (float(brent.change_percent) if brent else None),
+        "gold_delta_pct": _canon_float("GOLD", "change_percent") if _canon_float("GOLD", "change_percent") is not None else (float(gold.change_percent) if gold else None),
         "ten_y_level": float(ten_y.value) if ten_y else None,
         "two_y_level": float(two_y.value) if two_y else None,
         "spread_level": float(spread.value) if spread else None,
@@ -500,7 +515,11 @@ def _build_candidates(
                 chart_key="yield_curve_shape",
                 category="support",
                 priority=0.72 + (0.10 if "rates_led" in regime_tags else 0.0),
-                spec=_yield_curve_spec(yield_curve_points or [], market_data_service),
+                spec=_yield_curve_spec(
+                    yield_curve_points or [],
+                    market_data_service,
+                    briefing.canonical_prices or {},
+                ),
                 reason="Yield curve shape and week-over-week shift in one glance.",
             )
         )
@@ -872,26 +891,27 @@ def _stack_policy(stack_key: str, briefing: MorningBriefing) -> list[str]:
             "earnings_relevance_strip",
         ],
         "energy_geo": [
+            "global_relative_performance",
             "cross_asset_impulse_strip",
+            "regional_divergence_score",
+            "breadth_leadership_panel",
+            "yield_curve_shape",
+            "volatility_regime_card",
             "geo_confirmation_ladder",
             "oil_transmission_card",
-            "regional_divergence_score",
             "pnl_attribution_waterfall",
             "portfolio_concentration_risk_card",
-            "volatility_regime_card",
-            "global_relative_performance",
         ],
         "rates_repricing": [
             "global_relative_performance",
             "regional_divergence_score",
-            "yield_curve_shape",
-            "cross_asset_impulse_strip",
-            "volatility_regime_card",
             "breadth_leadership_panel",
+            "cross_asset_impulse_strip",
+            "yield_curve_shape",
+            "volatility_regime_card",
             "pnl_attribution_waterfall",
-            "rates_curve_micro_panel",
             "portfolio_concentration_risk_card",
-            "regional_divergence_score",
+            "rates_curve_micro_panel",
         ],
         "earnings_tech": [
             "global_relative_performance",
@@ -915,15 +935,14 @@ def _stack_policy(stack_key: str, briefing: MorningBriefing) -> list[str]:
         ],
         "balanced": [
             "global_relative_performance",
-            "regional_divergence_score",
-            "watchlist_movers_card",
             "cross_asset_impulse_strip",
+            "regional_divergence_score",
             "breadth_leadership_panel",
+            "yield_curve_shape",
+            "volatility_regime_card",
             "pnl_attribution_waterfall",
             "portfolio_concentration_risk_card",
-            "regional_divergence_score",
-            "volatility_regime_card",
-            "rates_curve_micro_panel",
+            "watchlist_movers_card",
         ],
     }
     policy = list(policies.get(stack_key, policies["balanced"]))
@@ -972,6 +991,8 @@ def _required_chart_groups(
         required.append(("geo_confirmation_ladder", "oil_transmission_card"))
     if "volatility_watch" in tags:
         required.append(("volatility_regime_card",))
+    if session_key == "morning":
+        required.append(("global_relative_performance",))
     return required
 
 
@@ -983,6 +1004,8 @@ def _hard_required_groups(briefing: MorningBriefing, regime_tags: list[str]) -> 
         hard.add(("watchlist_movers_card",))
     if session_key in {"us_intraday_risk", "into_close"}:
         hard.add(("setup_confirmation_card",))
+    if session_key == "us_pre_open":
+        hard.add(("what_changed_card", "setup_confirmation_card"))
     if "regional_split" in tags:
         hard.add(("regional_divergence_score", "global_relative_performance"))
     if "breadth_divergence" in tags:
@@ -994,6 +1017,8 @@ def _hard_required_groups(briefing: MorningBriefing, regime_tags: list[str]) -> 
         hard.add(("geo_confirmation_ladder", "oil_transmission_card"))
     if "volatility_watch" in tags:
         hard.add(("volatility_regime_card",))
+    if session_key == "morning":
+        hard.add(("global_relative_performance",))
     return hard
 
 
@@ -1329,7 +1354,8 @@ def _setup_confirmation_spec(
 
 def _what_changed_spec(briefing: MorningBriefing) -> dict[str, Any]:
     lines = [str(line).strip() for line in (briefing.what_changed_lines or []) if str(line).strip()]
-    available = bool(lines) and not lines[0].lower().startswith("no prior comparable snapshot")
+    first = lines[0].lower() if lines else ""
+    available = bool(lines) and not first.startswith("no prior comparable snapshot") and not first.startswith("no prior comparable replay snapshot")
     rows = [{"name": line[:74], "value": idx + 1} for idx, line in enumerate(lines[:6])]
     return {
         "chart_key": "what_changed_card",
@@ -1389,29 +1415,46 @@ def _geo_confirmation_ladder_spec(briefing: MorningBriefing, metrics: dict[str, 
 
 def _oil_transmission_card_spec(briefing: MorningBriefing, metrics: dict[str, Any]) -> dict[str, Any]:
     oil_row = _find_quote(briefing.market_setup.macro_quotes, OIL_KEYS)
-    brent_row = _find_quote(briefing.market_setup.macro_quotes, ("brent", "bz=F", "co1:com"))
+    brent_row = _find_quote(briefing.market_setup.macro_quotes, ("brent", "bz=f", "co1:com"))
     energy_etf = next((row for row in briefing.market_setup.market_breadth if str(row.symbol).upper() == "XLE"), None)
-    vix = float(metrics.get("vix_delta_pct") or 0.0)
-    gold = float(metrics.get("gold_delta_pct") or 0.0)
-    oil = float(oil_row.change_percent or 0.0) if oil_row else 0.0
-    brent = float(brent_row.change_percent or 0.0) if brent_row else 0.0
-    xle = float(energy_etf.change_percent or 0.0) if energy_etf else 0.0
+    canonical = dict(briefing.canonical_prices or {})
 
-    if oil > 1.0 and vix > 1.0 and gold <= 0.2:
+    def _canon_pct(key: str) -> float | None:
+        row = dict(canonical.get(key) or {})
+        val = row.get("change_percent")
+        return float(val) if val is not None else None
+
+    vix = float(metrics.get("vix_delta_pct")) if metrics.get("vix_delta_pct") is not None else None
+    gold = float(metrics.get("gold_delta_pct")) if metrics.get("gold_delta_pct") is not None else None
+    oil = _canon_pct("WTI")
+    if oil is None and oil_row and oil_row.change_percent is not None:
+        oil = float(oil_row.change_percent)
+    brent = _canon_pct("BRENT")
+    if brent is None and brent_row and brent_row.change_percent is not None:
+        brent = float(brent_row.change_percent)
+    xle = float(energy_etf.change_percent) if energy_etf and energy_etf.change_percent is not None else None
+
+    oil_v = float(oil or 0.0)
+    brent_v = float(brent or 0.0)
+    vix_v = float(vix or 0.0)
+    gold_v = float(gold or 0.0)
+    xle_v = float(xle or 0.0)
+
+    if max(oil_v, brent_v) > 1.0 and vix_v > 1.0 and gold_v <= 0.2:
         verdict = "inflation stress > haven panic"
-    elif oil > 1.0 and xle > 0:
+    elif max(oil_v, brent_v) > 1.0 and xle_v > 0:
         verdict = "energy leadership confirms supply stress"
-    elif oil <= 0 and vix <= 0:
+    elif max(oil_v, brent_v) <= 0 and vix_v <= 0:
         verdict = "energy pressure easing"
     else:
         verdict = "mixed transmission"
 
     rows = [
-        {"name": "WTI", "value": round(oil, 3)},
-        {"name": "Brent", "value": round(brent, 3)},
-        {"name": "XLE", "value": round(xle, 3)},
-        {"name": "VIX", "value": round(vix, 3)},
-        {"name": "Gold", "value": round(gold, 3)},
+        {"name": "WTI", "value": round(oil_v, 3)},
+        {"name": "Brent", "value": round(brent_v, 3)},
+        {"name": "XLE", "value": round(xle_v, 3)},
+        {"name": "VIX", "value": round(vix_v, 3)},
+        {"name": "Gold", "value": round(gold_v, 3)},
     ]
     return {
         "chart_key": "oil_transmission_card",
@@ -1420,7 +1463,8 @@ def _oil_transmission_card_spec(briefing: MorningBriefing, metrics: dict[str, An
         "reason_if_hidden": None,
         "title": "Oil Transmission",
         "caption": (
-            f"WTI {oil:+.2f}% / Brent {brent:+.2f}% with XLE {xle:+.2f}%, VIX {vix:+.2f}% and gold {gold:+.2f}%: {verdict}."
+            f"WTI {oil_v:+.2f}% / Brent {brent_v:+.2f}% with XLE {xle_v:+.2f}%, "
+            f"VIX {vix_v:+.2f}% and gold {gold_v:+.2f}%: {verdict}."
         ),
         "series": rows,
         "annotations": [{"label": "verdict", "value": verdict}],
@@ -1600,7 +1644,11 @@ def _earnings_relevance_spec(briefing: MorningBriefing) -> dict[str, Any]:
 # New chart spec builders
 # ---------------------------------------------------------------------------
 
-def _yield_curve_spec(yield_curve_points: list[MacroDataPoint], market_data_service: Any) -> dict[str, Any]:
+def _yield_curve_spec(
+    yield_curve_points: list[MacroDataPoint],
+    market_data_service: Any,
+    canonical_prices: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Yield curve shape from deterministic macro series only (no yfinance fallback)."""
     TENOR_ORDER = {"DGS2": 2, "DGS5": 5, "DGS10": 10, "DGS30": 30}
     today_rows: list[dict[str, Any]] = []
@@ -1621,6 +1669,10 @@ def _yield_curve_spec(yield_curve_points: list[MacroDataPoint], market_data_serv
     inversion = (today_rows[0]["today"] > today_rows[-1]["today"]) if available else False
     shape = "inverted" if inversion else "normal"
     row_map = {int(row["tenor"]): row for row in today_rows}
+    canon = dict(canonical_prices or {})
+    canon_ten = dict(canon.get("US10Y") or {}).get("value")
+    if canon_ten is not None and 10 in row_map:
+        row_map[10]["today"] = round(float(canon_ten), 4)
     two = row_map.get(2, {}).get("today")
     ten = row_map.get(10, {}).get("today")
     thirty = row_map.get(30, {}).get("today")
@@ -1713,22 +1765,32 @@ def _pnl_waterfall_spec(holdings_quotes: list[QuoteData], profile: UserProfile) 
     available = len(bars) >= 2
     top_pos = max(bars, key=lambda row: float(row.get("contribution") or 0.0), default=None)
     top_neg = min(bars, key=lambda row: float(row.get("contribution") or 0.0), default=None)
+    positive_count = sum(1 for row in bars if float(row.get("contribution") or 0.0) > 0.0)
     lens_hint = ""
     if top_pos and top_neg:
-        if total_contrib < 0:
+        if abs(total_contrib) < 0.005:
             lens_hint = (
-                f" Main drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%; "
-                f"largest positive offset: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}%."
+                f" Flat read with offsetting sleeves ({positive_count}/{len(bars)} positive). "
+                f"Strongest positive: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}% vs "
+                f"largest drag {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%."
             )
+        elif total_contrib < 0:
+            if positive_count == 0:
+                lens_hint = (
+                    f" Main drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%; "
+                    f"no positive offset among displayed sleeves ({positive_count}/{len(bars)} positive)."
+                )
+            else:
+                lens_hint = (
+                    f" Main drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%; "
+                    f"largest positive offset: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}% "
+                    f"({positive_count}/{len(bars)} positive)."
+                )
         elif total_contrib > 0:
             lens_hint = (
                 f" Main contributor: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}%; "
-                f"largest drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%."
-            )
-        else:
-            lens_hint = (
-                f" Offsetting sleeves: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}% "
-                f"vs {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%."
+                f"largest drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}% "
+                f"({positive_count}/{len(bars)} positive)."
             )
     return {
         "chart_key": "pnl_attribution_waterfall",
@@ -1921,8 +1983,9 @@ def _impulse_read_line(points: list[dict[str, Any]]) -> str:
 
     if strongest_pos and strongest_neg:
         return (
-            f"On a normalised impulse basis, upside is {_fmt(strongest_pos)} and downside is {_fmt(strongest_neg)}. "
-            "Units are normalised before comparison."
+            f"Largest upward move: {_fmt(strongest_pos)}. "
+            f"Largest downside move: {_fmt(strongest_neg)}. "
+            "Chart is normalised; labels show raw moves."
         )
     driver = max(points, key=lambda row: abs(float(row.get("impulse") or 0.0)))
     return f"On a normalised impulse basis, the largest move is {_fmt(driver)}; the rest of the strip is comparatively muted."

@@ -135,6 +135,7 @@ def _to_item(event: HealthcareEvent) -> HealthcareBriefingItem:
         portfolio_lens=event.portfolio_lens,
         source_line=source_line,
         published_at=event.published_at,
+        healthcare_classification_reason=event.healthcare_classification_reason,
     )
 
 
@@ -153,4 +154,3 @@ def _confidence_label(*, items: list[HealthcareBriefingItem], source_count: int)
     if source_count >= 1:
         return "MEDIUM"
     return "LOW"
-

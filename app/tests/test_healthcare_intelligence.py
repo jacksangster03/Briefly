@@ -95,6 +95,39 @@ def test_low_signal_generic_health_article_suppressed():
     assert classified is None
 
 
+def test_openai_power_story_is_not_healthcare():
+    event = _evt(
+        "Power crunch could cripple OpenAI and Anthropic",
+        "AI infrastructure and power grid constraints may impact model training economics.",
+        source="newsapi",
+    )
+    classified = classify_healthcare_event(event, healthcare_prefs=_profile().healthcare_preferences)
+    assert classified is None
+
+
+def test_radiology_labor_story_requires_healthcare_anchor():
+    event = _evt(
+        "Geoffrey Hinton says AI could replace radiologists",
+        "Broad labour-market commentary on AI replacement risk in radiology roles.",
+        source="newsapi",
+    )
+    classified = classify_healthcare_event(event, healthcare_prefs=_profile().healthcare_preferences)
+    assert classified is None
+
+
+def test_cabaletta_offering_classified_as_biotech_financing():
+    event = _evt(
+        "Cabaletta Bio announces follow-on public offering",
+        "Cabaletta Bio launched a follow-on public offering to extend development runway.",
+        tickers=["CABA"],
+        source="newsapi",
+    )
+    event.raw_data = {"source_name": "Reuters"}
+    classified = classify_healthcare_event(event, healthcare_prefs=_profile().healthcare_preferences)
+    assert classified is not None
+    assert classified.event_type == "biotech_financing"
+
+
 def test_portfolio_watchlist_ticker_gets_relevance_boost():
     prefs = _profile().healthcare_preferences
     profile = _profile()
@@ -110,6 +143,25 @@ def test_portfolio_watchlist_ticker_gets_relevance_boost():
     watch_scored = score_healthcare_event(watch_evt, profile=profile, healthcare_prefs=prefs)
     other_scored = score_healthcare_event(other_evt, profile=profile, healthcare_prefs=prefs)
     assert watch_scored.relevance_score > other_scored.relevance_score
+
+
+def test_lilly_guidance_ranks_above_generic_healthcare():
+    profile = _profile()
+    prefs = profile.healthcare_preferences
+    lilly = classify_healthcare_event(
+        _evt("Eli Lilly raises guidance on obesity demand", "LLY raised guidance as GLP-1 demand remains strong.", tickers=["LLY"]),
+        healthcare_prefs=prefs,
+    )
+    generic = classify_healthcare_event(
+        _evt("Healthcare sentiment update", "Broad healthcare sector commentary without hard catalyst.", source="newsapi"),
+        healthcare_prefs=prefs,
+    )
+    assert lilly is not None
+    lilly_scored = score_healthcare_event(lilly, profile=profile, healthcare_prefs=prefs)
+    generic_score = 0.0
+    if generic is not None:
+        generic_score = score_healthcare_event(generic, profile=profile, healthcare_prefs=prefs).relevance_score
+    assert lilly_scored.relevance_score > generic_score
 
 
 def test_section_omitted_when_no_relevant_items():

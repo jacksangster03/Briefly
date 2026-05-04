@@ -35,48 +35,66 @@ _REGIME_CODES: dict[str, int] = {
 
 
 def snapshot_metrics(briefing: MorningBriefing) -> dict[str, float]:
-    def _quote_move(token: str) -> float:
-        for q in briefing.market_setup.macro_quotes + briefing.market_setup.index_quotes:
-            text = f"{q.display_name} {q.symbol}".upper()
-            if token in text:
-                return float(q.change_percent or 0.0)
-        return 0.0
+    def _canon(key: str) -> dict | None:
+        return dict((briefing.canonical_prices or {}).get(key) or {}) or None
 
-    def _quote_level(token: str) -> float:
+    def _quote_move(token: str) -> float | None:
+        canon_key = token.upper().strip()
+        if canon_key in {"WTI", "BRENT", "GOLD"}:
+            canon = _canon(canon_key)
+            if canon:
+                return float(canon.get("change_percent")) if canon.get("change_percent") is not None else None
         for q in briefing.market_setup.macro_quotes + briefing.market_setup.index_quotes:
             text = f"{q.display_name} {q.symbol}".upper()
             if token in text:
-                return float(q.current_price or 0.0)
-        return 0.0
+                if q.change_percent is None:
+                    return None
+                return float(q.change_percent)
+        return None
+
+    def _quote_level(token: str) -> float | None:
+        canon_key = token.upper().strip()
+        if canon_key in {"VIX", "US10Y", "US2Y"}:
+            canon = _canon(canon_key)
+            if canon and canon.get("value") is not None:
+                return float(canon.get("value"))
+        for q in briefing.market_setup.macro_quotes + briefing.market_setup.index_quotes:
+            text = f"{q.display_name} {q.symbol}".upper()
+            if token in text:
+                if q.current_price is None:
+                    return None
+                return float(q.current_price)
+        return None
 
     sector_rows = list(briefing.market_setup.market_breadth or [])
     sector_up = sum(1 for row in sector_rows if float(row.change_percent or 0.0) > 0.0)
-    breadth_up_pct = (sector_up / len(sector_rows) * 100.0) if sector_rows else 0.0
+    breadth_up_pct = (sector_up / len(sector_rows) * 100.0) if sector_rows else None
 
     index_quotes = briefing.market_setup.index_quotes or []
     us = [float(q.change_percent or 0.0) for q in index_quotes if any(k in (q.display_name or q.symbol or "").upper() for k in ("S&P", "NASDAQ", "DOW", "RUSSELL"))]
     eu = [float(q.change_percent or 0.0) for q in index_quotes if any(k in (q.display_name or q.symbol or "").upper() for k in ("STOXX", "FTSE", "DAX", "CAC", "IBEX"))]
     asia = [float(q.change_percent or 0.0) for q in index_quotes if any(k in (q.display_name or q.symbol or "").upper() for k in ("NIKKEI", "HANG SENG", "HSI"))]
-    total_contrib = 0.0
+    total_contrib = None
     for asset in briefing.chart_assets:
         if asset.key == "pnl_attribution_waterfall":
             break
     bundle = briefing.morning_chart_bundle or {}
     charts = {str(row.get("chart_key")): row for row in (bundle.get("charts") or [])}
     pnl = charts.get("pnl_attribution_waterfall") or {}
-    total_contrib = float(((pnl.get("meta") or {}).get("total_contribution") or 0.0))
+    total_meta = ((pnl.get("meta") or {}).get("total_contribution"))
+    total_contrib = float(total_meta) if total_meta is not None else None
     watchlist_moves = [float(q.change_percent or 0.0) for q in (briefing.watchlist_quotes or [])]
-    leader = max(watchlist_moves) if watchlist_moves else 0.0
-    laggard = min(watchlist_moves) if watchlist_moves else 0.0
+    leader = max(watchlist_moves) if watchlist_moves else None
+    laggard = min(watchlist_moves) if watchlist_moves else None
     regime_label = str(briefing.session_quality_label or "").strip().lower()
     regime_code = float(_REGIME_CODES.get(regime_label, 0))
 
-    return {
+    out: dict[str, float] = {
         "vix_level": _quote_level("VIX"),
         "wti_pct": _quote_move("WTI"),
         "brent_pct": _quote_move("BRENT"),
         "gold_pct": _quote_move("GOLD"),
-        "us10y": _quote_level("10Y US TREASURY YIELD"),
+        "us10y": _quote_level("US10Y") or _quote_level("10Y US TREASURY YIELD"),
         "breadth_up_pct": breadth_up_pct,
         "us_avg_pct": (sum(us) / len(us)) if us else 0.0,
         "eu_avg_pct": (sum(eu) / len(eu)) if eu else 0.0,
@@ -87,6 +105,7 @@ def snapshot_metrics(briefing: MorningBriefing) -> dict[str, float]:
         "watchlist_leader_pct": leader,
         "watchlist_laggard_pct": laggard,
     }
+    return {k: float(v) for k, v in out.items() if v is not None}
 
 
 def load_previous_snapshot(*, profile_name: str, session_key: str, before: datetime | None = None) -> tuple[datetime | None, dict[str, float]]:
@@ -129,11 +148,14 @@ def persist_snapshot(*, profile_name: str, session_key: str, generated_at: datet
         for key, symbol in _METRIC_SYMBOLS.items():
             if key not in metrics:
                 continue
+            value = metrics.get(key)
+            if value is None:
+                continue
             session.add(
                 MarketSnapshot(
                     symbol=symbol,
                     display_name=profile_name,
-                    price=float(metrics.get(key) or 0.0),
+                    price=float(value),
                     snapshot_type=f"briefing:{session_key}",
                     timestamp=generated_at,
                 )
@@ -169,10 +191,24 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
         cur_label = next((name for name, code in _REGIME_CODES.items() if code == cur_regime), "mixed")
         lines.append(f"Regime: {prev_label.title()} -> {cur_label.title()}")
 
+    magnitudes: list[float] = []
+
     def _delta(name: str, key: str, suffix: str, scale: float = 1.0) -> None:
-        cur = float(current.get(key, 0.0))
-        prv = float(previous.get(key, 0.0))
+        cur_raw = current.get(key)
+        prv_raw = previous.get(key)
+        if cur_raw is None and prv_raw is None:
+            return
+        if cur_raw is None:
+            lines.append(f"{name}: unavailable")
+            return
+        if prv_raw is None:
+            cur = float(cur_raw)
+            lines.append(f"{name}: {cur:.2f}{suffix} (newly available)")
+            return
+        cur = float(cur_raw)
+        prv = float(prv_raw)
         d = (cur - prv) * scale
+        magnitudes.append(abs(d))
         lines.append(f"{name}: {cur:.2f}{suffix} ({d:+.2f}{suffix})")
 
     _delta("VIX", "vix_level", "")
@@ -185,13 +221,17 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
     _delta("Europe avg", "eu_avg_pct", "%")
     _delta("Asia avg", "asia_avg_pct", "%")
     _delta("Portfolio contribution", "portfolio_contrib_pct", "%")
-    if "watchlist_leader_pct" in current or "watchlist_laggard_pct" in current:
-        cur_leader = float(current.get("watchlist_leader_pct", 0.0))
-        cur_laggard = float(current.get("watchlist_laggard_pct", 0.0))
+    if "watchlist_leader_pct" in current and "watchlist_laggard_pct" in current:
+        cur_leader = float(current.get("watchlist_leader_pct"))
+        cur_laggard = float(current.get("watchlist_laggard_pct"))
         prv_leader = float(previous.get("watchlist_leader_pct", cur_leader))
         prv_laggard = float(previous.get("watchlist_laggard_pct", cur_laggard))
+        spread_delta = (cur_leader - cur_laggard) - (prv_leader - prv_laggard)
+        magnitudes.append(abs(spread_delta))
         lines.append(
             f"Watchlist leadership spread: {(cur_leader - cur_laggard):+.2f}pp "
-            f"({(cur_leader - cur_laggard) - (prv_leader - prv_laggard):+.2f}pp)"
+            f"({spread_delta:+.2f}pp)"
         )
+    if magnitudes and max(magnitudes) < 0.25:
+        return ["Little changed since prior replay slot: rates and oil remain the main pressure points."] + lines[:6]
     return lines[:8]

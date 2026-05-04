@@ -33,6 +33,8 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 - Story deduplication and clustering across sections
 - Cross-type anti-repeat policy: events already sent in one channel are suppressed from later surfaces
 - Manual QA harness: `day-replay` command simulates session cadence for a day without touching live idempotency markers
+- Replay safety + clarity: replay/test messages are explicitly labeled `REPLAY MODE` and `TEST DAY REPLAY - NOT LIVE`, with simulated session time vs data-as-of timestamp
+- Replay provider caching: per-run memoization reduces duplicate provider calls across replayed session slots
 
 ### Delivery and rendering
 
@@ -43,11 +45,13 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 - Email PNG cards generated from deterministic specs (Plotly web preview + Matplotlib email rendering)
 - HTML email with inline charts
 - Optional Healthcare / Biotech Intelligence vertical section (default off; adds high-signal pharma/biotech/regulatory/manufacturing catalysts when enabled)
+- Healthcare classifier hard-anchor gating (regulatory/clinical/company/ticker anchors) suppresses generic AI/power/radiology commentary from healthcare output
 
 ### Latest completed phases
 
 - **Phase 6/7:** session-aware decision layer, regime-to-chart-stack selection, desk/full density modes, and new cards (yield curve, VIX risk, geo confirmation, regional divergence, watchlist movers, setup confirmation, what changed)
 - **Phase 8:** routing/materiality/snapshot hardening, session-aware logs and metadata, required chart coverage enforcement, and provider-note cleanup
+- **Phase 8.5 polish:** day-replay banner semantics, replay action/status summary, snapshot missing-value safety (no fake 0.00s), session-shaped output tightening, canonical Brent propagation, and chart-copy consistency fixes
 - **Healthcare vertical (optional):** deterministic healthcare taxonomy/classifier/scorer/section-builder, Telegram+email rendering, breaking biotech label path, and configurable preferences in `configs/healthcare.yaml`
 
 ### Portfolio workbench (Phases 4.7–5.8)
@@ -364,6 +368,8 @@ python -m app.cli scheduler
 python -m app.cli day-replay --date today --show-output
 python -m app.cli day-replay --date today --send-test telegram,email
 python -m app.cli day-replay --date today --show-output --healthcare-enabled
+python -m app.cli day-replay --date today --force-all --ignore-materiality
+python -m app.cli day-replay --date 2026-05-04 --until close --send-test telegram,email
 
 # Web control center
 python -m app.cli web --host 127.0.0.1 --port 8080

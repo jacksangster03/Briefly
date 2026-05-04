@@ -6,6 +6,7 @@ idempotency markers or sent-message records.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -50,6 +51,8 @@ class DayReplaySession:
     sent_channels: list[str] = field(default_factory=list)
     telegram_chars: int = 0
     email_chars: int = 0
+    data_timestamp_local: str = ""
+    replay_data_mode: str = "latest_available"
 
 
 @dataclass
@@ -61,6 +64,8 @@ class DayReplayResult:
     data_note: str
     sessions: list[DayReplaySession]
     replay_namespace: str
+    replay_data_mode: str = "latest_available"
+    provider_cache_hits: int = 0
 
 
 _REPLAY_POINTS: tuple[tuple[str, time], ...] = (
@@ -152,6 +157,7 @@ def _build_replay_plan(
                 eligible=eligible,
                 future=not eligible,
                 future_reason=future_reason,
+                send_action="future" if not eligible else "skipped",
             )
         )
     return plan
@@ -174,6 +180,53 @@ def _find_previous_metrics(
     return candidates[-1]
 
 
+def _cache_key(args: tuple, kwargs: dict) -> tuple:
+    return (repr(args), repr(sorted((str(k), repr(v)) for k, v in kwargs.items())))
+
+
+def _memoize_method(obj: object, method_name: str) -> dict[str, int]:
+    store: dict[tuple, object] = {}
+    stats = {"hits": 0, "misses": 0}
+    original = getattr(obj, method_name, None)
+    if original is None:
+        return stats
+
+    def _wrapped(*args, **kwargs):
+        key = _cache_key(args, kwargs)
+        if key in store:
+            stats["hits"] += 1
+            return deepcopy(store[key])
+        stats["misses"] += 1
+        result = original(*args, **kwargs)
+        store[key] = deepcopy(result)
+        return result
+
+    setattr(obj, method_name, _wrapped)
+    return stats
+
+
+def _attach_replay_cache(
+    *,
+    market_svc: MarketDataService,
+    news_svc: NewsDataService,
+    macro_svc: MacroDataService,
+) -> list[dict[str, int]]:
+    stats: list[dict[str, int]] = []
+    for method in ("get_quote", "get_quotes", "get_price_history"):
+        stats.append(_memoize_method(market_svc, method))
+    for method in ("fetch_all",):
+        stats.append(_memoize_method(news_svc, method))
+    for method in (
+        "get_morning_macro",
+        "get_ecb_snapshot",
+        "get_eurostat_snapshot",
+        "get_commodity_strip",
+        "get_treasury_yields",
+    ):
+        stats.append(_memoize_method(macro_svc, method))
+    return stats
+
+
 def _provider_note(briefing) -> str:
     raw = str((briefing.data_freshness or {}).get("Provider Health", "")).strip()
     if not raw:
@@ -189,6 +242,22 @@ def _provider_note(briefing) -> str:
     if not items:
         return "Provider notes: core providers available."
     return "Provider notes: " + "; ".join(items) + "; core providers available."
+
+
+def _latest_data_timestamp_local(briefing, tz: ZoneInfo) -> str:
+    timestamps: list[datetime] = []
+    for quote in (
+        list(briefing.market_setup.index_quotes)
+        + list(briefing.market_setup.macro_quotes)
+        + list(briefing.watchlist_quotes)
+        + list(briefing.portfolio_quotes)
+    ):
+        if quote.timestamp:
+            timestamps.append(quote.timestamp)
+    if not timestamps:
+        return "unavailable"
+    latest = max(ts.astimezone(tz) if ts.tzinfo else ts.replace(tzinfo=tz) for ts in timestamps)
+    return latest.strftime("%Y-%m-%d %H:%M %Z")
 
 
 def _parse_channels(send_test: str, *, email_only: bool, telegram_only: bool) -> list[str]:
@@ -236,6 +305,50 @@ def _with_test_banner_email(email_content, *, session_title: str, replay_time_lo
     return email_content.model_copy(
         update={
             "subject": subject,
+            "plain_text": plain_prefix + email_content.plain_text,
+            "html_body": html_prefix + email_content.html_body,
+        }
+    )
+
+
+def _with_replay_banner_messages(
+    *,
+    messages: list[str],
+    session_title: str,
+    replay_time_local: datetime,
+    data_timestamp_local: str,
+) -> list[str]:
+    if not messages:
+        return messages
+    banner = (
+        "<i>REPLAY MODE: session slot simulated at "
+        f"{replay_time_local.strftime('%Y-%m-%d %H:%M %Z')}; data as of {data_timestamp_local}. "
+        "Not a historical point-in-time replay.</i>"
+    )
+    return [f"{banner}\n\n{messages[0]}"] + messages[1:]
+
+
+def _with_replay_banner_email(
+    email_content,
+    *,
+    replay_time_local: datetime,
+    data_timestamp_local: str,
+):
+    plain_prefix = (
+        "REPLAY MODE: session slot simulated at "
+        f"{replay_time_local.strftime('%Y-%m-%d %H:%M %Z')}; data as of {data_timestamp_local}. "
+        "Not a historical point-in-time replay.\n\n"
+    )
+    html_prefix = (
+        "<div style=\"font-family:Arial,sans-serif;background:#142235;color:#d7e7ff;"
+        "padding:10px 14px;font-size:11px;line-height:1.35;border-bottom:1px solid #254260;\">"
+        "REPLAY MODE: session slot simulated at "
+        f"{replay_time_local.strftime('%Y-%m-%d %H:%M %Z')}; data as of {data_timestamp_local}. "
+        "Not a historical point-in-time replay."
+        "</div>"
+    )
+    return email_content.model_copy(
+        update={
             "plain_text": plain_prefix + email_content.plain_text,
             "html_body": html_prefix + email_content.html_body,
         }
@@ -295,7 +408,9 @@ def _print_replay_summary(result: DayReplayResult) -> None:
         f"now {result.now_local.strftime('%H:%M')}"
     )
     print(f"Mode: {result.mode}")
+    print(f"Replay source mode: {result.replay_data_mode}")
     print(f"Replay data: {result.data_note}")
+    print(f"Provider cache hits: {result.provider_cache_hits}")
     print("Eligible sessions:")
     for row in result.sessions:
         marker = "✓" if row.eligible else "○"
@@ -309,6 +424,8 @@ def _print_replay_summary(result: DayReplayResult) -> None:
                 extra += f" score={row.materiality_score}"
             if row.selected_charts:
                 extra += f" charts={len(row.selected_charts)}"
+            if row.data_timestamp_local:
+                extra += f" data_ts={row.data_timestamp_local}"
             print(base + extra)
         else:
             print(base + f" {row.future_reason}")
@@ -355,6 +472,7 @@ def run_day_replay(
     market_svc = MarketDataService(settings)
     news_svc = NewsDataService(settings)
     macro_svc = MacroDataService(settings)
+    cache_stats = _attach_replay_cache(market_svc=market_svc, news_svc=news_svc, macro_svc=macro_svc)
     generator = MorningBriefingGenerator(
         settings=settings,
         profile=profile,
@@ -377,6 +495,16 @@ def run_day_replay(
         briefing = generator.generate(session_key=row.session_key, session_title=row.session_title)
         briefing.generated_at = replay_time_utc
         briefing.session_mode = session_mode_for(replay_time_utc.astimezone(tz))
+        data_ts_local = _latest_data_timestamp_local(briefing, tz)
+        row.data_timestamp_local = data_ts_local
+        row.replay_data_mode = "latest_available"
+        # Make replay semantics explicit inside user-facing freshness fields.
+        freshness = dict(briefing.data_freshness or {})
+        freshness["Generated"] = (
+            f"for replay slot: {row.replay_time_local.strftime('%Y-%m-%d %H:%M %Z')}"
+        )
+        freshness["Replay data snapshot"] = f"latest available, {data_ts_local}"
+        briefing.data_freshness = freshness
 
         previous = _find_previous_metrics(
             snapshots=replay_snapshots,
@@ -385,6 +513,8 @@ def run_day_replay(
         )
         current = snapshot_metrics(briefing)
         briefing.what_changed_lines = build_what_changed_lines(previous=previous, current=current)
+        if not previous:
+            briefing.what_changed_lines = ["No prior comparable replay snapshot available."]
 
         materiality = compute_materiality(briefing, previous=previous)
         row.materiality_score = materiality.score
@@ -411,12 +541,23 @@ def run_day_replay(
 
         telegram_messages = telegram_formatter.format_morning_briefing(briefing)
         email_content = email_formatter.format_morning_briefing(briefing)
+        telegram_messages = _with_replay_banner_messages(
+            messages=telegram_messages,
+            session_title=row.session_title,
+            replay_time_local=row.replay_time_local,
+            data_timestamp_local=data_ts_local,
+        )
+        email_content = _with_replay_banner_email(
+            email_content,
+            replay_time_local=row.replay_time_local,
+            data_timestamp_local=data_ts_local,
+        )
         row.telegram_chars = sum(len(msg) for msg in telegram_messages)
         row.email_chars = len(email_content.plain_text or "")
         row.warnings.append(_provider_note(briefing))
 
         if should_send:
-            row.send_action = "send"
+            row.send_action = "generated_only"
             replay_snapshots.append((row.session_key, replay_time_utc, current))
             if persist_replay_snapshots:
                 _persist_replay_snapshot(
@@ -453,9 +594,9 @@ def run_day_replay(
                     email_content=test_email,
                     channels=channels,
                 )
-                row.send_action = "sent" if row.sent_channels else "send_failed_or_unconfigured"
+                row.send_action = "test_sent" if row.sent_channels else "generated_only"
         else:
-            row.send_action = "suppress" if materiality.decision == "suppress" else "hold"
+            row.send_action = "suppressed" if materiality.decision == "suppress" else "held"
             if show_output:
                 from app.main import _print_terminal_output
 
@@ -475,6 +616,8 @@ def run_day_replay(
         data_note=data_note,
         sessions=plan,
         replay_namespace=replay_namespace,
+        replay_data_mode="latest_available",
+        provider_cache_hits=sum(int(stat.get("hits", 0)) for stat in cache_stats),
     )
     _print_replay_summary(result)
     logger.info(

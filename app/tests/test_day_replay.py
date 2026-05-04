@@ -122,6 +122,7 @@ def test_day_replay_show_output_prints_preview(monkeypatch, capsys):
     )
     captured = capsys.readouterr().out
     assert "[OUTPUT] day_replay:morning" in captured
+    assert "REPLAY MODE: session slot simulated at" in captured
 
 
 def test_day_replay_send_test_labels_without_sentmessage_writes(monkeypatch, validation_isolated_db):
@@ -169,10 +170,25 @@ def test_day_replay_send_test_labels_without_sentmessage_writes(monkeypatch, val
     assert sent_telegram
     assert sent_email
     assert "[TEST DAY REPLAY - NOT LIVE]" in sent_telegram[0][0]
+    assert "REPLAY MODE: session slot simulated at" in sent_telegram[0][0]
     assert sent_email[0]["subject"].startswith("[TEST Replay]")
 
     with get_session() as session:
         assert session.query(SentMessage).count() == 0
+
+
+def test_day_replay_full_day_includes_closing_wrap(monkeypatch):
+    _patch_replay_dependencies(monkeypatch)
+    settings = Settings(dry_run=True, show_output=False)
+    result = day_replay_mod.run_day_replay(
+        settings,
+        replay_date="today",
+        until="close",
+        respect_materiality=False,
+        force_all=True,
+    )
+    closing = next(row for row in result.sessions if row.session_key == "closing_wrap")
+    assert closing.eligible is True
 
 
 def test_cli_day_replay_dispatches(monkeypatch):
@@ -200,4 +216,3 @@ def test_cli_day_replay_dispatches(monkeypatch):
     assert result.exit_code == 0, result.output
     assert called["kwargs"]["replay_date"] == "2026-05-04"
     assert called["kwargs"]["send_test"] == "telegram,email"
-

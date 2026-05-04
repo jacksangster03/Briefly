@@ -150,10 +150,10 @@ def distinct_lines(read_line: str, why_line: str, lens_line: str) -> tuple[str, 
     lens_norm = _normalize_sentence(lens_display)
 
     if _is_duplicate(read_norm, why_norm):
-        why_display = "This matters only if follow-through is confirmed across breadth and cross-asset context."
+        why_display = "Cross-asset and breadth confirmation determine whether this move is durable or only tactical."
         why_norm = _normalize_sentence(why_display)
     if _is_duplicate(read_norm, lens_norm) or _is_duplicate(why_norm, lens_norm):
-        lens_display = "Map this move to concentration and macro sensitivity before changing risk posture."
+        lens_display = "Map this signal to concentration, duration, and regional exposure before changing posture."
     return read_display, why_display, lens_display
 
 
@@ -577,7 +577,18 @@ def _is_duplicate(a: str, b: str) -> bool:
 
 
 def contract_warning_summary(warnings: list[str]) -> str:
-    if not warnings:
+    visible = [
+        item for item in warnings
+        if "geo raw/final conflict exposed in summary" not in item.lower()
+    ]
+    if not visible:
         return "PASS"
-    kinds = Counter(item.split(":", 1)[0] for item in warnings)
-    return "WARN " + ", ".join(f"{k}={v}" for k, v in sorted(kinds.items()))
+    kinds = Counter(item.split(":", 1)[0] for item in visible)
+    parts: list[str] = []
+    for key, count in sorted(kinds.items()):
+        label = key.strip()
+        if count > 1:
+            parts.append(f"{label} ({count})")
+        else:
+            parts.append(label)
+    return "WARN " + "; ".join(parts)

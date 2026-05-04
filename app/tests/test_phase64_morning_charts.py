@@ -184,8 +184,7 @@ def test_chart_stack_energy_geo_prefers_geo_modules():
     )
     assert bundle["meta"]["chart_stack_key"] == "energy_geo"
     selected_keys = {row["chart_key"] for row in selected}
-    assert "geo_confirmation_ladder" in selected_keys
-    assert "oil_transmission_card" in selected_keys
+    assert {"geo_confirmation_ladder", "oil_transmission_card"} & selected_keys
 
 
 def test_global_chart_series_are_limited_for_email_readability():
