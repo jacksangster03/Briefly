@@ -29,7 +29,7 @@ from app.processing.article_quality import (
 )
 from app.processing.pipeline import is_actionable_event, process_event_stream
 from app.schemas.briefings import MarketSetup, MorningBriefing, session_mode_for
-from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, SectorSnapshot
+from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, QuoteData, SectorSnapshot
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
 from app.universe.ticker_metadata import TICKER_DISPLAY_NAMES, company_name_for_ticker
@@ -383,6 +383,9 @@ class MorningBriefingGenerator:
                 ))
         except Exception:
             briefing.commodity_strip = []
+        # Reconcile: override FRED commodity values with live yfinance prices where available.
+        # This eliminates the T+1 lag conflict between FRED settlement and live futures prices.
+        self._reconcile_commodity_sources(briefing)
         ten_y, two_y = self.macro_svc.get_treasury_yields()
         briefing.market_setup.treasury_10y = ten_y
         briefing.market_setup.treasury_2y = two_y
@@ -752,6 +755,46 @@ class MorningBriefingGenerator:
         }
         return snapshot, shift
 
+    def _reconcile_commodity_sources(self, briefing: MorningBriefing) -> None:
+        """Override FRED commodity strip values with live yfinance quotes where available.
+
+        FRED oil/gas series are T+1 settlement prices; the live macro quotes from
+        yfinance reflect current futures. Using the live price everywhere ensures the
+        market-setup table, commodity strip, geo-risk meter, and session quality score
+        all show the same WTI/Brent value.
+
+        Gold is already inserted from yfinance as the first commodity strip element
+        and is left untouched here.
+        """
+        live_wti: QuoteData | None = None
+        live_brent: QuoteData | None = None
+        for q in briefing.market_setup.macro_quotes:
+            label = (q.display_name or q.symbol or "").upper()
+            if ("WTI" in label or "CRUDE" in label) and "BRENT" not in label and q.current_price:
+                live_wti = q
+            elif "BRENT" in label and q.current_price:
+                live_brent = q
+
+        today = briefing.generated_at.strftime("%Y-%m-%d")
+        for i, pt in enumerate(briefing.commodity_strip):
+            pt_key = ((pt.name or "") + " " + (pt.series_id or "")).upper()
+            live_q: QuoteData | None = None
+            if ("WTI" in pt_key or "DCOILWTICO" in pt_key) and "BRENT" not in pt_key:
+                live_q = live_wti
+            elif "BRENT" in pt_key or "DCOILBRENTEU" in pt_key:
+                live_q = live_brent
+            # Gold (GC=F) is already yfinance-sourced — skip
+            if live_q is not None and live_q.current_price > 0:
+                briefing.commodity_strip[i] = MacroDataPoint(
+                    series_id=pt.series_id,
+                    name=pt.name,
+                    value=round(live_q.current_price, 2),
+                    change=round(live_q.change, 2) if live_q.change is not None else None,
+                    change_percent=round(live_q.change_percent, 4) if live_q.change_percent is not None else None,
+                    date=today,
+                    source="yfinance_live",
+                )
+
     def _build_geo_risk_meter(self, briefing: MorningBriefing) -> tuple[str, str]:
         from app.briefing.regime_context import _GEO_LEVEL_ORDER
 
@@ -815,9 +858,15 @@ class MorningBriefingGenerator:
             try:
                 if _GEO_LEVEL_ORDER.index(level) < _GEO_LEVEL_ORDER.index(floor):
                     level = floor
+                    # Build a clean replacement summary — do not concatenate the raw model summary
+                    vix_note = f"VIX {vix_level:.1f}" if vix_level else "VIX n/a"
+                    haven_note = "haven neutral" if safe_haven_strength < 0.5 else f"haven +{safe_haven_strength:.2f}"
+                    density_note = f"density {density:.2f}" if density is not None else "headline signal stale"
                     summary = (
-                        f"Geo risk ELEVATED (floored: oil {oil_level:.0f} USD, {oil_delta:+.2f}% with active geopolitical headlines). "
-                        + summary
+                        f"Geo risk ELEVATED: oil {oil_level:.0f} USD/bbl ({oil_delta:+.2f}%) "
+                        f"with active Middle East/geopolitical headlines; "
+                        f"{vix_note} and {haven_note} do not confirm broad panic. "
+                        f"Inputs: {vix_note}, oil {oil_delta:+.2f}%, {haven_note}, {density_note}."
                     )
             except ValueError:
                 pass  # level not in order list (e.g. N/A) — leave unchanged

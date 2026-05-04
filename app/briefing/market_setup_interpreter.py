@@ -309,44 +309,48 @@ def _dominant_tape_driver(
     oil_move = float(oil_quote.change_percent or 0.0) if oil_quote is not None else None
     oil_level = float(oil_quote.current_price or 0.0) if oil_quote is not None else 0.0
 
-    # --- 1. Geo-energy: fire if oil is elevated OR has a big move AND geo terms present ---
+    # --- 1. Geo-energy ---
     geo_oil_hit = (
         any(term in text for term in _GEO_TERMS)
         and any(term in text for term in _ENERGY_TERMS)
     )
-    # Lower threshold; also trigger on oil level alone even without a big move
-    oil_is_driver = oil_move is not None and (
-        abs(oil_move) >= 1.5 or oil_level > 90
-    )
+    oil_is_driver = oil_move is not None and (abs(oil_move) >= 1.5 or oil_level > 90)
+    geo_driver: str | None = None
     if geo_oil_hit and oil_is_driver and cluster_weight >= 5:
         direction = "spiking" if (oil_move or 0.0) > 0 else "unwinding"
-        level_note = f" (at {oil_level:.0f} USD/bbl)" if oil_level > 0 else ""
-        return (
+        level_note = f" at {oil_level:.0f} USD/bbl" if oil_level > 0 else ""
+        geo_driver = (
             f"Geo-energy: oil {direction}{level_note} on Middle East/Hormuz tensions "
-            f"(WTI {(oil_move or 0.0):+.1f}%), with inflation and transport-cost transmission in focus."
+            f"(WTI {(oil_move or 0.0):+.1f}%), with inflation and transport-cost risk in focus."
         )
 
-    # --- 2. Tech/AI earnings ---
-    tech_text_tokens = _TECH_EARNINGS_TOKENS + tuple(t.split()[0] for t in _AI_MOMENTUM_TOKENS)
+    # --- 2. Tech/AI earnings and momentum ---
     earnings_cluster = sum(
         1
         for evt in news
         if any(kw in f"{evt.title} {evt.summary}".lower() for kw in ("earnings", "results", "beat", "miss", "guidance"))
         and any(token in f"{evt.title} {evt.summary}".lower() for token in _TECH_EARNINGS_TOKENS)
     )
-    if earnings_cluster >= 2:
-        return "Big-tech and AI earnings are steering index leadership and intra-sector dispersion."
-
-    # --- 3. AI/semiconductor momentum (non-earnings) ---
     ai_momentum = sum(
         1
         for evt in news
         if any(token in f"{evt.title} {evt.summary}".lower() for token in _AI_MOMENTUM_TOKENS)
     )
-    if ai_momentum >= 3:
-        return "Tech and AI momentum (semiconductors, data-centre capex, inference demand) is the primary index driver today."
+    tech_driver: str | None = None
+    if earnings_cluster >= 2:
+        tech_driver = "big-tech and AI earnings steering index leadership and intra-sector dispersion"
+    elif ai_momentum >= 3:
+        tech_driver = "tech and AI momentum (semiconductors, data-centre capex, inference demand) supporting growth equities"
 
-    # --- 4. Rates repricing ---
+    # --- Combined: when both clusters fire, name them together ---
+    if geo_driver and tech_driver:
+        return f"Split tape: commodity/geopolitical pressure (oil/Hormuz) alongside {tech_driver}."
+    if geo_driver:
+        return geo_driver
+    if tech_driver:
+        return tech_driver[0].upper() + tech_driver[1:] + "."
+
+    # --- 3. Rates repricing ---
     ten_y_change = _macro_change(macro_points, ("10y treasury", "us 10y", "10y treasury yield"))
     if ten_y_change is None and setup.treasury_10y:
         ten_y_change = float(setup.treasury_10y.change or 0.0)

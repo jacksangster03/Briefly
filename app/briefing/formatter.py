@@ -41,6 +41,7 @@ from app.schemas.events import (
     SectorSnapshot,
 )
 from app.universe.ticker_metadata import company_name_for_ticker, format_company_ticker, format_company_ticker_list
+from app.cadence.exchange_calendar import exchange_for_symbol, is_exchange_closed
 
 
 class TelegramFormatter:
@@ -276,11 +277,21 @@ class TelegramFormatter:
         is_weekend = briefing.session_mode in {"saturday", "sunday"}
         section_name = SECTION_HEADERS["weekend_setup"] if is_weekend else SECTION_HEADERS["market_setup"]
         lines = [f"<b>{section_name}</b>"]
+        local_date = briefing.generated_at.astimezone(self.local_tz).date()
 
         # Index quotes
         for q in briefing.market_setup.index_quotes:
             name = self._friendly_instrument_label(q.display_name or q.symbol, q.symbol)
-            lines.append(format_price_line(name, q.current_price, q.change, q.change_percent))
+            line = format_price_line(name, q.current_price, q.change, q.change_percent)
+            ex = exchange_for_symbol(q.symbol)
+            if ex:
+                closed, reason = is_exchange_closed(ex, local_date)
+                if closed:
+                    suffix = " [closed, prior close]"
+                    if reason and reason != "weekend":
+                        suffix = f" [closed, prior close · {reason}]"
+                    line += suffix
+            lines.append(line)
 
         # Macro instruments (gold, oil, USD, BTC)
         for q in briefing.market_setup.macro_quotes:
@@ -913,7 +924,43 @@ class TelegramFormatter:
         return "\n".join(lines)
 
     def _company_label(self, evt: NormalisedEvent) -> str:
-        return format_company_ticker_list(evt.tickers)
+        if not evt.tickers:
+            return ""
+        text = f"{evt.title} {evt.summary}".lower()
+        valid: list[str] = []
+        for ticker in evt.tickers:
+            symbol = (ticker or "").upper().strip()
+            if not symbol:
+                continue
+            company = company_name_for_ticker(symbol)
+            # Unknown company mapping: keep the ticker.
+            if company == symbol:
+                valid.append(symbol)
+                continue
+            aliases = self._company_alias_tokens(company)
+            if aliases and any(alias in text for alias in aliases):
+                valid.append(symbol)
+        return format_company_ticker_list(valid)
+
+    @staticmethod
+    def _company_alias_tokens(company: str) -> list[str]:
+        base = (company or "").lower()
+        if not base:
+            return []
+        trimmed = re.sub(
+            r"\b(inc|inc\.|corp|corp\.|corporation|company|co|co\.|group|plc|ltd|limited|holdings?|sa|ag|nv)\b",
+            " ",
+            base,
+        )
+        trimmed = re.sub(r"[^a-z0-9&.\-\s]", " ", trimmed)
+        compact = re.sub(r"\s+", " ", trimmed).strip()
+        aliases: list[str] = []
+        if compact:
+            aliases.append(compact)
+            parts = [p for p in compact.split(" ") if len(p) >= 4]
+            if parts:
+                aliases.append(parts[0])
+        return list(dict.fromkeys(aliases))
 
     def _format_event_time(self, evt: NormalisedEvent) -> str:
         dt = evt.published_at

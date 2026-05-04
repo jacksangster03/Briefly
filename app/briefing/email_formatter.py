@@ -103,10 +103,10 @@ class EmailFormatter:
         delivery_mode = str(bundle_meta.get("delivery_mode") or "deterministic")
         llm_shadow = bool(bundle_meta.get("llm_shadow_mode", True))
         profile_name = str(bundle_meta.get("profile_name") or "default_user")
-        confidence = str(bundle_meta.get("data_confidence") or "medium").upper()
+        confidence = self._confidence_label(briefing, bundle_meta)
         lead = "Deterministic market stack, portfolio lens, and high-signal narrative."
-        freshness = self._freshness_summary(briefing)
         generated_local = self._format_local(briefing.generated_at)
+        freshness_lines = self._freshness_breakdown_lines(briefing, generated_local)
         title, date_label = self._split_subject(subject)
         desk_read = self._top_desk_read(briefing)
 
@@ -160,7 +160,10 @@ class EmailFormatter:
             "</td></tr>",
             # Source freshness row
             f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
-            f"<div style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">SOURCE</strong> {html.escape(freshness)}</div>",
+            "<div style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\">"
+            "<strong style=\"color:#E8ECEF;\">DATA FRESHNESS · SOURCE</strong><br>"
+            + "<br>".join(html.escape(line) for line in freshness_lines)
+            + "</div>",
             "</td></tr>",
             # Jump-link nav row
             f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:6px 16px 6px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
@@ -676,6 +679,79 @@ class EmailFormatter:
         counter = Counter((quote.source or "unknown").strip().lower() or "unknown" for quote in quotes)
         src = ", ".join(f"{name}({count})" for name, count in sorted(counter.items()))
         return f"Quotes as of {timestamp} · sources: {src}"
+
+    def _freshness_breakdown_lines(self, briefing: MorningBriefing, generated_local: str) -> list[str]:
+        quotes = self._freshness_quotes(briefing)
+        latest_ts = max((quote.timestamp for quote in quotes if quote.timestamp), default=None)
+        if latest_ts is None:
+            market_line = "Market prices: unavailable"
+            src_line = "Sources: none"
+        else:
+            ts_text = self._format_local(latest_ts)
+            if latest_ts.tzinfo is None:
+                latest_ts = latest_ts.replace(tzinfo=ZoneInfo(self.timezone_name))
+            age_hours = max(
+                0.0,
+                (briefing.generated_at.astimezone(ZoneInfo(self.timezone_name)) - latest_ts.astimezone(ZoneInfo(self.timezone_name))).total_seconds() / 3600.0,
+            )
+            freshness_tag = "prior close" if age_hours >= 8.0 else "near-real-time"
+            market_line = f"Market prices: {freshness_tag}, {ts_text}"
+            counter = Counter((quote.source or "unknown").strip().lower() or "unknown" for quote in quotes)
+            src_line = "Sources: " + ", ".join(f"{name}({count})" for name, count in sorted(counter.items()))
+
+        return [
+            market_line,
+            f"News: live, generated {generated_local}",
+            "Macro/FRED: latest available official release",
+            "Portfolio P&L: based on prior-close prices",
+            src_line,
+        ]
+
+    def _confidence_label(self, briefing: MorningBriefing, bundle_meta: dict) -> str:
+        score = 0.0
+        base_conf = str(bundle_meta.get("data_confidence") or briefing.market_setup_analysis_confidence or "medium").strip().lower()
+        if base_conf in {"high", "med-high", "medium-high"}:
+            score += 1.0
+        elif base_conf in {"medium", "med"}:
+            score += 0.7
+        else:
+            score += 0.4
+
+        if briefing.events_fetched >= 300:
+            score += 1.0
+        elif briefing.events_fetched >= 120:
+            score += 0.8
+        elif briefing.events_fetched > 0:
+            score += 0.5
+
+        quotes = self._freshness_quotes(briefing)
+        latest_ts = max((quote.timestamp for quote in quotes if quote.timestamp), default=None)
+        if latest_ts is not None:
+            if latest_ts.tzinfo is None:
+                latest_ts = latest_ts.replace(tzinfo=ZoneInfo(self.timezone_name))
+            age_hours = max(
+                0.0,
+                (briefing.generated_at.astimezone(ZoneInfo(self.timezone_name)) - latest_ts.astimezone(ZoneInfo(self.timezone_name))).total_seconds() / 3600.0,
+            )
+            if age_hours <= 12:
+                score += 1.0
+            elif age_hours <= 36:
+                score += 0.7
+            else:
+                score += 0.4
+
+        if briefing.geo_risk_level:
+            score += 0.5
+        if briefing.session_quality_bucket:
+            score += 0.5
+
+        if score >= 3.6:
+            return "HIGH"
+        if score >= 2.8:
+            return "MED-HIGH"
+        if score >= 1.9:
+            return "MEDIUM"
+        return "LOW"
 
     def _freshness_quotes(self, briefing: MorningBriefing) -> list[QuoteData]:
         preferred = list(briefing.watchlist_quotes or briefing.portfolio_quotes)
