@@ -117,6 +117,32 @@ PORTFOLIO_CATALYST_TERMS = (
     "recall",
     "launch",
 )
+SEC_MATERIAL_FILING_TERMS = (
+    "earnings",
+    "guidance",
+    "outlook",
+    "acquisition",
+    "merger",
+    "transaction",
+    "ceo",
+    "cfo",
+    "resign",
+    "appoint",
+    "bankruptcy",
+    "restructuring",
+    "buyback",
+    "repurchase",
+    "dividend",
+    "offering",
+    "financing",
+    "credit facility",
+    "lawsuit",
+    "litigation",
+    "regulatory approval",
+    "fda",
+    "major contract",
+    "investor presentation",
+)
 PORTFOLIO_READTHROUGH_TERMS = (
     "inflation",
     "cpi",
@@ -530,7 +556,7 @@ class MorningBriefingGenerator:
         briefing.events_sent = len(sent_ids)
 
         logger.info(
-            "Morning briefing ready: %d fetched, %d deduped, %d themes, %d sectors, %d watchlist",
+            "Morning briefing ready: %d fetched, %d deduped, %d themes, %d sectors, watchlist_events=%d",
             briefing.events_fetched,
             briefing.events_after_dedup,
             len(briefing.top_themes),
@@ -626,6 +652,9 @@ class MorningBriefingGenerator:
         cleaned: list[NormalisedEvent] = []
         for event in selected:
             if classify_section_fit(event) != "global_macro_geo":
+                continue
+            if event.event_type in {"ipo", "company_news"} and not has_hard_catalyst(event.event_type, event.title, event.summary):
+                # Company-level deal/news belongs in portfolio/watchlist or sector sections.
                 continue
             evt = self._apply_news_hygiene(event, section="global_macro_geo")
             if is_clickbait_headline(evt.title) and not has_hard_catalyst(evt.event_type, evt.title, evt.summary):
@@ -1068,7 +1097,8 @@ class MorningBriefingGenerator:
     @staticmethod
     def _is_material_portfolio_catalyst(event: NormalisedEvent, text_lower: str) -> bool:
         if event.source == "sec_edgar":
-            return True
+            # Official filings still need materiality; suppress generic exhibit/admin filings.
+            return any(term in text_lower for term in SEC_MATERIAL_FILING_TERMS)
         if event.event_type in PORTFOLIO_CATALYST_EVENT_TYPES:
             return True
         return any(term in text_lower for term in PORTFOLIO_CATALYST_TERMS)

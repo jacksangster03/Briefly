@@ -304,10 +304,10 @@ class TelegramFormatter:
         # Treasury yields from FRED
         setup = briefing.market_setup
         if setup.treasury_10y:
-            chg = f" ({format_change(setup.treasury_10y.change or 0, 0)})" if setup.treasury_10y.change else ""
+            chg = f" {format_change(setup.treasury_10y.change or 0, 0)}" if setup.treasury_10y.change else ""
             lines.append(f"US 10Y: {setup.treasury_10y.value:.3f}%{chg}")
         if setup.treasury_2y:
-            chg = f" ({format_change(setup.treasury_2y.change or 0, 0)})" if setup.treasury_2y.change else ""
+            chg = f" {format_change(setup.treasury_2y.change or 0, 0)}" if setup.treasury_2y.change else ""
             lines.append(f"US 2Y: {setup.treasury_2y.value:.3f}%{chg}")
 
         # Sector breadth (up/down count from SPDR ETFs)
@@ -797,6 +797,15 @@ class TelegramFormatter:
         if "^" in text:
             text = re.sub(r"\(\^?[A-Z0-9:=._-]+\)", "", text).strip()
             text = text.replace("^", "").strip()
+        sym = str(symbol or "").upper().strip()
+        if sym in {"SPY", "IVV", "VOO"} and ("S&P 500" in text or "SPX" in text):
+            text = f"{text} [proxy]"
+        elif sym in {"QQQ", "ONEQ"} and ("NASDAQ" in text or "COMP" in text):
+            text = f"{text} [proxy]"
+        elif sym in {"DIA"} and ("DOW" in text or "DJIA" in text):
+            text = f"{text} [proxy]"
+        elif sym in {"IWM"} and ("RUSSELL" in text or "RUT" in text):
+            text = f"{text} [proxy]"
         return text or str(symbol or "").strip()
 
     def _format_empty_sector_compact(

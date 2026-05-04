@@ -182,6 +182,8 @@ def test_email_formatter_uses_continuous_finance_canvas():
     assert "border-radius" not in rendered.html_body
     assert rendered.html_body.index("READ") < rendered.html_body.index("<img src=\"cid:market-snapshot-cid\"")
     assert '<strong style="color:#FF7A00;font-weight:800;">Setup read:</strong>' in rendered.html_body
+    for stale in ("#44546A", "#46566A", "#4A586B", "#536176"):
+        assert stale not in rendered.html_body
 
 
 def test_email_formatter_desktop_and_narrow_width_snapshots():

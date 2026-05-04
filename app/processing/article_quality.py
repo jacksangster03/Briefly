@@ -269,7 +269,8 @@ _GLOBAL_MACRO_TERMS = (
     "tariff",
     "sanction",
     "sovereign",
-    "policy",
+    "fiscal",
+    "monetary",
 )
 
 _SECTOR_SIGNAL_TERMS = (
@@ -313,10 +314,27 @@ def has_hard_catalyst(event_type: str, title: str, summary: str = "") -> bool:
 def classify_section_fit(event: NormalisedEvent) -> str:
     """Classify event fit for strict morning section routing."""
     text = f"{event.title} {event.summary}".lower()
+    macro_hits = sum(1 for term in _GLOBAL_MACRO_TERMS if term in text)
+    hard_company_event = event.event_type in {
+        "company_news",
+        "earnings",
+        "guidance",
+        "m_and_a",
+        "ipo",
+        "filing",
+        "current_report",
+        "quarterly_report",
+        "annual_report",
+        "insider_trade",
+    }
+
     if event.event_type in {"macro_release", "fed_decision", "geopolitical", "regulatory"}:
         return "global_macro_geo"
-    if any(term in text for term in _GLOBAL_MACRO_TERMS):
+    if macro_hits >= 2 and not hard_company_event:
         return "global_macro_geo"
+    if event.event_type in {"ipo", "m_and_a"} and macro_hits < 3:
+        # Corporate deal flow belongs to portfolio/watchlist unless strongly macro-coded.
+        return "portfolio_watchlist" if event.tickers else "other"
     if event.sectors and (event.event_type in {"earnings", "guidance", "regulatory"} or any(term in text for term in _SECTOR_SIGNAL_TERMS)):
         return "sector_signals"
     if event.tickers:

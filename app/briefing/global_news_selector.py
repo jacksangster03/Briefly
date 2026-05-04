@@ -10,6 +10,7 @@ from app.processing.article_quality import (
     has_hard_catalyst,
     classify_article_type,
     classify_source_quality,
+    classify_section_fit,
     is_low_quality_for_section,
     is_clickbait_headline,
 )
@@ -342,6 +343,8 @@ def build_market_relevance_note(
     used_notes: set[str] | None = None,
 ) -> str:
     """Generate a concise market-impact phrase for global sections."""
+    if classify_section_fit(event) != "global_macro_geo":
+        return "Why market-relevant: company-level catalyst with possible cross-asset read-through; monitor section routing."
     text = _normalise_text(f"{event.title} {event.summary}")
     templates: list[str]
     is_em_fx = any(term in text for term in ("fx", "currency", "dollar", "yuan", "yen", "euro", "devaluation"))

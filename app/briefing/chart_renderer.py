@@ -122,12 +122,43 @@ class ChartRenderer:
 
     @staticmethod
     def _line_series_for_email(series: list[dict], limit: int = 7) -> list[dict]:
+        if len(series) <= limit:
+            return series
         ranked = sorted(
             series,
             key=lambda row: abs(float((row.get("y_5d") or [100.0])[-1]) - 100.0),
             reverse=True,
         )
-        return ranked[:limit]
+        latest_ranked = sorted(
+            series,
+            key=lambda row: float((row.get("y_5d") or [100.0])[-1]),
+            reverse=True,
+        )
+        chosen: list[dict] = []
+        seen: set[str] = set()
+
+        def _push(row: dict) -> None:
+            symbol = str(row.get("symbol") or row.get("name") or "")
+            if symbol in seen:
+                return
+            chosen.append(row)
+            seen.add(symbol)
+
+        # Always keep leader + laggard so endpoint labels can never omit them.
+        _push(latest_ranked[0])
+        _push(latest_ranked[-1])
+        # Keep broad benchmarks when present.
+        for token in ("S&P 500", "NASDAQ", "RUSSELL", "STOXX"):
+            hit = next((row for row in series if token in str(row.get("name") or "").upper()), None)
+            if hit is not None:
+                _push(hit)
+                if len(chosen) >= limit:
+                    return chosen[:limit]
+        for row in ranked:
+            _push(row)
+            if len(chosen) >= limit:
+                break
+        return chosen[:limit]
 
     @staticmethod
     def _label_positions(values: list[float], *, min_gap: float = 0.34, low: float | None = None, high: float | None = None) -> list[float]:
@@ -493,8 +524,37 @@ class ChartRenderer:
                 low=(y_low + 0.12 if y_low is not None else None),
                 high=(y_high - 0.12 if y_high is not None else None),
             )
+            adjusted_rows = []
             for row, y_pos in zip(label_rows, adjusted):
                 idx, label, x_val, y_val, color = row
+                adjusted_rows.append({"idx": idx, "label": label, "x": x_val, "y": y_val, "y_pos": y_pos, "color": color})
+
+            # Always show leader + laggard labels, then fill remaining slots with largest dispersion names.
+            if adjusted_rows:
+                leader_idx = max(range(len(adjusted_rows)), key=lambda i: float(adjusted_rows[i]["y"]))
+                laggard_idx = min(range(len(adjusted_rows)), key=lambda i: float(adjusted_rows[i]["y"]))
+                keep = {leader_idx, laggard_idx}
+                ranked_by_disp = sorted(
+                    range(len(adjusted_rows)),
+                    key=lambda i: abs(float(adjusted_rows[i]["y"]) - 100.0),
+                    reverse=True,
+                )
+                for i in ranked_by_disp:
+                    keep.add(i)
+                    if len(keep) >= min(4, len(adjusted_rows)):
+                        break
+            else:
+                keep = set()
+
+            for i, row in enumerate(adjusted_rows):
+                if keep and i not in keep:
+                    continue
+                idx = int(row["idx"])
+                label = str(row["label"])
+                x_val = float(row["x"])
+                y_val = float(row["y"])
+                y_pos = float(row["y_pos"])
+                color = str(row["color"])
                 excess = y_val - 100.0
                 self._value_box(
                     ax,
@@ -770,6 +830,7 @@ class ChartRenderer:
         y_span = max(y_max - y_min, 1e-9)
 
         event_label = ""
+        event_window_pct: float | None = None
         for ann in (spec.get("annotations") or []):
             if ann.get("label") == "event_window_start":
                 x_mark = int(ann.get("x") or 0)
@@ -777,30 +838,7 @@ class ChartRenderer:
                 # Shaded vertical band from event start to chart end
                 ax.axvspan(x_mark, max(x), color=ACCENT, alpha=0.10, zorder=1)
                 ax.axvline(x_mark, color=ACCENT, linewidth=1.4, linestyle="--", alpha=0.75, zorder=4)
-                # Event band label inside the shaded region (kept away from endpoint callout).
-                y_label_pos = y_max - (y_span * 0.06)
-                ax.text(
-                    x_mark + (max(x) - x_mark) * 0.04,
-                    y_label_pos,
-                    event_label,
-                    color=ACCENT,
-                    fontsize=8.2,
-                    weight="bold",
-                    ha="left",
-                    va="top",
-                    zorder=5,
-                )
-                window_pct = ((float(y[-1]) / float(y[x_mark])) - 1.0) * 100.0 if float(y[x_mark]) else 0.0
-                ax.text(
-                    x_mark + (max(x) - x_mark) * 0.04,
-                    y_label_pos - (y_span * 0.08),
-                    f"+{window_pct:.2f}% window" if window_pct >= 0 else f"{window_pct:.2f}% window",
-                    color=MUTED,
-                    fontsize=7.8,
-                    ha="left",
-                    va="top",
-                    zorder=5,
-                )
+                event_window_pct = ((float(y[-1]) / float(y[x_mark])) - 1.0) * 100.0 if float(y[x_mark]) else 0.0
                 break
 
         change_pct = ((float(y[-1]) / float(y[0])) - 1.0) * 100.0 if y[0] else 0.0
@@ -826,6 +864,24 @@ class ChartRenderer:
             ylabel="Price",
             grid_axis="y",
             lock_x_ticks=True,
+        )
+        summary_lines = [
+            f"Event: {event_label or 'latest catalyst'}",
+            f"Full-period move: {change_pct:+.2f}%",
+        ]
+        if event_window_pct is not None:
+            summary_lines.append(f"Event-window move: {event_window_pct:+.2f}%")
+        ax.text(
+            0.99,
+            0.98,
+            "\n".join(summary_lines),
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=8.0,
+            color=TEXT,
+            bbox={"facecolor": SUBTLE, "edgecolor": GRID, "linewidth": 0.6, "pad": 2.2},
+            zorder=6,
         )
         fig.subplots_adjust(left=0.10, right=0.95, top=0.94, bottom=0.18)
         return self._to_asset(

@@ -11,12 +11,13 @@ from app.briefing.morning_charts import build_morning_chart_bundle, validate_cha
 from app.briefing.trust_contract import (
     active_index_quotes,
     chart_copy_is_distinct,
+    distinct_lines,
     resolve_canonical_prices,
     run_pre_send_lints,
 )
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MarketSetup, MorningBriefing
-from app.schemas.events import NormalisedEvent, PricePoint
+from app.schemas.events import MacroDataPoint, NormalisedEvent, PricePoint, QuoteData
 from app.settings import Settings
 
 
@@ -130,6 +131,53 @@ def test_chart_copy_triplet_is_distinct_and_outlook_safe():
     )
     assert chart_copy_is_distinct(read, why, lens)
     assert read and why and lens
+
+
+def test_distinct_lines_preserves_display_casing_units_and_punctuation():
+    read, why, lens = distinct_lines(
+        "Nasdaq Composite (COMP) leads CAC 40 by 1.9 rebased points over the 5D window.",
+        "Why this matters: 6/11 tracked benchmarks are positive, so breadth is split.",
+        "Portfolio lens: Portfolio contribution is +0.10% and 1D 95% VaR is 1.84%.",
+    )
+    assert "Nasdaq Composite (COMP)" in read
+    assert "1.9" in read
+    assert "5D" in read
+    assert "6/11" in why
+    assert "+0.10%" in lens
+    assert "1.84%" in lens
+
+
+def test_lints_flag_rates_conflict_and_proxy_scaled_index_level():
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 5, 4, 8, 0, tzinfo=timezone.utc),
+        market_setup=MarketSetup(
+            index_quotes=[
+                QuoteData(symbol="SPY", display_name="S&P 500 (SPX)", current_price=720.0, change=1.2, change_percent=0.17),
+            ],
+            treasury_10y=MacroDataPoint(series_id="DGS10", name="US 10Y Treasury Yield", value=4.40, change=-0.02),
+        ),
+        macro_context=[
+            MacroDataPoint(series_id="DGS10", name="US 10Y Treasury Yield", value=4.39, change=0.02),
+        ],
+    )
+    warnings = run_pre_send_lints(briefing, timezone_name="Europe/Madrid")
+    assert any("Index level integrity" in warning for warning in warnings)
+    assert any("Rates direction conflict" in warning for warning in warnings)
+
+
+def test_canonical_price_resolver_does_not_overwrite_spx_with_spy_proxy():
+    briefing = MorningBriefing(
+        market_setup=MarketSetup(
+            index_quotes=[
+                QuoteData(symbol="^GSPC", display_name="S&P 500 (SPX)", current_price=7230.12, change=21.11, change_percent=0.29),
+            ],
+        ),
+        watchlist_quotes=[
+            QuoteData(symbol="SPY", display_name="SPDR S&P 500 ETF", current_price=720.65, change=1.99, change_percent=0.28),
+        ],
+    )
+    resolve_canonical_prices(briefing)
+    assert briefing.market_setup.index_quotes[0].current_price == 7230.12
 
 
 def test_llm_payload_is_prose_only_contract():

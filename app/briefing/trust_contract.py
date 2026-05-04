@@ -134,19 +134,27 @@ def run_pre_send_lints(
     warnings.extend(_lint_geo_label_conflict(briefing))
     warnings.extend(_lint_ticker_company_mismatch(briefing))
     warnings.extend(_lint_closed_market_breadth(briefing, timezone_name=timezone_name))
+    warnings.extend(_lint_index_level_integrity(briefing))
+    warnings.extend(_lint_rates_direction_conflict(briefing))
     return warnings
 
 
 def distinct_lines(read_line: str, why_line: str, lens_line: str) -> tuple[str, str, str]:
     """Ensure READ/WHY/LENS are not duplicates after normalization."""
-    read = _normalize_sentence(read_line)
-    why = _normalize_sentence(why_line)
-    lens = _normalize_sentence(lens_line)
-    if _is_duplicate(read, why):
-        why = "Why it matters: the signal matters only if it confirms across regions and cross-asset context."
-    if _is_duplicate(read, lens) or _is_duplicate(why, lens):
-        lens = "Portfolio lens: map the move to exposure concentration and monitor whether leadership broadens."
-    return read, why, lens
+    read_display = re.sub(r"\s+", " ", (read_line or "").strip())
+    why_display = re.sub(r"\s+", " ", (why_line or "").strip())
+    lens_display = re.sub(r"\s+", " ", (lens_line or "").strip())
+
+    read_norm = _normalize_sentence(read_display)
+    why_norm = _normalize_sentence(why_display)
+    lens_norm = _normalize_sentence(lens_display)
+
+    if _is_duplicate(read_norm, why_norm):
+        why_display = "This matters only if follow-through is confirmed across breadth and cross-asset context."
+        why_norm = _normalize_sentence(why_display)
+    if _is_duplicate(read_norm, lens_norm) or _is_duplicate(why_norm, lens_norm):
+        lens_display = "Map this move to concentration and macro sensitivity before changing risk posture."
+    return read_display, why_display, lens_display
 
 
 def chart_copy_is_distinct(read_line: str, why_line: str, lens_line: str) -> bool:
@@ -235,14 +243,16 @@ def _asset_key_from_quote(quote: QuoteData) -> str:
         return "US10Y"
     if "2Y" in key_text and "YIELD" in key_text:
         return "US2Y"
-    if sym in {"SPY", "SPX", "^GSPC"} or "S&P 500" in name:
+    if sym in {"SPX", "^GSPC"} or ("S&P 500" in name and sym.startswith("^")):
         return "SPX"
-    if sym in {"COMP", "^IXIC", "QQQ"} or "NASDAQ" in name:
+    if sym in {"COMP", "^IXIC"} or ("NASDAQ COMPOSITE" in name and sym.startswith("^")):
         return "COMP"
-    if sym in {"DJIA", "^DJI", "DIA"} or "DOW" in name:
+    if sym in {"DJIA", "^DJI"} or ("DOW JONES" in name and sym.startswith("^")):
         return "DJIA"
-    if sym in {"RUT", "^RUT", "IWM"} or "RUSSELL" in name:
+    if sym in {"RUT", "^RUT"} or ("RUSSELL 2000" in name and sym.startswith("^")):
         return "RUT"
+    if sym in {"SPY", "QQQ", "DIA", "IWM"}:
+        return sym
     if sym in {"^FTSE", "FTSE", "UKX"} or "FTSE" in name:
         return "FTSE"
     if sym in {"^STOXX50E", "SX5E"} or "STOXX" in name:
@@ -313,6 +323,18 @@ def _apply_canonical_to_briefing(briefing: MorningBriefing, canonical: dict[str,
             point.value = float(canon.get("value") or point.value)
             point.change = float(canon.get("change") or 0.0)
             point.change_percent = float(canon.get("change_percent") or 0.0)
+    if briefing.market_setup.treasury_10y:
+        canon = canonical.get("US10Y")
+        if canon is not None:
+            briefing.market_setup.treasury_10y.value = float(canon.get("value") or briefing.market_setup.treasury_10y.value)
+            briefing.market_setup.treasury_10y.change = float(canon.get("change") or 0.0)
+            briefing.market_setup.treasury_10y.change_percent = float(canon.get("change_percent") or 0.0)
+    if briefing.market_setup.treasury_2y:
+        canon = canonical.get("US2Y")
+        if canon is not None:
+            briefing.market_setup.treasury_2y.value = float(canon.get("value") or briefing.market_setup.treasury_2y.value)
+            briefing.market_setup.treasury_2y.change = float(canon.get("change") or 0.0)
+            briefing.market_setup.treasury_2y.change_percent = float(canon.get("change_percent") or 0.0)
 
 
 def _apply_canonical_to_quote(quote: QuoteData, canonical: dict[str, dict]) -> None:
@@ -462,6 +484,65 @@ def _lint_closed_market_breadth(briefing: MorningBriefing, *, timezone_name: str
         if total != active_count:
             warnings.append(
                 f"Closed market breadth mismatch: narrative total={total}, active_total={active_count}, closed={','.join(closed_symbols)}."
+            )
+    return warnings
+
+
+def _lint_index_level_integrity(briefing: MorningBriefing) -> list[str]:
+    """Flag likely proxy/scaled values shown under canonical index labels."""
+    warnings: list[str] = []
+    thresholds = {
+        "SPX": 1000.0,
+        "COMP": 2000.0,
+        "DJIA": 5000.0,
+        "RUT": 500.0,
+        "FTSE": 1000.0,
+        "STOXX50": 500.0,
+        "NIKKEI225": 5000.0,
+        "HANGSENG": 1000.0,
+    }
+    for quote in briefing.market_setup.index_quotes:
+        key = _asset_key_from_quote(quote)
+        sym = (quote.symbol or "").upper()
+        label = (quote.display_name or "").upper()
+        if sym in {"SPY", "IVV", "VOO"} and ("S&P 500" in label or "SPX" in label):
+            warnings.append(f"Index level integrity: {quote.display_name or quote.symbol} is using ETF proxy symbol {sym}.")
+        if sym in {"QQQ", "ONEQ"} and ("NASDAQ" in label or "COMP" in label):
+            warnings.append(f"Index level integrity: {quote.display_name or quote.symbol} is using ETF proxy symbol {sym}.")
+        if sym in {"DIA"} and ("DOW" in label or "DJIA" in label):
+            warnings.append(f"Index level integrity: {quote.display_name or quote.symbol} is using ETF proxy symbol {sym}.")
+        if sym in {"IWM"} and ("RUSSELL" in label or "RUT" in label):
+            warnings.append(f"Index level integrity: {quote.display_name or quote.symbol} is using ETF proxy symbol {sym}.")
+        if key not in thresholds:
+            continue
+        value = float(quote.current_price or 0.0)
+        if value <= 0:
+            continue
+        if value < thresholds[key]:
+            warnings.append(
+                f"Index level integrity: {quote.display_name or quote.symbol}={value:.2f} appears proxy/scaled."
+            )
+    return warnings
+
+
+def _lint_rates_direction_conflict(briefing: MorningBriefing) -> list[str]:
+    """Catch contradictory directions between setup treasury lines and macro context."""
+    warnings: list[str] = []
+    macro_map = {(_asset_key_from_macro(point)): point for point in briefing.macro_context}
+
+    if briefing.market_setup.treasury_10y and "US10Y" in macro_map:
+        setup = float(briefing.market_setup.treasury_10y.change or 0.0)
+        macro = float(macro_map["US10Y"].change or 0.0)
+        if setup * macro < 0 and abs(setup - macro) > 1e-6:
+            warnings.append(
+                f"Rates direction conflict: US10Y setup_change={setup:+.4f}, macro_change={macro:+.4f}."
+            )
+    if briefing.market_setup.treasury_2y and "US2Y" in macro_map:
+        setup = float(briefing.market_setup.treasury_2y.change or 0.0)
+        macro = float(macro_map["US2Y"].change or 0.0)
+        if setup * macro < 0 and abs(setup - macro) > 1e-6:
+            warnings.append(
+                f"Rates direction conflict: US2Y setup_change={setup:+.4f}, macro_change={macro:+.4f}."
             )
     return warnings
 

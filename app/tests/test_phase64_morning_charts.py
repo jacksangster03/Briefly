@@ -201,6 +201,7 @@ def test_chart_renderer_global_shows_full_x_axis_labels_and_avoids_clipped_text(
         ax = fig.axes[0]
         labels = [tick.get_text() for tick in ax.get_xticklabels()]
         captured["labels"] = labels
+        captured["texts"] = [text.get_text() for text in ax.texts]
         # Ensure text artists are within figure canvas bounds.
         renderer = fig.canvas.get_renderer()
         fw, fh = fig.canvas.get_width_height()
@@ -227,6 +228,10 @@ def test_chart_renderer_global_shows_full_x_axis_labels_and_avoids_clipped_text(
     assert asset is not None
     assert any(label == "Today" for label in captured["labels"])
     assert len([label for label in captured["labels"] if label]) >= 5
+    joined = " | ".join(captured["texts"])
+    assert "Nasdaq" in joined or "NASDAQ" in joined
+    endpoint_labels = [text for text in captured["texts"] if "%" in text and "(" in text]
+    assert len(endpoint_labels) >= 2
 
 
 def test_chart_renderer_breadth_separates_breadth_pct_from_factor_axis(monkeypatch):
@@ -295,6 +300,38 @@ def test_chart_renderer_cross_asset_uses_normalized_axis_and_no_in_chart_title(m
     assert asset is not None
     assert "Normalized impulse score" in captured["xlabel"]
     assert captured["title"] == ""
+
+
+def test_chart_renderer_event_annotation_uses_explicit_non_overlapping_summary(monkeypatch):
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=_sample_briefing(),
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+    )
+    spec = next(item for item in selected_chart_specs(bundle) if item.get("chart_key") == "event_linked_annotated_trend")
+    captured: dict = {}
+
+    def _capture(self, fig, *, key: str, title: str, caption: str, filename: str):
+        ax = fig.axes[0]
+        captured["texts"] = [text.get_text() for text in ax.texts]
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        return ChartAsset(
+            key=key,
+            title=title,
+            caption=caption,
+            filename=filename,
+            content_type="image/png",
+            content_id="test-cid",
+            content=buf.getvalue(),
+        )
+
+    monkeypatch.setattr(ChartRenderer, "_to_asset", _capture, raising=False)
+    asset = ChartRenderer().render_event_linked_from_spec(spec)
+    assert asset is not None
+    text_block = "\n".join(captured["texts"])
+    assert "Event:" in text_block
+    assert "Full-period move:" in text_block
 
 
 def test_briefing_morning_charts_route_renders_preview(monkeypatch, validation_test_settings):

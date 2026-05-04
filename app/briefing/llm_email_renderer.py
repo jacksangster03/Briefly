@@ -495,44 +495,44 @@ class LLMEmailRenderer:
             else "This note prioritizes the most material developments from the deterministic morning selection."
         )
         parts = [
-            "<html><body style=\"margin:0;padding:0;background:#eef3f8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#102a43;\">",
-            "<div style=\"max-width:820px;margin:0 auto;padding:24px;\">",
-            "<div style=\"background:#0f172a;color:#f8fafc;border-radius:18px;padding:24px 28px;\">",
-            f"<div style=\"font-size:28px;font-weight:700;line-height:1.2;\">{html.escape(subject)}</div>",
-            f"<div style=\"margin-top:10px;font-size:15px;line-height:1.6;color:#dbeafe;\">{html.escape(lead)}</div>",
+            "<html><body style=\"margin:0;padding:0;background:#030A12;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#EAF2FF;\">",
+            "<div style=\"max-width:820px;margin:0 auto;padding:16px 14px;background:#06111F;\">",
+            "<div style=\"background:#071423;color:#EAF2FF;padding:18px 20px;border-top:3px solid #FF7A00;\">",
+            f"<div style=\"font-size:24px;font-weight:800;line-height:1.2;\">{html.escape(subject)}</div>",
+            f"<div style=\"margin-top:8px;font-size:14px;line-height:1.45;color:#A9B8C8;\">{html.escape(lead)}</div>",
             "</div>",
         ]
 
         if inline_assets:
-            parts.append("<div style=\"margin-top:18px;display:grid;gap:18px;\">")
+            parts.append("<div style=\"margin-top:12px;\">")
             for asset in inline_assets:
                 parts.append(
-                    "<div style=\"background:#ffffff;border:1px solid #d8e2ed;border-radius:18px;padding:18px;\">"
-                    f"<div style=\"font-size:18px;font-weight:700;color:#102a43;margin-bottom:8px;\">{html.escape(asset.title)}</div>"
+                    "<div style=\"background:#03101D;border:1px solid #153047;padding:14px 14px 12px 14px;margin-bottom:10px;\">"
+                    f"<div style=\"font-size:15px;font-weight:800;color:#EAF2FF;margin-bottom:7px;\">{html.escape(asset.title)}</div>"
                     f"<img src=\"cid:{html.escape(asset.content_id)}\" alt=\"{html.escape(asset.title)}\" "
-                    "style=\"display:block;width:100%;max-width:760px;border-radius:14px;\">"
-                    f"<div style=\"margin-top:10px;font-size:13px;line-height:1.5;color:#486581;\">{html.escape(asset.caption)}</div>"
+                    "style=\"display:block;width:100%;max-width:760px;height:auto;\">"
+                    f"<div style=\"margin-top:8px;font-size:12px;line-height:1.4;color:#A9B8C8;\">{html.escape(asset.caption)}</div>"
                     "</div>"
                 )
             parts.append("</div>")
 
-        parts.append("<div style=\"margin-top:18px;background:#ffffff;border:1px solid #d8e2ed;border-radius:18px;padding:20px 22px;\">")
+        parts.append("<div style=\"margin-top:12px;background:#071423;border:1px solid #153047;padding:14px 16px;\">")
         for paragraph in [chunk.strip() for chunk in body.split("\n\n") if chunk.strip()]:
             lines = "<br>".join(html.escape(line.strip()) for line in paragraph.splitlines() if line.strip())
             if not lines:
                 continue
             parts.append(
-                "<p style=\"margin:0 0 14px 0;font-size:15px;line-height:1.65;color:#334e68;\">"
+                "<p style=\"margin:0 0 10px 0;font-size:13px;line-height:1.4;color:#EAF2FF;\">"
                 f"{lines}</p>"
             )
         if source_urls:
-            parts.append("<div style=\"margin-top:10px;font-size:13px;color:#486581;font-weight:600;\">Sources</div>")
+            parts.append("<div style=\"margin-top:10px;font-size:12px;color:#A9B8C8;font-weight:700;\">Sources</div>")
             parts.append("<ul style=\"margin:6px 0 0 18px;padding:0;\">")
             for url in source_urls:
                 safe = html.escape(url)
                 parts.append(
-                    "<li style=\"margin:0 0 6px 0;font-size:13px;line-height:1.5;\">"
-                    f"<a href=\"{safe}\" style=\"color:#0b7285;text-decoration:none;\">{safe}</a>"
+                    "<li style=\"margin:0 0 6px 0;font-size:12px;line-height:1.4;\">"
+                    f"<a href=\"{safe}\" style=\"color:#6FA8E8;text-decoration:none;\">{safe}</a>"
                     "</li>"
                 )
             parts.append("</ul>")
@@ -642,7 +642,7 @@ class LLMEmailRenderer:
 
     def _format_market_lines(self, index_quotes: list[QuoteData], macro_quotes: list[QuoteData]) -> list[str]:
         lines: list[str] = []
-        for quote in (index_quotes[:4] + macro_quotes[:4]):
+        for quote in (index_quotes[:12] + macro_quotes[:8]):
             sign = "+" if quote.change_percent >= 0 else ""
             lines.append(
                 f"{quote.display_name or quote.symbol}: {quote.current_price:.2f} ({sign}{quote.change_percent:.2f}%)"
@@ -727,11 +727,28 @@ class LLMEmailRenderer:
         if numeric_value is None:
             return False
         # Permit 4.29 <-> 4.29% style swaps for yield/rate-scale values only.
-        if abs(numeric_value) > 20:
-            return False
         if token.endswith("%"):
-            return token[:-1] in allowed_tokens
-        return f"{token}%" in allowed_tokens
+            alt = token[:-1]
+            if alt in allowed_tokens:
+                return True
+        else:
+            alt = f"{token}%"
+            if alt in allowed_tokens:
+                return True
+
+        # Accept rounded deterministic values (e.g. 17.74 -> 17.7).
+        # Keep this narrow to avoid admitting invented numbers.
+        for allowed in allowed_tokens:
+            allowed_value = self._coerce_numeric_value(allowed)
+            if allowed_value is None:
+                continue
+            if (allowed.endswith("%") != token.endswith("%")) and abs(numeric_value) > 30:
+                # Only allow percent/no-percent swaps for rate-scale numbers.
+                continue
+            tolerance = 0.05 if abs(allowed_value) < 1 else 0.10 if abs(allowed_value) < 10 else 0.25
+            if abs(numeric_value - allowed_value) <= tolerance:
+                return True
+        return False
 
     @staticmethod
     def _extract_explicit_tickers(text: str) -> set[str]:

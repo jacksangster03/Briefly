@@ -259,6 +259,21 @@ def test_validate_candidate_accepts_safe_percent_equivalent_numeric():
     assert not any("Unknown numeric tokens" in error for error in errors)
 
 
+def test_validate_candidate_accepts_rounded_numeric_token_within_tolerance():
+    renderer = LLMEmailRenderer(Settings(enable_llm_email_render=True, openai_api_key="test-key"))
+    briefing, events = _sample_briefing()
+    briefing.market_setup.index_quotes[0].display_name = "VIX"
+    briefing.market_setup.index_quotes[0].current_price = 17.74
+    payload = renderer._build_payload(briefing, events)
+    candidate = {
+        "subject": "Weekend Briefing",
+        "body": "VIX held near 17.7 while TSLA remained in focus.",
+        "source_urls": ["https://example.com/tesla-demand-reset"],
+    }
+    errors, _ = renderer._validate_candidate(candidate, payload)
+    assert not any("Unknown numeric tokens" in error for error in errors)
+
+
 def test_build_payload_allows_title_and_exchange_ticker_mentions():
     renderer = LLMEmailRenderer(Settings(enable_llm_email_render=True, openai_api_key="test-key"))
     briefing, _ = _sample_briefing()

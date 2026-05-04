@@ -139,3 +139,12 @@ class TestHeadlineHygiene:
             event_type="macro_release",
         )
         assert classify_section_fit(evt) == "global_macro_geo"
+
+    def test_section_fit_company_ipo_not_forced_into_global_macro(self):
+        evt = NormalisedEvent(
+            title="Blackstone Data Center REIT seeks to raise $1.75B in IPO",
+            summary="Company-level fundraising update for AI infrastructure capacity.",
+            event_type="ipo",
+            tickers=["BX"],
+        )
+        assert classify_section_fit(evt) == "portfolio_watchlist"
