@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field
+import yaml
 
 from app.cadence.state_store import has_cadence_marker
 from app.cadence.us_market_calendar import session_for_ny_date
@@ -117,6 +119,7 @@ class DecisionEngine:
         self.settings = settings
         self.profile_name = profile_name
         self.cadence = CadenceEngine(settings, local_timezone=local_timezone)
+        self._intraday_config = self._load_intraday_config()
 
     def decide_morning(
         self,
@@ -153,29 +156,77 @@ class DecisionEngine:
 
     def decide_intraday(self, now: datetime | None = None) -> CadenceDecision:
         local_now = self.cadence.now_local(now)
-        local_date = local_now.date()
-        marker_key = f"intraday:{local_date.isoformat()}"
-        if has_cadence_marker(self.profile_name, marker_key):
-            return _decision("no_action", "Intraday already sent today", local_now)
-
         window = self.cadence.intraday_preopen_window(local_now)
         if not window.is_market_open_day:
             suffix = " (half day)" if window.is_half_day else ""
             return _decision("no_action", f"US market closed ({window.reason}){suffix}", local_now)
-        if local_now < window.preopen_start_local:
-            return _decision("no_action", "Before US pre-open local window", local_now)
-        if local_now > window.preopen_end_local:
-            return _decision("no_action", "US pre-open window passed; skip today", local_now)
+
+        start_hhmm = str(self._intraday_config.get("start", "14:30"))
+        end_hhmm = str(self._intraday_config.get("end", "21:30"))
+        interval_minutes = max(1, int(self._intraday_config.get("interval_minutes", 60)))
+        check_interval_minutes = max(1, int(self._intraday_config.get("check_interval_minutes", 2)))
+        start_dt = _combine_local(local_now.date(), start_hhmm, self.cadence.local_tz)
+        end_dt = _combine_local(local_now.date(), end_hhmm, self.cadence.local_tz)
+        if local_now < start_dt:
+            return _decision("no_action", "Before intraday schedule window", local_now)
+        if local_now > end_dt:
+            return _decision("no_action", "Intraday schedule window passed", local_now)
+
+        slot_dt = self._active_intraday_slot(
+            now_local=local_now,
+            start_local=start_dt,
+            end_local=end_dt,
+            interval_minutes=interval_minutes,
+            check_interval_minutes=check_interval_minutes,
+        )
+        if slot_dt is None:
+            return _decision("no_action", "Between intraday schedule slots", local_now)
+
+        marker_key = f"intraday:{slot_dt.date().isoformat()}:{slot_dt.strftime('%H%M')}"
+        if has_cadence_marker(self.profile_name, marker_key):
+            return _decision("no_action", "Intraday slot already sent", local_now)
 
         return _decision(
             "send_intraday",
-            "Inside local US pre-open window and unsent today",
+            "Inside configured intraday slot and unsent for this slot",
             local_now,
             metadata={
                 "marker_key": marker_key,
-                "us_cash_open_local": window.us_cash_open_local.isoformat(),
+                "slot_time_local": slot_dt.isoformat(),
+                "schedule_window": f"{start_hhmm}-{end_hhmm}/{interval_minutes}m",
             },
         )
+
+    def _active_intraday_slot(
+        self,
+        *,
+        now_local: datetime,
+        start_local: datetime,
+        end_local: datetime,
+        interval_minutes: int,
+        check_interval_minutes: int,
+    ) -> datetime | None:
+        if now_local < start_local or now_local > end_local:
+            return None
+        elapsed = int((now_local - start_local).total_seconds() // 60)
+        slot_index = elapsed // interval_minutes
+        slot = start_local + timedelta(minutes=slot_index * interval_minutes)
+        if slot > end_local:
+            return None
+        if now_local >= slot + timedelta(minutes=check_interval_minutes):
+            return None
+        return slot
+
+    def _load_intraday_config(self) -> dict:
+        path = Path(self.settings.configs_dir) / "schedules.yaml"
+        if not path.exists():
+            return {}
+        try:
+            with open(path) as f:
+                data = yaml.safe_load(f) or {}
+            return dict(data.get("hourly_intraday", {}) or {})
+        except Exception:
+            return {}
 
     def decide_breaking(
         self,

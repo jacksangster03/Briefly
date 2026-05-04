@@ -55,26 +55,38 @@ def test_intraday_decision_skips_us_holiday(isolated_db):
     assert "US market closed" in decision.reason
 
 
-def test_intraday_decision_sends_once_in_local_preopen_window(isolated_db):
+def test_intraday_decision_sends_once_per_intraday_slot(isolated_db):
     settings = Settings(timezone="Europe/Madrid")
     decision_engine = DecisionEngine(settings, profile_name="default_user", local_timezone="Europe/Madrid")
-    base_now = datetime(2026, 4, 13, 10, 0, tzinfo=timezone.utc)  # trading day
-    window = decision_engine.cadence.intraday_preopen_window(base_now)
-    now = window.preopen_start_local + timedelta(minutes=5)
+    # 2026-04-13 12:31 UTC => 14:31 local, inside first configured slot window
+    now = datetime(2026, 4, 13, 12, 31, tzinfo=timezone.utc)
     decision = decision_engine.decide_intraday(now=now)
     assert decision.action_type == "send_intraday"
+    marker_key = decision.metadata.get("marker_key")
+    assert marker_key
+    assert marker_key.startswith("intraday:2026-04-13:")
 
     record_cadence_marker(
         profile_name="default_user",
-        marker_key=f"intraday:{now.date().isoformat()}",
+        marker_key=marker_key,
         action_type="intraday",
-        local_date=now.date(),
+        local_date=decision_engine.cadence.now_local(now).date(),
         local_timezone="Europe/Madrid",
-        sent_at_local=now,
+        sent_at_local=decision_engine.cadence.now_local(now),
     )
-    second = decision_engine.decide_intraday(now=now + timedelta(minutes=1))
+    second = decision_engine.decide_intraday(now=now + timedelta(seconds=30))
     assert second.action_type == "no_action"
-    assert "already sent today" in second.reason.lower()
+    assert "slot already sent" in second.reason.lower()
+
+
+def test_intraday_decision_between_slots_is_no_action(isolated_db):
+    settings = Settings(timezone="Europe/Madrid")
+    decision_engine = DecisionEngine(settings, profile_name="default_user", local_timezone="Europe/Madrid")
+    # 14:40 local is outside the 2-minute slot capture window when start=14:30 interval=60
+    now = datetime(2026, 4, 13, 12, 40, tzinfo=timezone.utc)
+    decision = decision_engine.decide_intraday(now=now)
+    assert decision.action_type == "no_action"
+    assert "between intraday schedule slots" in decision.reason.lower()
 
 
 def test_morning_decision_respects_marker(isolated_db):

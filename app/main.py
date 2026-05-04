@@ -736,9 +736,14 @@ def run_intraday_update(settings: Settings | None = None, *, respect_cadence: bo
 
     if respect_cadence and delivered_ok and not settings.dry_run:
         local_now = decision_engine.cadence.now_local()
+        marker_key = (
+            (intraday_decision.metadata or {}).get("marker_key")
+            if respect_cadence
+            else None
+        ) or f"intraday:{local_now.date().isoformat()}"
         record_cadence_marker(
             profile_name=profile.name,
-            marker_key=f"intraday:{local_now.date().isoformat()}",
+            marker_key=str(marker_key),
             action_type="intraday",
             local_date=local_now.date(),
             local_timezone=profile.timezone or settings.timezone,
