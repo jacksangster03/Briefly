@@ -67,8 +67,12 @@ class TelegramFormatter:
             header = SECTION_HEADERS["weekend_title_sunday"]
         else:
             header = SECTION_HEADERS["morning_title"]
+        tldr = briefing.dominant_tape_driver or briefing.market_setup_analysis or ""
+        if tldr:
+            tldr = tldr[:130] + ("…" if len(tldr) > 130 else "")
         sections.append(
             f"<b>{header}</b>\n{date_str}"
+            + (f"\n<i>{tldr}</i>" if tldr else "")
         )
 
         # Market setup
@@ -80,6 +84,11 @@ class TelegramFormatter:
         macro = self._format_macro(briefing.macro_context)
         if macro:
             sections.append(macro)
+
+        # Commodity strip
+        commodities = self._format_commodity_strip(briefing.commodity_strip)
+        if commodities:
+            sections.append(commodities)
 
         regional = self._format_regional_lens(briefing.regional_lens, briefing.regional_skew_summary)
         if regional:
@@ -286,12 +295,13 @@ class TelegramFormatter:
         if setup.treasury_2y:
             chg = f" ({format_change(setup.treasury_2y.change or 0, 0)})" if setup.treasury_2y.change else ""
             lines.append(f"US 2Y: {setup.treasury_2y.value:.3f}%{chg}")
-        if briefing.dominant_tape_driver:
-            lines.append("")
-            lines.append(f"<i>Dominant driver:</i> {briefing.dominant_tape_driver}")
-        if briefing.market_setup_analysis:
-            lines.append("")
-            lines.append(f"<i>Setup read:</i> {briefing.market_setup_analysis}")
+
+        # Sector breadth (up/down count from SPDR ETFs)
+        breadth_rows = briefing.market_setup.market_breadth
+        if breadth_rows:
+            up = sum(1 for b in breadth_rows if float(b.change_percent or 0) > 0)
+            dn = len(breadth_rows) - up
+            lines.append(f"Sectors: {up}↑ {dn}↓")
 
         return "\n".join(lines) if len(lines) > 1 else ""
 
@@ -306,6 +316,23 @@ class TelegramFormatter:
                 sign = "+" if m.change >= 0 else ""
                 chg = f" ({sign}{m.change:.4f})"
             lines.append(f"{m.name}: {val}{chg}")
+        return "\n".join(lines)
+
+    def _format_commodity_strip(self, strip: list[MacroDataPoint]) -> str:
+        if not strip:
+            return ""
+        _ARROWS = {True: "↑", False: "↓"}
+        lines = ["<b>COMMODITIES</b>"]
+        for m in strip:
+            chg_pct = m.change_percent
+            if chg_pct is not None:
+                arrow = _ARROWS[chg_pct >= 0]
+                pct_str = f" {arrow}{abs(chg_pct):.2f}%"
+            else:
+                pct_str = ""
+            val = f"{m.value:,.2f}"
+            name = (m.name or m.series_id).replace(" (USD/bbl)", "").replace(" (USD/troy oz)", "").replace(" (USD/MMBtu)", "")
+            lines.append(f"{name}: {val}{pct_str}")
         return "\n".join(lines)
 
     def _format_themes(self, themes: list[NormalisedEvent]) -> str:
@@ -329,6 +356,23 @@ class TelegramFormatter:
                 lines.append(f"   <i>{' | '.join(meta)}</i>")
         return "\n".join(lines)
 
+    _REGION_FLAGS: dict[str, str] = {
+        "us": "🇺🇸", "united states": "🇺🇸", "north america": "🇺🇸",
+        "europe": "🇪🇺", "eu": "🇪🇺", "euro area": "🇪🇺", "eurozone": "🇪🇺",
+        "uk": "🇬🇧", "united kingdom": "🇬🇧",
+        "asia": "🌏", "apac": "🌏", "asia-pacific": "🌏",
+        "china": "🇨🇳",
+        "japan": "🇯🇵",
+        "india": "🇮🇳",
+        "middle east": "🌍", "mena": "🌍",
+        "latam": "🌎", "latin america": "🌎",
+        "russia": "🇷🇺",
+        "emerging markets": "🌐", "em": "🌐",
+    }
+
+    def _region_flag(self, region: str) -> str:
+        return self._REGION_FLAGS.get(region.lower().strip(), "")
+
     def _format_regional_lens(self, rows: list[dict[str, str]], skew_summary: str) -> str:
         if not rows and not skew_summary:
             return ""
@@ -336,9 +380,12 @@ class TelegramFormatter:
         if skew_summary:
             lines.append(skew_summary)
         for row in rows[:7]:
+            region = row.get("region", "Region")
+            flag = self._region_flag(region)
+            prefix = f"{flag} " if flag else ""
             lines.append(
-                f"- <b>{row.get('region', 'Region')}</b>: {row.get('direction', 'mixed')} "
-                f"({row.get('status', 'monitor')}) · Driver: {row.get('driver', 'mixed macro')} · "
+                f"- {prefix}<b>{region}</b>: {row.get('direction', 'mixed')} "
+                f"({row.get('status', 'monitor')}) · {row.get('driver', 'mixed macro')} · "
                 f"{row.get('implication', '')}"
             )
         return "\n".join(lines)
@@ -550,7 +597,20 @@ class TelegramFormatter:
         elif date_str:
             when = f"({date_str})"
 
-        est = f", est. ${e.eps_estimate:.2f}" if e.eps_estimate else ""
+        estimates: list[str] = []
+        if e.eps_estimate is not None:
+            estimates.append(f"EPS est. {e.eps_estimate:.2f}")
+        if e.revenue_estimate is not None:
+            rev = e.revenue_estimate
+            if rev >= 1_000_000_000:
+                estimates.append(f"Rev est. {rev/1_000_000_000:.1f}B")
+            elif rev >= 1_000_000:
+                estimates.append(f"Rev est. {rev/1_000_000:.0f}M")
+        if e.prior_quarter_surprise_pct is not None:
+            sign = "+" if e.prior_quarter_surprise_pct >= 0 else ""
+            beat = "beat" if e.prior_quarter_surprise_pct >= 0 else "miss"
+            estimates.append(f"prior: {sign}{e.prior_quarter_surprise_pct:.1f}% {beat}")
+        est_str = f" | {', '.join(estimates)}" if estimates else ""
 
         tag_source = relevance.get(sym) or e.relevance_tag
         tag = ""
@@ -564,7 +624,7 @@ class TelegramFormatter:
             parts.append(f" — {quarter}")
         if when:
             parts.append(f" {when}")
-        return f"{''.join(parts)}{est}{tag}".rstrip()
+        return f"{''.join(parts)}{est_str}{tag}".rstrip()
 
     def _format_watchlist(
         self,

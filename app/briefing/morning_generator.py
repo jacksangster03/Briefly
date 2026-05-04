@@ -28,7 +28,7 @@ from app.processing.article_quality import (
 )
 from app.processing.pipeline import is_actionable_event, process_event_stream
 from app.schemas.briefings import MarketSetup, MorningBriefing, session_mode_for
-from app.schemas.events import EarningsEvent, NormalisedEvent, SectorSnapshot
+from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, SectorSnapshot
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
 from app.universe.ticker_metadata import TICKER_DISPLAY_NAMES, company_name_for_ticker
@@ -367,6 +367,19 @@ class MorningBriefingGenerator:
         briefing.macro_context.extend(self.macro_svc.get_eurostat_snapshot())
         try:
             briefing.commodity_strip = self.macro_svc.get_commodity_strip()
+            gold_q = self.market_svc.get_quote("GC=F")
+            if gold_q and gold_q.current_price > 0:
+                prev = gold_q.previous_close or None
+                briefing.commodity_strip.insert(0, MacroDataPoint(
+                    series_id="GC=F",
+                    name="Gold (USD/troy oz)",
+                    value=round(gold_q.current_price, 2),
+                    previous_value=round(prev, 2) if prev else None,
+                    change=round(gold_q.change, 2) if gold_q.change is not None else None,
+                    change_percent=round(gold_q.change_percent, 4) if gold_q.change_percent is not None else None,
+                    date=gold_q.timestamp.strftime("%Y-%m-%d"),
+                    source="yfinance",
+                ))
         except Exception:
             briefing.commodity_strip = []
         ten_y, two_y = self.macro_svc.get_treasury_yields()

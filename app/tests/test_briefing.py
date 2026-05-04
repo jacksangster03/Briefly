@@ -66,7 +66,7 @@ class TestTelegramFormatter:
         assert len(messages) >= 1
         assert "MORNING BRIEFING" in messages[0]
         assert "S&P 500" in messages[0]
-        assert "Setup read:" in messages[0]
+        assert "risk-on" in messages[0]
         assert "Fed signals" in messages[0]
 
     def test_message_splitting(self):
@@ -287,7 +287,7 @@ class TestTelegramFormatter:
             eps_estimate=2.34,
         )
         line = self.formatter._format_earnings_line(e, {"AAPL": "portfolio"})
-        assert "est. $2.34" in line
+        assert "EPS est. 2.34" in line
         assert "[portfolio]" in line
 
     def test_earnings_section_is_empty_when_no_dated_events(self):

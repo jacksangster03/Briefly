@@ -179,6 +179,14 @@ class EmailFormatter:
             parts.append(self._chart_modules(briefing))
             parts.append("</td></tr>")
 
+        commodity_grid = self._commodity_grid_html(briefing)
+        if commodity_grid:
+            parts.append(commodity_grid)
+
+        breadth_row = self._breadth_row_html(briefing)
+        if breadth_row:
+            parts.append(breadth_row)
+
         parts.append(f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:0 16px 16px 16px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">")
         parts.append(self._brief_modules(full_html))
         parts.append("</td></tr>")
@@ -195,6 +203,70 @@ class EmailFormatter:
             for slug, label in _NAV_ITEMS
         )
         return f"<div style=\"line-height:1.5;\">{links}</div>"
+
+    def _commodity_grid_html(self, briefing: MorningBriefing) -> str:
+        strip = briefing.commodity_strip
+        if not strip:
+            return ""
+        cells = []
+        for m in strip:
+            chg_pct = m.change_percent
+            if chg_pct is not None:
+                color = "#00D4AA" if chg_pct >= 0 else "#FF6B6B"
+                sign = "+" if chg_pct >= 0 else ""
+                chg_html = f"<span style=\"color:{color};\">{sign}{chg_pct:.2f}%</span>"
+            else:
+                chg_html = ""
+            name = (m.name or m.series_id).replace(" (USD/bbl)", "").replace(" (USD/troy oz)", "").replace(" (USD/MMBtu)", "")
+            val = f"{m.value:,.2f}"
+            cells.append(
+                f"<td style=\"padding:3px 10px 3px 0;font-size:11px;color:#E8ECEF;white-space:nowrap;\">"
+                f"<span style=\"color:#9BA3AB;\">{html.escape(name)}</span>&nbsp;"
+                f"<strong>{html.escape(val)}</strong>&nbsp;{chg_html}</td>"
+            )
+        # Two columns
+        rows_html = ""
+        for i in range(0, len(cells), 2):
+            pair = cells[i:i+2]
+            rows_html += f"<tr>{''.join(pair)}</tr>"
+        return (
+            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:8px 16px;border-bottom:1px solid #1F3447;"
+            f"background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
+            f"<div style=\"font-size:10px;color:#9BA3AB;letter-spacing:0.05em;font-weight:700;"
+            f"margin-bottom:5px;\">COMMODITIES</div>"
+            f"<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\">{rows_html}</table>"
+            f"</td></tr>"
+        )
+
+    def _breadth_row_html(self, briefing: MorningBriefing) -> str:
+        rows = briefing.market_setup.market_breadth
+        if not rows:
+            return ""
+        up = sum(1 for b in rows if float(b.change_percent or 0) > 0)
+        dn = len(rows) - up
+        cells = []
+        for b in rows:
+            chg = float(b.change_percent or 0)
+            color = "#00D4AA" if chg >= 0 else "#FF6B6B"
+            sign = "+" if chg >= 0 else ""
+            cells.append(
+                f"<td style=\"padding:2px 8px 2px 0;font-size:10px;white-space:nowrap;\">"
+                f"<span style=\"color:#9BA3AB;\">{html.escape(b.display_name or b.symbol)}</span>&nbsp;"
+                f"<span style=\"color:{color};\">{sign}{chg:.1f}%</span></td>"
+            )
+        rows_html = ""
+        for i in range(0, len(cells), 4):
+            rows_html += f"<tr>{''.join(cells[i:i+4])}</tr>"
+        summary_color = "#00D4AA" if up >= dn else "#FF6B6B"
+        return (
+            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:8px 16px;border-bottom:1px solid #1F3447;"
+            f"background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
+            f"<div style=\"font-size:10px;color:#9BA3AB;letter-spacing:0.05em;font-weight:700;"
+            f"margin-bottom:5px;\">SECTOR BREADTH &nbsp;"
+            f"<span style=\"color:{summary_color};\">{up}↑ {dn}↓</span></div>"
+            f"<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\">{rows_html}</table>"
+            f"</td></tr>"
+        )
 
     def _chart_modules(self, briefing: MorningBriefing) -> str:
         roles = {row.get("chart_key"): row.get("role") for row in (briefing.morning_chart_selection or [])}
