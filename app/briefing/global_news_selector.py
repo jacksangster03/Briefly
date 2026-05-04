@@ -7,9 +7,11 @@ import re
 from typing import Callable
 
 from app.processing.article_quality import (
+    has_hard_catalyst,
     classify_article_type,
     classify_source_quality,
     is_low_quality_for_section,
+    is_clickbait_headline,
 )
 from app.schemas.events import NormalisedEvent
 
@@ -249,6 +251,13 @@ def is_global_market_news_worthy(
     )
 
     if is_low_quality_for_section(article_type, source_quality) and not has_catalyst:
+        return False, 0.0, has_catalyst
+
+    # Keep generic ETF/listicle content out of Global Macro/Geo unless
+    # backed by a hard market catalyst.
+    if is_clickbait_headline(event.title) and not has_hard_catalyst(event.event_type, event.title, event.summary):
+        return False, 0.0, has_catalyst
+    if "etf" in title_lower and not has_hard_catalyst(event.event_type, event.title, event.summary):
         return False, 0.0, has_catalyst
 
     if any(pattern in text_lower for pattern in GLOBAL_HARD_BLOCK_PATTERNS) and not has_catalyst:

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+from app.schemas.events import NormalisedEvent
+
 # ----- Source quality buckets ------------------------------------------------
 
 TIER1_WIRE_NAMES = (
@@ -56,6 +58,47 @@ BLOG_LIKE_NAMES = (
     "stocktwits",
 )
 
+# Institutional taxonomy used by deterministic section routing + hygiene.
+# Tier 1: top wire / official primary sources.
+# Tier 2: recognised market outlets.
+# Tier 3: aggregators/opinion-heavy finance outlets.
+# Tier 4: SEO/listicle/low-signal or unknown quality.
+TIER1_EXTRA_NAMES = (
+    "ft",
+    "wsj",
+    "central bank",
+    "federal reserve",
+    "ecb",
+    "bank of england",
+    "bank of japan",
+    "u.s. treasury",
+    "sec",
+    "investor relations",
+)
+
+TIER2_NAMES = (
+    "cnbc",
+    "marketwatch",
+    "barron's",
+    "barrons",
+    "investing.com",
+    "economist",
+    "nikkei",
+    "financial post",
+)
+
+TIER3_NAMES = (
+    "seeking alpha",
+    "seekingalpha",
+    "motley fool",
+    "fool.com",
+    "benzinga",
+    "zacks",
+    "yahoo finance",
+    "investorplace",
+    "thestreet",
+)
+
 
 def classify_source_quality(source: str, source_name: str = "", url: str = "") -> str:
     """Return source tier: tier1_wire | tier1_press | sec_filing | tier2 | blog."""
@@ -70,6 +113,26 @@ def classify_source_quality(source: str, source_name: str = "", url: str = "") -
     if any(needle in haystack for needle in BLOG_LIKE_NAMES):
         return "blog"
     return "tier2"
+
+
+def classify_source_tier(source: str, source_name: str = "", url: str = "") -> tuple[int, str]:
+    """Return institutional source-tier tuple: (tier_number, label)."""
+    src = (source or "").lower().strip()
+    source_quality = classify_source_quality(source, source_name, url)
+    if src in {"sec_edgar", "fred", "bls", "bea"}:
+        return 1, "tier1"
+    haystack = f"{(source_name or '').lower()} {(url or '').lower()}"
+    if source_quality in {"tier1_wire", "tier1_press", "sec_filing"}:
+        return 1, "tier1"
+    if any(needle in haystack for needle in TIER1_EXTRA_NAMES):
+        return 1, "tier1"
+    if any(needle in haystack for needle in TIER2_NAMES):
+        return 2, "tier2"
+    if any(needle in haystack for needle in TIER3_NAMES):
+        return 3, "tier3"
+    if source_quality == "blog":
+        return 3, "tier3"
+    return 4, "tier4"
 
 
 # ----- Article type classification -------------------------------------------
@@ -144,6 +207,146 @@ def classify_article_type(title: str, summary: str = "", url: str = "") -> str:
         return "opinion"
 
     return "hard_news"
+
+
+_CLICKBAIT_TERMS = (
+    "just announced",
+    "is a buy",
+    "room to run",
+    "is a mess",
+    "fantastic news",
+    "turbocharge",
+    "thrown under the bus",
+    "should you buy",
+    "stock to watch",
+    "stocks to watch",
+)
+
+_HARD_CATALYST_TERMS = (
+    "earnings",
+    "guidance",
+    "merger",
+    "acquisition",
+    "ipo",
+    "regulatory",
+    "central bank",
+    "fed",
+    "ecb",
+    "boj",
+    "boe",
+    "macro data",
+    "cpi",
+    "ppi",
+    "payroll",
+    "tariff",
+    "sanction",
+    "geopolitical",
+    "lawsuit",
+    "filing",
+    "8-k",
+    "10-q",
+    "10-k",
+)
+
+_GLOBAL_MACRO_TERMS = (
+    "macro",
+    "geopolit",
+    "central bank",
+    "fed",
+    "ecb",
+    "boj",
+    "boe",
+    "rates",
+    "yield",
+    "treasury",
+    "oil",
+    "crude",
+    "brent",
+    "wti",
+    "fx",
+    "usd",
+    "dollar",
+    "tariff",
+    "sanction",
+    "sovereign",
+    "policy",
+)
+
+_SECTOR_SIGNAL_TERMS = (
+    "sector",
+    "industry",
+    "etf",
+    "commodity",
+    "regulation",
+    "guidance",
+    "earnings",
+    "supply chain",
+)
+
+
+def is_clickbait_headline(title: str) -> bool:
+    text = (title or "").lower()
+    if any(term in text for term in _CLICKBAIT_TERMS):
+        return True
+    return classify_article_type(title) in {"seo", "listicle", "preview", "opinion"}
+
+
+def has_hard_catalyst(event_type: str, title: str, summary: str = "") -> bool:
+    text = f"{title} {summary}".lower()
+    if event_type in {
+        "earnings",
+        "guidance",
+        "m_and_a",
+        "macro_release",
+        "fed_decision",
+        "geopolitical",
+        "regulatory",
+        "filing",
+        "current_report",
+        "annual_report",
+        "quarterly_report",
+    }:
+        return True
+    return any(term in text for term in _HARD_CATALYST_TERMS)
+
+
+def classify_section_fit(event: NormalisedEvent) -> str:
+    """Classify event fit for strict morning section routing."""
+    text = f"{event.title} {event.summary}".lower()
+    if event.event_type in {"macro_release", "fed_decision", "geopolitical", "regulatory"}:
+        return "global_macro_geo"
+    if any(term in text for term in _GLOBAL_MACRO_TERMS):
+        return "global_macro_geo"
+    if event.sectors and (event.event_type in {"earnings", "guidance", "regulatory"} or any(term in text for term in _SECTOR_SIGNAL_TERMS)):
+        return "sector_signals"
+    if event.tickers:
+        return "portfolio_watchlist"
+    return "other"
+
+
+def event_company_confidence(event: NormalisedEvent) -> float:
+    raw = event.raw_data or {}
+    for key in ("symbol_confidence", "ticker_confidence", "resolution_confidence"):
+        val = raw.get(key)
+        if isinstance(val, (int, float)):
+            return float(val)
+    # If the resolver did not emit an explicit confidence, treat text-match
+    # gating as the primary control and avoid hiding otherwise valid labels.
+    return 0.85
+
+
+def neutralize_headline(title: str, *, event_type: str = "", ticker: str = "") -> str:
+    """Rewrite low-signal/clickbait headlines into neutral catalyst wording."""
+    raw = (title or "").strip()
+    if not raw:
+        return raw
+    if not is_clickbait_headline(raw):
+        return raw
+    symbol = (ticker or "").upper().strip()
+    if has_hard_catalyst(event_type, raw):
+        subject = symbol or "Company"
+        return f"{subject}: hard catalyst update under review."
+    return f"{symbol + ': ' if symbol else ''}Low-signal commentary; no primary market catalyst identified."
 
 
 _LOW_QUALITY_TYPES = {"preview", "listicle", "seo", "opinion"}

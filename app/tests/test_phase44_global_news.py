@@ -68,6 +68,37 @@ def test_global_selector_rejects_non_market_world_news():
     assert selected == []
 
 
+def test_global_selector_rejects_generic_etf_listicle():
+    events = [
+        NormalisedEvent(
+            title="This High-Yield Emerging Funds ETF Offers International Diversification",
+            summary="A look at an ETF for long-term investors.",
+            event_type="headline",
+            factual_confidence_score=0.88,
+            final_score=0.85,
+            cluster_size=3,
+            regions=["Global Macro"],
+        ),
+        NormalisedEvent(
+            title="US sanctions tighten tanker insurance in Gulf shipping lanes",
+            summary="Oil and freight risk premium rise after policy action.",
+            event_type="geopolitical",
+            factual_confidence_score=0.86,
+            final_score=0.81,
+            cluster_size=4,
+            regions=["Middle East", "US"],
+        ),
+    ]
+    selected = select_global_market_events(
+        events,
+        session_mode="weekday",
+        max_items=6,
+    )
+    titles = [evt.title for evt in selected]
+    assert "This High-Yield Emerging Funds ETF Offers International Diversification" not in titles
+    assert "US sanctions tighten tanker insurance in Gulf shipping lanes" in titles
+
+
 def test_market_relevance_note_is_concise_and_present():
     event = NormalisedEvent(
         title="ECB and Fed rhetoric keeps rates path in focus",

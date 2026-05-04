@@ -1,10 +1,16 @@
 """Tests for article-type and source-quality classifiers."""
 
 from app.processing.article_quality import (
+    classify_section_fit,
     classify_article_type,
     classify_source_quality,
+    classify_source_tier,
+    has_hard_catalyst,
+    is_clickbait_headline,
     is_low_quality_for_section,
+    neutralize_headline,
 )
+from app.schemas.events import NormalisedEvent
 
 
 class TestArticleType:
@@ -82,6 +88,14 @@ class TestSourceQuality:
     def test_unknown_source_is_tier2(self):
         assert classify_source_quality("newsapi", "Some Random Site", "https://random.com") == "tier2"
 
+    def test_source_tier_reuters_is_tier1(self):
+        tier, label = classify_source_tier("newsapi", "Reuters", "")
+        assert (tier, label) == (1, "tier1")
+
+    def test_source_tier_benzinga_is_tier3(self):
+        tier, label = classify_source_tier("newsapi", "Benzinga", "")
+        assert (tier, label) == (3, "tier3")
+
 
 class TestLowQualityGate:
     def test_listicle_from_blog_is_low_quality(self):
@@ -100,3 +114,28 @@ class TestLowQualityGate:
 
     def test_sec_filing_is_never_low_quality(self):
         assert is_low_quality_for_section("preview", "sec_filing") is False
+
+
+class TestHeadlineHygiene:
+    def test_clickbait_detection(self):
+        assert is_clickbait_headline("Microsoft Is a Mess. Is the Stock a Buy in May?")
+
+    def test_hard_catalyst_detection(self):
+        assert has_hard_catalyst("earnings", "Company reports earnings beat and guidance raise")
+
+    def test_neutralize_clickbait_headline(self):
+        out = neutralize_headline(
+            "Eli Lilly Just Announced Fantastic News for Shareholders",
+            event_type="company_news",
+            ticker="LLY",
+        )
+        assert "fantastic news" not in out.lower()
+        assert out.startswith("LLY:")
+
+    def test_section_fit_global_macro_geo(self):
+        evt = NormalisedEvent(
+            title="Fed signals slower pace of cuts as yields rise",
+            summary="Rates and dollar move on policy rhetoric.",
+            event_type="macro_release",
+        )
+        assert classify_section_fit(evt) == "global_macro_geo"

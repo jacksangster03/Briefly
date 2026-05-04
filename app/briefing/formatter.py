@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.processing.cleaners import truncate
 from app.briefing.global_news_selector import build_market_relevance_note
-from app.processing.article_quality import classify_article_type
+from app.processing.article_quality import classify_article_type, event_company_confidence
 from app.briefing.templates import (
     MAX_EARNINGS_DISPLAY,
     MAX_INTRADAY_EVENTS,
@@ -153,6 +153,9 @@ class TelegramFormatter:
             f"{briefing.events_after_dedup} unique, "
             f"{briefing.events_sent} sent</i>"
         )
+        provider_health = (briefing.data_freshness or {}).get("Provider Health", "").strip()
+        if provider_health:
+            sections.append(f"<i>Provider health: {provider_health}</i>")
 
         full_text = "\n\n".join(sections)
         return self._split_message(full_text)
@@ -925,6 +928,8 @@ class TelegramFormatter:
 
     def _company_label(self, evt: NormalisedEvent) -> str:
         if not evt.tickers:
+            return ""
+        if event_company_confidence(evt) < 0.75:
             return ""
         text = f"{evt.title} {evt.summary}".lower()
         valid: list[str] = []

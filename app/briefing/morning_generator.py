@@ -30,9 +30,15 @@ from app.logger import get_logger
 from app.personalization.delivery_rules import load_alert_rules
 from app.personalization.user_profile import UserProfile
 from app.processing.article_quality import (
+    classify_section_fit,
     classify_article_type,
     classify_source_quality,
+    classify_source_tier,
+    event_company_confidence,
+    has_hard_catalyst,
     is_low_quality_for_section,
+    is_clickbait_headline,
+    neutralize_headline,
 )
 from app.processing.pipeline import is_actionable_event, process_event_stream
 from app.schemas.briefings import MarketSetup, MorningBriefing, session_mode_for
@@ -507,6 +513,9 @@ class MorningBriefingGenerator:
             briefing,
             timezone_name=self.profile.timezone,
         )
+        provider_health = self._provider_health_summary()
+        if provider_health:
+            briefing.data_freshness["Provider Health"] = provider_health
         sent_ids: set[str] = set()
         for event in (
             briefing.global_news
@@ -589,7 +598,7 @@ class MorningBriefingGenerator:
             )
             if symbol
         }
-        return build_top_themes(
+        themes = build_top_themes(
             scored_events,
             max_themes=self.rules.max_themes,
             editorial_gate=lambda evt: self._is_editorially_trustworthy(
@@ -599,6 +608,7 @@ class MorningBriefingGenerator:
             ),
             preferred_symbols=preferred_symbols,
         )
+        return [self._apply_news_hygiene(evt, section="portfolio_watchlist_themes") for evt in themes]
 
     def _build_global_news(
         self,
@@ -606,13 +616,22 @@ class MorningBriefingGenerator:
         session_mode: str,
     ) -> list[NormalisedEvent]:
         """Select high-trust, market-linked global/geopolitical stories."""
-        return select_global_market_events(
+        selected = select_global_market_events(
             scored_events,
             session_mode=session_mode,
             max_items=MAX_GLOBAL_NEWS,
             region_weights=self.profile.coverage_weights,
             actionable_check=is_actionable_event,
         )
+        cleaned: list[NormalisedEvent] = []
+        for event in selected:
+            if classify_section_fit(event) != "global_macro_geo":
+                continue
+            evt = self._apply_news_hygiene(event, section="global_macro_geo")
+            if is_clickbait_headline(evt.title) and not has_hard_catalyst(evt.event_type, evt.title, evt.summary):
+                continue
+            cleaned.append(evt)
+        return cleaned
 
     def _build_sector_scan(
         self,
@@ -656,7 +675,7 @@ class MorningBriefingGenerator:
                     continue
                 if not self._is_editorially_trustworthy(event, session_mode, section="sector_scan"):
                     continue
-                sector_events.append(event)
+                sector_events.append(self._apply_news_hygiene(event, section="sector_signals"))
                 placed_event_ids.add(event.event_id)
 
             etf_quote = etf_quotes.get(sector.etf)
@@ -955,7 +974,7 @@ class MorningBriefingGenerator:
             if not is_actionable_event(event):
                 continue
             if self._portfolio_focus_worthy(event, portfolio_symbols, require_direct=True):
-                _push(event)
+                _push(self._apply_news_hygiene(event, section="portfolio_watchlist_themes"))
 
         for event in scored_events:
             if len(selected) >= MAX_PORTFOLIO_FOCUS:
@@ -967,7 +986,7 @@ class MorningBriefingGenerator:
             if not (concentrated_sectors and any(sector in concentrated_sectors for sector in event.sectors)):
                 continue
             if self._portfolio_focus_worthy(event, portfolio_symbols, require_direct=False):
-                _push(event)
+                _push(self._apply_news_hygiene(event, section="portfolio_watchlist_themes"))
 
         return selected
 
@@ -1090,7 +1109,7 @@ class MorningBriefingGenerator:
             if tracking_id in seen_tracking_ids:
                 continue
             seen_tracking_ids.add(tracking_id)
-            selected.append(event)
+            selected.append(self._apply_news_hygiene(event, section="portfolio_watchlist_themes"))
         return selected
 
     def _watchlist_event_worthy(
@@ -1138,6 +1157,8 @@ class MorningBriefingGenerator:
         section: str,
     ) -> bool:
         """Apply section-level trust gating for top themes and sector scan."""
+        if event.raw_data is None:
+            event.raw_data = {}
         title_lower = self._normalise_text(event.title)
         text_lower = self._normalise_text(f"{event.title} {event.summary}")
         source_name = self._normalise_text(str(event.raw_data.get("source_name", "")))
@@ -1157,9 +1178,25 @@ class MorningBriefingGenerator:
             str(event.raw_data.get("source_name", "")),
             event.url,
         )
+        source_tier, source_tier_label = classify_source_tier(
+            event.source,
+            str(event.raw_data.get("source_name", "")),
+            event.url,
+        )
+        section_fit = classify_section_fit(event)
+        event.raw_data["source_tier"] = source_tier
+        event.raw_data["source_tier_label"] = source_tier_label
+        event.raw_data["section_fit"] = section_fit
         trusted_source = source_quality in {"tier1_wire", "tier1_press", "sec_filing"}
 
+        if is_clickbait_headline(event.title) and not has_catalyst:
+            return False
+        if source_tier >= 3 and not has_catalyst:
+            return False
+
         if section == "top_themes":
+            if section_fit == "global_macro_geo" and not has_relevant_ticker:
+                return False
             # Hard-stop low-signal editorial formats unless they are directly relevant
             # and strongly corroborated by a trusted source.
             if article_type in {"listicle", "seo", "opinion"}:
@@ -1177,6 +1214,9 @@ class MorningBriefingGenerator:
             ):
                 return False
             if event.event_type == "news_search" and not has_relevant_ticker and not has_catalyst:
+                return False
+        if section == "sector_scan":
+            if section_fit not in {"sector_signals", "portfolio_watchlist"} and not has_catalyst:
                 return False
 
         if (
@@ -1246,6 +1286,34 @@ class MorningBriefingGenerator:
         threshold = TRUST_TOP_THEMES_MIN_SCORE if section == "top_themes" else TRUST_SECTOR_SCAN_MIN_SCORE
         return score >= threshold
 
+    def _apply_news_hygiene(self, event: NormalisedEvent, *, section: str) -> NormalisedEvent:
+        """Attach source-tier metadata + neutralized headline for user-facing sections."""
+        evt = event.model_copy(deep=True)
+        raw = dict(evt.raw_data or {})
+        source_tier, source_tier_label = classify_source_tier(
+            evt.source,
+            str(raw.get("source_name", "")),
+            evt.url,
+        )
+        raw["source_tier"] = source_tier
+        raw["source_tier_label"] = source_tier_label
+        raw["section_fit"] = classify_section_fit(evt)
+        raw.setdefault("headline_original", evt.title)
+        if is_clickbait_headline(evt.title):
+            evt.title = neutralize_headline(
+                evt.title,
+                event_type=evt.event_type,
+                ticker=(evt.tickers[0] if evt.tickers else ""),
+            )
+            raw["headline_neutralized"] = True
+        else:
+            raw["headline_neutralized"] = False
+        if event_company_confidence(evt) < 0.75:
+            raw["ticker_label_suppressed"] = True
+        raw["briefing_section"] = section
+        evt.raw_data = raw
+        return evt
+
     def _dedupe_cross_section_events(self, briefing: MorningBriefing) -> None:
         """Keep a story from repeating across multiple morning sections."""
         seen_keys: set[str] = set()
@@ -1303,3 +1371,12 @@ class MorningBriefingGenerator:
             or getattr(self.settings, "telegram_send_charts", False)
             or self.settings.show_output
         )
+
+    def _provider_health_summary(self) -> str:
+        hub = getattr(self.news_svc, "global_hub", None)
+        stats = dict(getattr(hub, "last_run_stats", {}) or {})
+        contributions = dict(stats.get("provider_contributions", {}) or {})
+        if not contributions:
+            return ""
+        pieces = [f"{name}:{count}" for name, count in sorted(contributions.items())]
+        return ", ".join(pieces)

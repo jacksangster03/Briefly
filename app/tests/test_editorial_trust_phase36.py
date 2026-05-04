@@ -187,5 +187,63 @@ def test_top_themes_blocks_personal_finance_seo_headline():
         raw_data={"source_name": "Reuters"},
     )
     themes = generator._build_top_themes([weak, strong], session_mode="saturday")
+    # With strict section split, macro/geo belongs in Global Macro/Geo,
+    # while SEO personal-finance content is suppressed entirely.
+    assert themes == []
+
+
+def test_tier3_hard_catalyst_can_pass_for_watchlist_theme():
+    generator = _build_generator()
+    tier3_catalyst = NormalisedEvent(
+        title="NVIDIA earnings guidance update after AI demand inflection",
+        summary="Guidance raised for the second half.",
+        source="newsapi",
+        source_type="news",
+        event_type="guidance",
+        tickers=["NVDA"],
+        sectors=["technology"],
+        personal_relevance_score=0.9,
+        factual_confidence_score=0.7,
+        cluster_size=3,
+        final_score=0.79,
+        raw_data={"source_name": "Benzinga"},
+    )
+    filler = NormalisedEvent(
+        title="Generic market chatter with no catalyst",
+        summary="No concrete update.",
+        source="newsapi",
+        source_type="news",
+        event_type="headline",
+        tickers=[],
+        sectors=[],
+        personal_relevance_score=0.2,
+        factual_confidence_score=0.6,
+        cluster_size=1,
+        final_score=0.5,
+        raw_data={"source_name": "Random Blog"},
+    )
+    themes = generator._build_top_themes([tier3_catalyst, filler], session_mode="weekday")
     assert themes
-    assert all("best cd rates" not in evt.title.lower() for evt in themes)
+    assert themes[0].tickers == ["NVDA"]
+
+
+def test_clickbait_watchlist_headline_gets_neutralized():
+    generator = _build_generator()
+    evt = NormalisedEvent(
+        title="Microsoft Is a Mess. Is the Stock a Buy in May?",
+        summary="Debate continues around AI capex and earnings outlook.",
+        source="newsapi",
+        source_type="news",
+        event_type="guidance",
+        tickers=["AAPL"],
+        sectors=["technology"],
+        personal_relevance_score=0.86,
+        factual_confidence_score=0.78,
+        cluster_size=3,
+        final_score=0.8,
+        raw_data={"source_name": "Motley Fool"},
+    )
+    themes = generator._build_top_themes([evt], session_mode="weekday")
+    assert themes
+    assert "is a mess" not in themes[0].title.lower()
+    assert themes[0].raw_data.get("headline_original") == "Microsoft Is a Mess. Is the Stock a Buy in May?"

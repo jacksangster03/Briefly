@@ -51,3 +51,16 @@ def test_company_label_keeps_valid_match():
     )
     label = formatter._company_label(evt)
     assert "JPM" in label
+
+
+def test_company_label_suppressed_when_confidence_low():
+    formatter = TelegramFormatter("Europe/Madrid")
+    evt = NormalisedEvent(
+        title="JPMorgan raises net interest income guidance",
+        summary="JPMorgan highlighted resilient client activity.",
+        tickers=["JPM"],
+        source="newsapi",
+        source_type="news",
+        raw_data={"symbol_confidence": 0.55},
+    )
+    assert formatter._company_label(evt) == ""
