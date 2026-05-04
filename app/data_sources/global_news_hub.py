@@ -10,6 +10,7 @@ from urllib.parse import urlparse, urlunparse
 from app.data_sources.providers.alphavantage_news import AlphaVantageNewsProvider
 from app.data_sources.providers.fmp_news import FMPNewsProvider
 from app.data_sources.providers.gdelt import GDELTProvider
+from app.data_sources.providers.marketaux import MarketauxProvider
 from app.data_sources.providers.mediastack import MediastackProvider
 from app.logger import get_logger
 from app.schemas.events import NormalisedEvent
@@ -56,6 +57,7 @@ class GlobalNewsHubService:
         "alpha_vantage": 3,
         "gdelt": 2,
         "fmp": 2,
+        "marketaux": 2,
         "mediastack": 1,
     }
 
@@ -69,6 +71,7 @@ class GlobalNewsHubService:
         alpha_vantage: AlphaVantageNewsProvider | None = None,
         fmp: FMPNewsProvider | None = None,
         mediastack: MediastackProvider | None = None,
+        marketaux: MarketauxProvider | None = None,
     ):
         self.settings = settings
         self.finnhub = finnhub
@@ -110,6 +113,16 @@ class GlobalNewsHubService:
                 max_retries=1,
             )
             if settings.enable_mediastack_news and settings.mediastack_configured
+            else None
+        )
+        self.marketaux = marketaux or (
+            MarketauxProvider(
+                api_key=settings.marketaux_api_key,
+                base_url=settings.marketaux_base_url,
+                timeout=max(8, min(settings.provider_timeout, 15)),
+                max_retries=1,
+            )
+            if settings.enable_marketaux_news and settings.marketaux_configured
             else None
         )
         self.last_run_stats: dict[str, object] = {}
@@ -169,6 +182,16 @@ class GlobalNewsHubService:
             _pull(
                 "mediastack",
                 lambda: self.mediastack.get_market_news(limit=self.settings.mediastack_news_limit),
+            )
+
+        if (
+            self.marketaux
+            and self.marketaux.is_configured()
+            and self._consume_budget("marketaux_news", self.settings.marketaux_news_daily_call_budget)
+        ):
+            _pull(
+                "marketaux",
+                lambda: self.marketaux.get_market_news(limit=self.settings.marketaux_news_limit),
             )
 
         canonicalized = [self._canonicalize_event(event) for event in events]

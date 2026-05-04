@@ -9,6 +9,18 @@ from app.schemas.events import NormalisedEvent
 from app.settings import Settings
 
 
+def _isolated_settings(**overrides) -> Settings:
+    base = dict(
+        enable_gdelt=False,
+        enable_alpha_vantage_news=False,
+        enable_fmp_news=False,
+        enable_mediastack_news=False,
+        enable_marketaux_news=False,
+    )
+    base.update(overrides)
+    return Settings(**base)
+
+
 class _StubFinnhub:
     def __init__(self, events: list[NormalisedEvent]):
         self.events = events
@@ -96,7 +108,7 @@ def test_global_news_hub_merges_sources_and_dedupes_story_fingerprint():
     )
 
     hub = GlobalNewsHubService(
-        Settings(),
+        _isolated_settings(),
         finnhub=_StubFinnhub([finnhub_event]),
         newsapi=_StubNewsAPI([newsapi_event, unique_event]),
     )
@@ -117,7 +129,7 @@ def test_global_news_hub_merges_sources_and_dedupes_story_fingerprint():
 
 def test_global_news_hub_respects_daily_budget_guards():
     GlobalNewsHubService._daily_usage.clear()
-    settings = Settings(
+    settings = _isolated_settings(
         enable_gdelt=True,
         gdelt_daily_call_budget=1,
     )
@@ -154,7 +166,7 @@ def test_global_news_hub_canonicalizes_provider_metadata():
     )
     event.raw_data = {"id": "abc123"}
     hub = GlobalNewsHubService(
-        Settings(),
+        _isolated_settings(),
         finnhub=_StubFinnhub([event]),
         newsapi=_StubNewsAPI([]),
     )
@@ -165,3 +177,33 @@ def test_global_news_hub_canonicalizes_provider_metadata():
     assert enriched.raw_data["canonical_url"] == "https://www.sample.org/path/article"
     assert enriched.raw_data["domain"] == "sample.org"
     assert enriched.raw_data["provider_event_id"] == "abc123"
+
+
+def test_global_news_hub_includes_marketaux_when_enabled():
+    GlobalNewsHubService._daily_usage.clear()
+    settings = _isolated_settings(
+        enable_marketaux_news=True,
+        marketaux_api_key="k",
+        marketaux_news_daily_call_budget=2,
+        marketaux_news_limit=5,
+    )
+    marketaux = _StubProvider(
+        [
+            _event(
+                source="marketaux",
+                title="Dollar strength pressures EM importers",
+                url="https://marketaux.example/dollar-em",
+            )
+        ]
+    )
+    hub = GlobalNewsHubService(
+        settings,
+        finnhub=None,
+        newsapi=None,
+        marketaux=marketaux,  # type: ignore[arg-type]
+    )
+
+    merged = hub.fetch_market_news()
+    assert len(merged) == 1
+    assert marketaux.calls == 1
+    assert hub.last_run_stats["provider_contributions"]["marketaux"] == 1

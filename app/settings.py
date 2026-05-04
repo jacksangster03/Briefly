@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # -- Data providers -------------------------------------------------------
     finnhub_api_key: str = ""
     newsapi_key: str = ""
+    marketaux_api_key: str = ""
     alpha_vantage_api_key: str = ""
     fmp_api_key: str = ""
     mediastack_api_key: str = ""
@@ -37,6 +38,7 @@ class Settings(BaseSettings):
     alpha_vantage_base_url: str = "https://www.alphavantage.co/query"
     fmp_base_url: str = "https://financialmodelingprep.com/stable/news/general-latest"
     mediastack_base_url: str = "https://api.mediastack.com/v1/news"
+    marketaux_base_url: str = "https://api.marketaux.com/v1/news/all"
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     x_bearer_token: str = ""
@@ -102,17 +104,20 @@ class Settings(BaseSettings):
     enable_alpha_vantage_news: bool = False
     enable_fmp_news: bool = False
     enable_mediastack_news: bool = False
+    enable_marketaux_news: bool = False
     # Daily call budgets (process-level guard; reset each process day)
     gdelt_daily_call_budget: int = 250
     alpha_vantage_news_daily_call_budget: int = 20
     fmp_news_daily_call_budget: int = 120
     mediastack_news_daily_call_budget: int = 3
+    marketaux_news_daily_call_budget: int = 100
     # Request shaping
     global_news_max_records: int = 50
     alpha_vantage_topics: str = "economy_macro,economy_monetary,energy_transportation,financial_markets"
     gdelt_global_query: str = "(inflation OR sanctions OR tariffs OR oil OR shipping OR blockade OR war OR ceasefire OR central bank OR rates OR treasury OR dollar OR fx OR supply chain)"
     fmp_news_limit: int = 50
     mediastack_news_limit: int = 25
+    marketaux_news_limit: int = 50
 
     # -- Convenience helpers --------------------------------------------------
     @property
@@ -150,6 +155,10 @@ class Settings(BaseSettings):
     @property
     def alpha_vantage_configured(self) -> bool:
         return bool(self.alpha_vantage_api_key)
+
+    @property
+    def marketaux_configured(self) -> bool:
+        return bool(self.marketaux_api_key)
 
     @property
     def fmp_configured(self) -> bool:

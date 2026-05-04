@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.data_sources.providers.alphavantage_news import AlphaVantageNewsProvider
 from app.data_sources.providers.fmp_news import FMPNewsProvider
 from app.data_sources.providers.gdelt import GDELTProvider
+from app.data_sources.providers.marketaux import MarketauxProvider
 from app.data_sources.providers.mediastack import MediastackProvider
 
 
@@ -99,3 +100,29 @@ def test_mediastack_provider_normalizes_rows():
     assert events[0].source == "mediastack"
     assert events[0].event_type == "headline"
     assert events[0].raw_data["source_name"] == "Media Stack Source"
+
+
+def test_marketaux_provider_normalizes_rows():
+    provider = MarketauxProvider(
+        api_key="k",
+        base_url="https://api.marketaux.com/v1/news/all",
+    )
+    provider._get = lambda *args, **kwargs: {  # type: ignore[assignment]
+        "data": [
+            {
+                "uuid": "abc-123",
+                "title": "Energy spreads widen as tanker rates rise",
+                "url": "https://marketaux.example/energy-spreads",
+                "description": "Shipping pressure is lifting near-term risk premia.",
+                "published_at": "2026-04-16T11:45:00+00:00",
+                "source": {"name": "MarketWire"},
+                "entities": [{"symbol": "XLE"}, {"symbol": "CL1:COM"}],
+            }
+        ]
+    }
+    events = provider.get_market_news(limit=10)
+    assert len(events) == 1
+    assert events[0].source == "marketaux"
+    assert events[0].event_type == "market_news"
+    assert events[0].tickers == ["XLE", "CL1:COM"]
+    assert events[0].raw_data["source_name"] == "MarketWire"
