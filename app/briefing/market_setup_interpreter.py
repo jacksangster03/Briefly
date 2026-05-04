@@ -220,12 +220,37 @@ def _rates_phrase(*, setup: MarketSetup, macro_points: list[MacroDataPoint]) -> 
         ten_y_change = float(setup.treasury_10y.change or 0.0)
     if ten_y_change is None and spread_change is None:
         return "Rates context is neutral from available data."
+
+    # Tiny-move guard: moves this small are noise, not a driver
+    ten_y_tiny = ten_y_change is None or abs(ten_y_change) < 0.03
+    spread_tiny = spread_change is None or abs(spread_change) < 0.02
+    if ten_y_tiny and spread_tiny:
+        if ten_y_change is not None and ten_y_change != 0.0:
+            nudge = "marginally higher" if ten_y_change > 0 else "marginally lower"
+            return f"Rates are little changed from the prior close (US 10Y {nudge}); not the main story."
+        return "Rates context is neutral from available data."
+
     bits: list[str] = []
     if ten_y_change is not None:
         direction = "lower" if ten_y_change < 0 else "higher" if ten_y_change > 0 else "flat"
         bits.append(f"US 10Y is {direction} ({ten_y_change:+.3f})")
     if spread_change is not None:
-        curve = "steepening" if spread_change > 0 else "flattening" if spread_change < 0 else "flat"
+        # Only call curve direction if consistent with 10Y-2Y arithmetic
+        two_y_change = _macro_change(macro_points, ("us 2y treasury", "2y treasury yield", "dgs2"))
+        consistent_steepen = (
+            spread_change > 0
+            and (two_y_change is None or (ten_y_change or 0.0) > (two_y_change or 0.0))
+        )
+        consistent_flatten = (
+            spread_change < 0
+            and (two_y_change is None or (two_y_change or 0.0) > (ten_y_change or 0.0))
+        )
+        if consistent_steepen:
+            curve = "steepening"
+        elif consistent_flatten:
+            curve = "flattening"
+        else:
+            curve = "little changed"
         bits.append(f"curve is {curve} ({spread_change:+.3f})")
     return "Rates impulse: " + ", ".join(bits) + "."
 
@@ -264,6 +289,12 @@ def _net_takeaway(
     return "Net takeaway: conditions are mixed; focus on regional dispersion and macro headlines rather than index direction alone."
 
 
+_GEO_TERMS = ("iran", "hormuz", "blockade", "naval", "shipping", "tanker", "strike", "missile", "attack", "strait", "persian gulf", "invasion")
+_ENERGY_TERMS = ("oil", "crude", "energy", "opec", "wti", "brent")
+_TECH_EARNINGS_TOKENS = ("apple", "microsoft", "alphabet", "google", "meta", "amazon", "nvidia", "tesla", "broadcom", "tsmc", "amd")
+_AI_MOMENTUM_TOKENS = ("semiconductor", "data center", "data centre", "inference", "ai chip", "gpu demand", "artificial intelligence", "hyperscaler")
+
+
 def _dominant_tape_driver(
     *,
     setup: MarketSetup,
@@ -273,28 +304,49 @@ def _dominant_tape_driver(
     news = list(global_news)
     text = " ".join(f"{evt.title} {evt.summary}".lower() for evt in news)
     cluster_weight = sum(max(1, int(evt.cluster_size or 1)) for evt in news)
+
     oil_quote = _find_quote(setup.macro_quotes or [], ("WTI", "CRUDE", "CL1:COM", "CL=F"))
     oil_move = float(oil_quote.change_percent or 0.0) if oil_quote is not None else None
-    geo_oil_hit = any(
-        term in text for term in ("iran", "hormuz", "blockade", "naval", "shipping", "tanker")
-    ) and any(term in text for term in ("oil", "crude", "energy"))
-    if geo_oil_hit and cluster_weight >= 12 and oil_move is not None and abs(oil_move) >= 2.0:
-        direction = "spiking" if oil_move > 0 else "unwinding"
+    oil_level = float(oil_quote.current_price or 0.0) if oil_quote is not None else 0.0
+
+    # --- 1. Geo-energy: fire if oil is elevated OR has a big move AND geo terms present ---
+    geo_oil_hit = (
+        any(term in text for term in _GEO_TERMS)
+        and any(term in text for term in _ENERGY_TERMS)
+    )
+    # Lower threshold; also trigger on oil level alone even without a big move
+    oil_is_driver = oil_move is not None and (
+        abs(oil_move) >= 1.5 or oil_level > 90
+    )
+    if geo_oil_hit and oil_is_driver and cluster_weight >= 5:
+        direction = "spiking" if (oil_move or 0.0) > 0 else "unwinding"
+        level_note = f" (at {oil_level:.0f} USD/bbl)" if oil_level > 0 else ""
         return (
-            f"Iran/Hormuz oil shock {direction} (WTI {oil_move:+.1f}%) "
-            f"with inflation and transport-risk transmission in focus."
+            f"Geo-energy: oil {direction}{level_note} on Middle East/Hormuz tensions "
+            f"(WTI {(oil_move or 0.0):+.1f}%), with inflation and transport-cost transmission in focus."
         )
 
-    megacap_tokens = ("apple", "microsoft", "alphabet", "google", "meta", "amazon", "nvidia", "tesla")
+    # --- 2. Tech/AI earnings ---
+    tech_text_tokens = _TECH_EARNINGS_TOKENS + tuple(t.split()[0] for t in _AI_MOMENTUM_TOKENS)
     earnings_cluster = sum(
         1
         for evt in news
-        if ("earnings" in f"{evt.title} {evt.summary}".lower())
-        and any(token in f"{evt.title} {evt.summary}".lower() for token in megacap_tokens)
+        if any(kw in f"{evt.title} {evt.summary}".lower() for kw in ("earnings", "results", "beat", "miss", "guidance"))
+        and any(token in f"{evt.title} {evt.summary}".lower() for token in _TECH_EARNINGS_TOKENS)
     )
     if earnings_cluster >= 2:
-        return "Big-tech earnings digest is steering index leadership and intra-sector dispersion."
+        return "Big-tech and AI earnings are steering index leadership and intra-sector dispersion."
 
+    # --- 3. AI/semiconductor momentum (non-earnings) ---
+    ai_momentum = sum(
+        1
+        for evt in news
+        if any(token in f"{evt.title} {evt.summary}".lower() for token in _AI_MOMENTUM_TOKENS)
+    )
+    if ai_momentum >= 3:
+        return "Tech and AI momentum (semiconductors, data-centre capex, inference demand) is the primary index driver today."
+
+    # --- 4. Rates repricing ---
     ten_y_change = _macro_change(macro_points, ("10y treasury", "us 10y", "10y treasury yield"))
     if ten_y_change is None and setup.treasury_10y:
         ten_y_change = float(setup.treasury_10y.change or 0.0)
@@ -302,7 +354,7 @@ def _dominant_tape_driver(
         direction = "higher" if ten_y_change > 0 else "lower"
         return f"Rates repricing is the lead driver (US 10Y {direction} {ten_y_change:+.3f})."
 
-    return ""
+    return "No single dominant driver identified."
 
 
 def _confidence_label(*, total: int, signals: list[int]) -> str:

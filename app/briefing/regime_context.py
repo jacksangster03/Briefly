@@ -61,6 +61,9 @@ def _alignment_label(*, current_setup_tags: list[str], latest: RiskMetricsSnapsh
     return "Positioning alignment: mixed — monitor confirmation from risk and breadth."
 
 
+_GEO_LEVEL_ORDER = ["LOW", "MODERATE", "ELEVATED", "HIGH", "EXTREME", "N/A"]
+
+
 def compute_geo_risk_level(
     *,
     vix_level: float | None,
@@ -68,7 +71,11 @@ def compute_geo_risk_level(
     safe_haven_strength: float | None,
     news_keyword_density: float | None,
 ) -> tuple[str, str]:
-    """Return (geo_risk_level, summary) using deterministic scalar thresholds."""
+    """Return (geo_risk_level, summary) using deterministic scalar thresholds.
+
+    Pass news_keyword_density=None when no event data is available; the function
+    will skip the density component and label the signal as stale rather than 'low'.
+    """
     score = 0.0
     if vix_level is not None:
         if vix_level >= 26:
@@ -94,13 +101,15 @@ def compute_geo_risk_level(
     elif haven >= 0.6:
         score += 0.4
 
-    density = float(news_keyword_density or 0.0)
-    if density >= 0.60:
-        score += 1.8
-    elif density >= 0.35:
-        score += 1.0
-    elif density >= 0.15:
-        score += 0.5
+    density_stale = news_keyword_density is None
+    density = float(news_keyword_density) if not density_stale else 0.0
+    if not density_stale:
+        if density >= 0.60:
+            score += 1.8
+        elif density >= 0.35:
+            score += 1.0
+        elif density >= 0.15:
+            score += 0.5
 
     if score >= 5.5:
         level = "EXTREME"
@@ -113,9 +122,10 @@ def compute_geo_risk_level(
     else:
         level = "LOW"
 
+    density_note = "headline signal stale (no events)" if density_stale else f"density {density:.2f}"
     summary = (
         f"Geo risk {level}: VIX {vix_level if vix_level is not None else 'n/a'}, "
         f"oil {float(oil_delta_pct or 0.0):+.2f}%, haven {float(safe_haven_strength or 0.0):+.2f}, "
-        f"headline density {density:.2f}."
+        f"{density_note}."
     )
     return level, summary

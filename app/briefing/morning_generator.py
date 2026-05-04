@@ -753,6 +753,8 @@ class MorningBriefingGenerator:
         return snapshot, shift
 
     def _build_geo_risk_meter(self, briefing: MorningBriefing) -> tuple[str, str]:
+        from app.briefing.regime_context import _GEO_LEVEL_ORDER
+
         vix_level = None
         for quote in briefing.market_setup.index_quotes + briefing.market_setup.macro_quotes:
             text = f"{quote.display_name} {quote.symbol}".lower()
@@ -761,36 +763,66 @@ class MorningBriefingGenerator:
                 break
 
         oil_delta = 0.0
+        oil_level = 0.0
         gold_delta = 0.0
         usd_delta = 0.0
         for quote in briefing.market_setup.macro_quotes:
             text = f"{quote.display_name} {quote.symbol}".lower()
             if "wti" in text or "crude" in text:
                 oil_delta = float(quote.change_percent or 0.0)
+                oil_level = float(quote.current_price or 0.0)
             elif "gold" in text:
                 gold_delta = float(quote.change_percent or 0.0)
             elif "usd" in text or "dollar" in text or "dxy" in text:
                 usd_delta = float(quote.change_percent or 0.0)
+        # Prefer FRED commodity strip for oil level (more reliable than live quote)
+        for pt in briefing.commodity_strip:
+            key = (pt.name or pt.series_id or "").upper()
+            if "WTI" in key or "DCOILWTICO" in key:
+                oil_level = oil_level or float(pt.value or 0.0)
+                break
 
         safe_haven_strength = max(0.0, gold_delta) + max(0.0, usd_delta)
-        geo_terms = ("iran", "israel", "hormuz", "blockade", "missile", "ceasefire", "sanction", "shipping", "war")
+        geo_terms = ("iran", "israel", "hormuz", "blockade", "missile", "ceasefire", "sanction", "shipping", "war", "attack", "strike", "invasion")
         events = briefing.global_news + briefing.top_themes
+
+        # Pass density=None when no events; compute_geo_risk_level will label signal as stale
+        density: float | None
         if not events:
-            density = 0.0
+            density = None
+            has_geo_headlines = False
         else:
             geo_hits = 0
+            has_geo_headlines = False
             for event in events:
-                text = f"{event.title} {event.summary}".lower()
-                if any(term in text for term in geo_terms):
+                etext = f"{event.title} {event.summary}".lower()
+                if any(term in etext for term in geo_terms):
                     geo_hits += max(1, int(event.cluster_size or 1))
+                    has_geo_headlines = True
             density = geo_hits / max(1.0, float(sum(max(1, int(evt.cluster_size or 1)) for evt in events)))
 
-        return compute_geo_risk_level(
+        level, summary = compute_geo_risk_level(
             vix_level=vix_level,
             oil_delta_pct=oil_delta,
             safe_haven_strength=safe_haven_strength,
             news_keyword_density=density,
         )
+
+        # Floor rule: oil elevated + active geo headlines → at least ELEVATED, never LOW/MODERATE
+        oil_is_elevated = oil_level > 90 or oil_delta >= 2.0
+        if has_geo_headlines and oil_is_elevated:
+            floor = "ELEVATED"
+            try:
+                if _GEO_LEVEL_ORDER.index(level) < _GEO_LEVEL_ORDER.index(floor):
+                    level = floor
+                    summary = (
+                        f"Geo risk ELEVATED (floored: oil {oil_level:.0f} USD, {oil_delta:+.2f}% with active geopolitical headlines). "
+                        + summary
+                    )
+            except ValueError:
+                pass  # level not in order list (e.g. N/A) — leave unchanged
+
+        return level, summary
 
     def _build_earnings_relevance(self, earnings: list) -> dict[str, str]:
         portfolio = {holding.symbol.upper() for holding in self.profile.portfolio_holdings}

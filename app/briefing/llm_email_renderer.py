@@ -9,6 +9,7 @@ This module is intentionally render-only:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 import html
 import json
 import re
@@ -159,9 +160,11 @@ class LLMEmailRenderer:
     ) -> LLMRenderPayload:
         section_hints = self._section_hints(briefing)
         market_lines = self._format_market_lines(briefing.market_setup.index_quotes, briefing.market_setup.macro_quotes)
-        macro_lines = [
+        macro_lines_with_deltas = self._format_macro_lines_with_deltas(briefing.macro_context[:8])
+        # Legacy plain lines for allowlist seeding
+        macro_lines_plain = [
             f"{point.name}: {point.value:.4f}"
-            for point in briefing.macro_context[:6]
+            for point in briefing.macro_context[:8]
             if point.name
         ]
 
@@ -202,15 +205,40 @@ class LLMEmailRenderer:
         allowed_tickers.update(quote.symbol for quote in briefing.watchlist_quotes)
         allowed_tickers.update(quote.symbol for quote in briefing.portfolio_quotes)
         numeric_source_parts.extend(market_lines)
-        numeric_source_parts.extend(macro_lines)
+        numeric_source_parts.extend(macro_lines_plain)
+
+        commodity_lines = self._format_commodity_lines(briefing.commodity_strip)
+        numeric_source_parts.extend(commodity_lines)
+
+        freshness_label, age_hours = self._quotes_freshness_label(briefing)
+        yield_curve_plain = self._yield_curve_plain(briefing)
+        if yield_curve_plain:
+            numeric_source_parts.append(yield_curve_plain)
 
         prompt = {
             "session_mode": briefing.session_mode,
             "generated_at_local": briefing.generated_at.isoformat(),
+            "quotes_freshness": freshness_label,
+            "quotes_age_hours": age_hours,
+            # --- Market context ---
             "market_setup_lines": market_lines[:10],
-            "macro_context_lines": macro_lines[:6],
+            "macro_context_lines": macro_lines_with_deltas[:8],
+            "commodity_lines": commodity_lines[:5],
+            "yield_curve_plain": yield_curve_plain,
+            # --- Regime & quality signals ---
+            "geo_risk_level": briefing.geo_risk_level or "UNKNOWN",
+            "geo_risk_summary": briefing.geo_risk_summary or "",
+            "dominant_tape_driver": briefing.dominant_tape_driver or "No single dominant driver identified.",
+            "session_quality_bucket": briefing.session_quality_bucket or "MIXED",
+            "session_quality_label": briefing.session_quality_label or "Mixed tape",
+            "regime_snapshot": briefing.regime_snapshot,
+            "regime_shift": briefing.regime_shift,
+            # --- Headline density ---
+            "headline_density_label": self._headline_density_label(briefing),
+            # --- Chart context ---
             "chart_regime_tags": list((briefing.morning_chart_bundle or {}).get("regime_tags") or []),
             "chart_summaries": chart_summary_lines(briefing.morning_chart_bundle or {}, limit=5),
+            # --- Events ---
             "events": event_rows,
             "portfolio_focus_ids": [
                 event.cluster_id or event.content_hash or event.event_id
@@ -255,15 +283,28 @@ class LLMEmailRenderer:
                     {
                         "role": "system",
                         "content": (
-                            "You are editing a market-intelligence morning email. "
-                            "Use only the supplied payload facts. "
-                            "Never invent events, tickers, numbers, or URLs. "
-                            "Do not invent or modify chart type, chart scale, chart series, or chart annotations. "
-                            "Charts are deterministic and already selected upstream. "
-                            "When referencing prices or values, never prefix numbers with currency symbols ($, €, £). "
-                            "Write 'WTI at 101.3' or '101.3 USD' rather than '$101.3'. "
-                            "Return strict JSON with keys: subject (string), body (string), source_urls (array of strings). "
-                            "Body should be concise, readable on mobile, and under max_body_chars."
+                            "You are the institutional narrator for a morning market briefing email.\n\n"
+                            "INPUT: A JSON payload with market data, macro context, geo risk, news events, and portfolio signals.\n\n"
+                            "OUTPUT: Return strict JSON with keys: subject (string), body (string), source_urls (array of strings).\n\n"
+                            "NARRATIVE STRUCTURE – write the body in this sequence:\n"
+                            "1. DOMINANT DRIVER (1 sentence): Name the 1-2 real drivers using payload.dominant_tape_driver as your anchor. "
+                            "If it says 'No single dominant driver', write exactly that.\n"
+                            "2. SETUP READ (3-5 sentences): State the regime. "
+                            "If quotes_freshness is 'prior close', frame all moves as 'vs prior close' or 'vs Friday\'s close', never as 'this morning' or 'today'. "
+                            "If an index move is below 0.3% or a yield move is below 0.05%, acknowledge direction but do not call it a driver.\n"
+                            "3. YIELDS AND CURVE (2-3 sentences): State where the 2Y and 10Y roughly sit. "
+                            "Use yield_curve_plain from the payload as your base. "
+                            "Only say the curve is 'flattening' or 'steepening' if the spread change is at least 0.02 and directionally consistent; otherwise say 'little changed'.\n"
+                            "4. GEO RISK (1-2 sentences): Use geo_risk_level and geo_risk_summary from the payload. "
+                            "If oil is above 90 or oil change is above 2% and geo headlines are present, do not say 'low'; say 'elevated but not panic' even if VIX is moderate. "
+                            "If headline_density_label contains 'unavailable', say 'headline signal is thin or stale'.\n"
+                            "5. PORTFOLIO BULLETS (2-3 bullets): Link named market dynamics to holdings. One sentence per bullet.\n\n"
+                            "RULES:\n"
+                            "- Use only payload facts. Never invent numbers, tickers, or URLs.\n"
+                            "- Never prefix numbers with currency symbols ($, €, £). Write 'WTI at 83.2', not '$83.2'.\n"
+                            "- Do not repeat raw numbers already shown in deterministic tables; interpret instead.\n"
+                            "- Never contradict the numeric payload.\n"
+                            "- Body must be under max_body_chars."
                         ),
                     },
                     {
@@ -508,6 +549,91 @@ class LLMEmailRenderer:
         for snapshot in briefing.sector_scan:
             seed(snapshot.top_events, f"sector:{snapshot.sector_key}")
         return hints
+
+    def _format_macro_lines_with_deltas(self, points: list) -> list[str]:
+        lines: list[str] = []
+        for p in points:
+            if not p.name:
+                continue
+            if p.change is not None:
+                lines.append(f"{p.name}: {p.value:.4f} (delta {p.change:+.4f})")
+            else:
+                lines.append(f"{p.name}: {p.value:.4f}")
+        return lines
+
+    def _format_commodity_lines(self, strip: list) -> list[str]:
+        lines: list[str] = []
+        for p in strip:
+            name = p.name or p.series_id or ""
+            if not name:
+                continue
+            if p.change_percent is not None:
+                sign = "+" if p.change_percent >= 0 else ""
+                lines.append(f"{name}: {p.value:.2f} ({sign}{p.change_percent:.2f}%)")
+            else:
+                lines.append(f"{name}: {p.value:.2f}")
+        return lines
+
+    def _quotes_freshness_label(self, briefing: MorningBriefing) -> tuple[str, float]:
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        generated = briefing.generated_at
+        if generated.tzinfo is None:
+            generated = generated.replace(tzinfo=timezone.utc)
+        age_hours = (now - generated).total_seconds() / 3600
+        label = "prior close" if age_hours > 8 or briefing.session_mode in {"saturday", "sunday"} else "live"
+        return label, round(age_hours, 1)
+
+    def _yield_curve_plain(self, briefing: MorningBriefing) -> str:
+        macro = briefing.macro_context or []
+        ten_y = next((p for p in macro if "10y treasury" in (p.name or "").lower() or "dgs10" in (p.series_id or "").lower()), None)
+        two_y = next((p for p in macro if "2y treasury" in (p.name or "").lower() or "dgs2" in (p.series_id or "").lower()), None)
+        spread = next((p for p in macro if "10y-2y" in (p.name or "").lower() or "t10y2y" in (p.series_id or "").lower()), None)
+
+        parts: list[str] = []
+        if two_y:
+            parts.append(f"2Y at {two_y.value:.2f}%")
+        if ten_y:
+            parts.append(f"10Y at {ten_y.value:.2f}%")
+        if not parts:
+            return ""
+
+        base = ", ".join(parts)
+        if not spread:
+            return base
+
+        spread_val = float(spread.value or 0.0)
+        spread_change = float(spread.change or 0.0)
+        ten_y_change = float(ten_y.change or 0.0) if ten_y else None
+        two_y_change = float(two_y.change or 0.0) if two_y else None
+
+        if abs(spread_change) < 0.02:
+            curve_desc = "little changed"
+        elif spread_change > 0 and ten_y_change is not None and two_y_change is not None and ten_y_change > two_y_change:
+            curve_desc = "steepening slightly"
+        elif spread_change < 0 and ten_y_change is not None and two_y_change is not None and two_y_change > ten_y_change:
+            curve_desc = "flattening slightly"
+        else:
+            curve_desc = "little changed"
+
+        if spread_val > 0.15:
+            shape = "normal upward-sloping"
+        elif spread_val > -0.05:
+            shape = "flat"
+        else:
+            shape = "inverted"
+        return f"{base}; 10Y-2Y spread ~{spread_val:.2f}% ({shape} curve, {curve_desc})"
+
+    def _headline_density_label(self, briefing: MorningBriefing) -> str:
+        events = list(briefing.global_news or []) + list(briefing.top_themes or [])
+        if not events:
+            return "unavailable (no events passed filters)"
+        count = len(events)
+        if count <= 2:
+            return f"low ({count} market-relevant stories)"
+        if count <= 8:
+            return f"moderate ({count} stories)"
+        return f"elevated ({count}+ stories)"
 
     def _format_market_lines(self, index_quotes: list[QuoteData], macro_quotes: list[QuoteData]) -> list[str]:
         lines: list[str] = []
