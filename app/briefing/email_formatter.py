@@ -23,16 +23,17 @@ _MOVE_TOKEN_RE = re.compile(r"([+\-−]\d[\d,]*(?:\.\d+)?%?)")
 _PAREN_MOVE_RE = re.compile(r"(\([+\-−]?\d[\d,]*(?:\.\d+)?%?\))")
 _PAIR_MOVE_RE = re.compile(r"([+\-−]\d[\d,]*(?:\.\d+)?\s*\([+\-−]?\d[\d,]*(?:\.\d+)?%\))")
 _EMAIL_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
+_CANVAS_BG = "#071629"
 
 # Regime → (background tint hex, accent hex, display label)
 _REGIME_STYLES: dict[str, tuple[str, str, str]] = {
-    "risk_on":          ("#071629", "#00D4AA", "RISK ON"),
-    "defensive":        ("#071629", "#FF6B6B", "DEFENSIVE"),
-    "oil_shock":        ("#071629", "#FF6B00", "OIL SHOCK"),
-    "rates_led":        ("#071629", "#4A90E2", "RATES LED"),
-    "regional_split":   ("#071629", "#B08EFF", "REGIONAL SPLIT"),
-    "breadth_divergence": ("#071629", "#4A90E2", "BREADTH DIVERGENCE"),
-    "mixed":            ("#071629", "#7A8FA0", "MIXED"),
+    "risk_on":          (_CANVAS_BG, "#00D4AA", "RISK ON"),
+    "defensive":        (_CANVAS_BG, "#FF6B6B", "DEFENSIVE"),
+    "oil_shock":        (_CANVAS_BG, "#FF6B00", "OIL SHOCK"),
+    "rates_led":        (_CANVAS_BG, "#4A90E2", "RATES LED"),
+    "regional_split":   (_CANVAS_BG, "#B08EFF", "REGIONAL SPLIT"),
+    "breadth_divergence": (_CANVAS_BG, "#4A90E2", "BREADTH DIVERGENCE"),
+    "mixed":            (_CANVAS_BG, "#7A8FA0", "MIXED"),
 }
 
 # Section header → anchor slug mapping
@@ -100,14 +101,14 @@ class EmailFormatter:
         all_tags_text = " · ".join(str(t).replace("_", " ").upper() for t in regime_tags) or "MIXED"
 
         parts = [
-            f"<html><body style=\"margin:0;padding:0;background:#071629;font-family:{_EMAIL_FONT_STACK};color:#E8ECEF;\">",
-            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#071629;\">",
+            f"<html><body style=\"margin:0;padding:0;background:{_CANVAS_BG};font-family:{_EMAIL_FONT_STACK};color:#E8ECEF;\">",
+            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:{_CANVAS_BG};\">",
             "<tr><td align=\"center\" style=\"padding:8px 4px;\">",
-            "<table role=\"presentation\" width=\"680\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:680px;max-width:680px;background:#071629;border:1px solid #1F3447;\">",
+            f"<table role=\"presentation\" width=\"680\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:680px;max-width:680px;background:{_CANVAS_BG};border:1px solid #1F3447;\">",
             # Regime colour bar (3px top accent)
             f"<tr><td style=\"height:3px;line-height:3px;font-size:0;background:{regime_accent};\">&nbsp;</td></tr>",
             # Header row
-            "<tr><td style=\"padding:13px 16px 11px 16px;border-bottom:1px solid #1F3447;background:#071629;\">",
+            f"<tr><td style=\"padding:13px 16px 11px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
             "<td valign=\"bottom\" style=\"width:62%;\">",
             f"<div style=\"font-size:20px;line-height:1.08;font-weight:800;color:#E8ECEF;letter-spacing:-0.01em;\">{html.escape(title)}</div>",
@@ -127,7 +128,7 @@ class EmailFormatter:
             "</tr></table>",
             "</td></tr>",
             # Meta row
-            "<tr><td style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:#071629;\">",
+            f"<tr><td style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
             f"<td style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">GENERATED</strong> {html.escape(generated_local)}</td>",
             f"<td align=\"center\" style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">PROFILE</strong> {html.escape(profile_name)}</td>",
@@ -135,11 +136,11 @@ class EmailFormatter:
             "</tr></table>",
             "</td></tr>",
             # Source freshness row
-            "<tr><td style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:#071629;\">",
+            f"<tr><td style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};\">",
             f"<div style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">SOURCE</strong> {html.escape(freshness)}</div>",
             "</td></tr>",
             # Jump-link nav row
-            "<tr><td style=\"padding:6px 16px 6px 16px;border-bottom:1px solid #1F3447;background:#071629;\">",
+            f"<tr><td style=\"padding:6px 16px 6px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};\">",
             self._nav_row(),
             "</td></tr>",
         ]
@@ -152,11 +153,11 @@ class EmailFormatter:
             )
 
         if briefing.chart_assets:
-            parts.append("<tr><td style=\"padding:10px 16px 0 16px;background:#071629;\">")
+            parts.append(f"<tr><td style=\"padding:10px 16px 0 16px;background:{_CANVAS_BG};\">")
             parts.append(self._chart_modules(briefing))
             parts.append("</td></tr>")
 
-        parts.append("<tr><td style=\"padding:0 16px 16px 16px;background:#071629;\">")
+        parts.append(f"<tr><td style=\"padding:0 16px 16px 16px;background:{_CANVAS_BG};\">")
         parts.append(self._brief_modules(full_html))
         parts.append("</td></tr>")
 
@@ -175,7 +176,7 @@ class EmailFormatter:
     def _chart_modules(self, briefing: MorningBriefing) -> str:
         roles = {row.get("chart_key"): row.get("role") for row in (briefing.morning_chart_selection or [])}
         modules = [
-            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;\">"
+            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;background:{_CANVAS_BG};\">"
         ]
         for idx, asset in enumerate(briefing.chart_assets):
             role = str(roles.get(asset.key) or ("hero" if idx == 0 else "support"))
@@ -188,7 +189,7 @@ class EmailFormatter:
             takeaway_line = self._chart_takeaway_line(asset.caption)
             explain_line = self._chart_explainer_paragraph(asset.key, asset.caption)
             modules.append(
-                f"<tr><td style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid #1F3447;\">"
+                f"<tr><td style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};\">"
             )
             modules.append(
                 f"<div style=\"font-size:{title_size};line-height:1.15;font-weight:800;color:#E8ECEF;letter-spacing:-0.01em;padding:0 0 4px 0;\">{html.escape(asset.title)}</div>"
@@ -232,16 +233,16 @@ class EmailFormatter:
             if len(lines) > 1:
                 body = self._format_section_body(lines[1:], section_title)
                 return (
-                    f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;\">"
-                    f"<tr><td{anchor_id} style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;\">"
+                    f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;background:{_CANVAS_BG};\">"
+                    f"<tr><td{anchor_id} style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;background:{_CANVAS_BG};\">"
                     f"<div style=\"font-size:15px;line-height:1.18;font-weight:800;letter-spacing:-0.01em;color:#E8ECEF;margin:0 0 6px 0;\">{html.escape(header_text)}</div>"
                     f"{body}"
                     "</td></tr></table>"
                 )
         body = self._format_section_body(lines, section_title)
         return (
-            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;\">"
-            f"<tr><td{anchor_id} style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;\">"
+            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;background:{_CANVAS_BG};\">"
+            f"<tr><td{anchor_id} style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;background:{_CANVAS_BG};\">"
             f"{body}"
             "</td></tr></table>"
         )
@@ -270,31 +271,52 @@ class EmailFormatter:
     def _chart_explainer_paragraph(chart_key: str | None, caption: str | None) -> str:
         key = str(chart_key or "").strip().lower()
         base = (caption or "").strip()
-        if len(base.split()) > 34:
-            base = " ".join(base.split()[:34]).rstrip(".,;:") + "."
+        numbers = re.findall(r"[+\-−]?\d+(?:\.\d+)?%?", base.replace("−", "-"))
+        first_signal = numbers[0] if numbers else None
+        bias = "mixed"
+        if first_signal:
+            try:
+                bias_value = float(first_signal.replace("%", ""))
+                if bias_value > 0:
+                    bias = "constructive"
+                elif bias_value < 0:
+                    bias = "defensive"
+            except ValueError:
+                bias = "mixed"
         if key == "cross_asset_impulse_strip":
             return (
-                "This strip ranks cross-asset shocks around a neutral zero line: right-side values signal positive impulse, "
-                "left-side values signal drag. Use it to identify whether rates, commodities, or risk gauges are driving the tape."
+                "Cross-asset impulse is centered on zero, so leadership is defined by which sleeve shows the largest absolute displacement. "
+                "Today’s read is best treated as a transmission map for where macro pressure is entering the tape first."
             )
         if key == "breadth_leadership_panel":
             return (
-                "Breadth and leadership factors are shown on a bullish/bearish scale, so bar direction and magnitude both matter. "
-                "A positive cluster confirms participation, while mixed signs usually indicate fragile trend quality."
+                "Breadth is a confirmation test, not a direction forecast: clustered positives support trend durability, while split signals "
+                "usually imply rotation-heavy tape and lower conviction on outright index follow-through."
             )
         if key == "pnl_attribution_waterfall":
             return (
-                "Each bar is a weighted contribution to daily portfolio return, not just raw move, so larger positions carry more influence. "
-                "Positive bars add to P&L and negative bars subtract, with the TOTAL line summarizing net impact."
+                "Attribution reflects weighted contribution rather than simple return, so concentration can dominate the day even when headline "
+                "breadth looks benign. Focus first on whether gains are broad-based or reliant on one sleeve."
             )
         if key == "event_linked_annotated_trend":
             return (
-                "The dashed marker shows where the current catalyst window starts, and the shaded region tracks price response since that trigger. "
-                "This helps separate pre-event drift from event-driven follow-through."
+                "The event marker separates pre-catalyst drift from post-catalyst repricing; persistence after the marker matters more than the "
+                "initial spike. Sustained slope suggests a regime handoff rather than a one-session reaction."
+            )
+        if key == "portfolio_concentration_risk":
+            return (
+                "Concentration should be read as a fragility gauge: when top-weight exposure is elevated, idiosyncratic headline risk can override "
+                "otherwise constructive macro tape and amplify both upside and drawdown paths."
+            )
+        if key == "global_relative_performance":
+            return (
+                "Rebased leadership isolates relative momentum across regions; widening endpoints indicate persistent regional divergence, while "
+                "converging endpoints typically signal a risk-beta catch-up phase."
             )
         if base:
-            return f"Interpretation: {base}"
-        return "Interpretation: Deterministic chart values are summarized here to explain direction, magnitude, and the current risk signal."
+            short = " ".join(base.split()[:26]).rstrip(".,;:")
+            return f"Signal context is {bias}: {short}."
+        return "Signal context is mixed: treat this panel as a directional cue only when confirmed by breadth and cross-asset alignment."
 
     def _top_desk_read(self, briefing: MorningBriefing) -> str:
         lines = [html.escape(line) for line in self._top_desk_read_lines(briefing)]
