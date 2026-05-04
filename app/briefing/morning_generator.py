@@ -17,6 +17,13 @@ from app.briefing.portfolio_impact import build_portfolio_impact
 from app.briefing.regime_context import build_regime_context, compute_geo_risk_level
 from app.briefing.regime_tracker import classify_regime, persist_regime_snapshot
 from app.briefing.session_quality import compute_session_quality
+from app.briefing.trust_contract import (
+    active_index_quotes,
+    freshness_block,
+    resolve_canonical_prices,
+    run_pre_send_lints,
+    section_confidence,
+)
 from app.briefing.regional_lens import build_regional_lens
 from app.briefing.theme_builder import build_top_themes
 from app.logger import get_logger
@@ -389,7 +396,9 @@ class MorningBriefingGenerator:
         ten_y, two_y = self.macro_svc.get_treasury_yields()
         briefing.market_setup.treasury_10y = ten_y
         briefing.market_setup.treasury_2y = two_y
-        setup_interpretation = interpret_market_setup(briefing.market_setup, briefing.macro_context)
+        briefing.canonical_prices = resolve_canonical_prices(briefing)
+        active_setup = self._active_market_setup_view(briefing)
+        setup_interpretation = interpret_market_setup(active_setup, briefing.macro_context)
         briefing.market_setup_analysis = setup_interpretation.narrative
         briefing.dominant_tape_driver = setup_interpretation.dominant_driver
         briefing.market_setup_analysis_confidence = setup_interpretation.confidence
@@ -423,8 +432,9 @@ class MorningBriefingGenerator:
         briefing.watchlist_events = self._filter_watchlist_events(eligible)
         briefing.watchlist_quotes = self._fetch_watchlist_quotes()
         briefing.portfolio_quotes = self._fetch_portfolio_quotes()
+        active_setup = self._active_market_setup_view(briefing)
         setup_interpretation = interpret_market_setup(
-            briefing.market_setup,
+            active_setup,
             briefing.macro_context,
             global_news=briefing.global_news,
         )
@@ -433,15 +443,16 @@ class MorningBriefingGenerator:
         briefing.market_setup_analysis_confidence = setup_interpretation.confidence
         briefing.market_setup_signal_tags = setup_interpretation.tags
 
-        geo_level, geo_summary = self._build_geo_risk_meter(briefing)
+        geo_level, geo_raw_level, geo_summary = self._build_geo_risk_meter(briefing)
         briefing.geo_risk_level = geo_level
+        briefing.geo_risk_raw_level = geo_raw_level
         briefing.geo_risk_summary = geo_summary
         regime_snapshot, regime_shift = self._track_regime_snapshot(briefing)
         briefing.regime_snapshot = regime_snapshot
         briefing.regime_shift = regime_shift
         sq = compute_session_quality(
             market_breadth=briefing.market_setup.market_breadth,
-            index_quotes=briefing.market_setup.index_quotes,
+            index_quotes=active_setup.index_quotes,
             macro_context=briefing.macro_context,
             commodity_strip=briefing.commodity_strip,
             geo_risk_level=briefing.geo_risk_level,
@@ -451,7 +462,7 @@ class MorningBriefingGenerator:
         briefing.session_quality_color_hex = sq.color_hex
         briefing.session_quality_label = sq.label
         regional_lens, regional_skew = build_regional_lens(
-            index_quotes=briefing.market_setup.index_quotes,
+            index_quotes=active_setup.index_quotes,
             global_news=briefing.global_news,
         )
         briefing.regional_lens = regional_lens
@@ -473,11 +484,29 @@ class MorningBriefingGenerator:
         briefing.positioning_alignment = alignment
         self._dedupe_cross_section_events(briefing)
         if self._should_build_charts():
+            chart_briefing = briefing.model_copy(deep=True)
+            chart_briefing.market_setup = active_setup.model_copy(deep=True)
             briefing.chart_assets = MorningChartBuilder(
                 profile=self.profile,
                 market_data=self.market_svc,
                 macro_data_svc=self.macro_svc,
-            ).build(briefing)
+            ).build(chart_briefing)
+            briefing.morning_chart_bundle = chart_briefing.morning_chart_bundle
+            briefing.morning_chart_selection = chart_briefing.morning_chart_selection
+        # Final contract checks before delivery rendering.
+        briefing.canonical_prices = resolve_canonical_prices(briefing)
+        briefing.contract_warnings = run_pre_send_lints(
+            briefing,
+            timezone_name=self.profile.timezone,
+        )
+        briefing.section_confidence = section_confidence(
+            briefing,
+            timezone_name=self.profile.timezone,
+        )
+        briefing.data_freshness = freshness_block(
+            briefing,
+            timezone_name=self.profile.timezone,
+        )
         sent_ids: set[str] = set()
         for event in (
             briefing.global_news
@@ -755,6 +784,17 @@ class MorningBriefingGenerator:
         }
         return snapshot, shift
 
+    def _active_market_setup_view(self, briefing: MorningBriefing) -> MarketSetup:
+        """Copy market setup and exclude closed benchmarks from active breadth logic."""
+        return briefing.market_setup.model_copy(
+            update={
+                "index_quotes": active_index_quotes(
+                    briefing,
+                    timezone_name=self.profile.timezone,
+                )
+            }
+        )
+
     def _reconcile_commodity_sources(self, briefing: MorningBriefing) -> None:
         """Override FRED commodity strip values with live yfinance quotes where available.
 
@@ -795,7 +835,7 @@ class MorningBriefingGenerator:
                     source="yfinance_live",
                 )
 
-    def _build_geo_risk_meter(self, briefing: MorningBriefing) -> tuple[str, str]:
+    def _build_geo_risk_meter(self, briefing: MorningBriefing) -> tuple[str, str, str]:
         from app.briefing.regime_context import _GEO_LEVEL_ORDER
 
         vix_level = None
@@ -844,12 +884,13 @@ class MorningBriefingGenerator:
                     has_geo_headlines = True
             density = geo_hits / max(1.0, float(sum(max(1, int(evt.cluster_size or 1)) for evt in events)))
 
-        level, summary = compute_geo_risk_level(
+        raw_level, summary = compute_geo_risk_level(
             vix_level=vix_level,
             oil_delta_pct=oil_delta,
             safe_haven_strength=safe_haven_strength,
             news_keyword_density=density,
         )
+        level = raw_level
 
         # Floor rule: oil elevated + active geo headlines → at least ELEVATED, never LOW/MODERATE
         oil_is_elevated = oil_level > 90 or oil_delta >= 2.0
@@ -871,7 +912,7 @@ class MorningBriefingGenerator:
             except ValueError:
                 pass  # level not in order list (e.g. N/A) — leave unchanged
 
-        return level, summary
+        return level, raw_level, summary
 
     def _build_earnings_relevance(self, earnings: list) -> dict[str, str]:
         portfolio = {holding.symbol.upper() for holding in self.profile.portfolio_holdings}

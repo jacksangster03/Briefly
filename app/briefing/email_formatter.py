@@ -12,6 +12,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.briefing.formatter import TelegramFormatter
+from app.briefing.trust_contract import chart_copy_is_distinct, contract_warning_summary, distinct_lines
 from app.schemas.briefings import MorningBriefing
 from app.schemas.delivery import EmailRenderResult
 from app.schemas.events import QuoteData
@@ -103,9 +104,10 @@ class EmailFormatter:
         delivery_mode = str(bundle_meta.get("delivery_mode") or "deterministic")
         llm_shadow = bool(bundle_meta.get("llm_shadow_mode", True))
         profile_name = str(bundle_meta.get("profile_name") or "default_user")
-        confidence = self._confidence_label(briefing, bundle_meta)
+        confidence = self._confidence_summary(briefing, bundle_meta)
         lead = "Deterministic market stack, portfolio lens, and high-signal narrative."
         generated_local = self._format_local(briefing.generated_at)
+        section_conf_lines = self._section_confidence_lines(briefing)
         freshness_lines = self._freshness_breakdown_lines(briefing, generated_local)
         title, date_label = self._split_subject(subject)
         desk_read = self._top_desk_read(briefing)
@@ -157,6 +159,13 @@ class EmailFormatter:
             f"<td align=\"center\" style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">PROFILE</strong> {html.escape(profile_name)}</td>",
             f"<td align=\"right\" style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">MODE</strong> {html.escape(delivery_mode)} · <strong style=\"color:#E8ECEF;\">CONF</strong> {html.escape(confidence)}</td>",
             "</tr></table>",
+            "</td></tr>",
+            # Section confidence row
+            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
+            "<div style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\">"
+            "<strong style=\"color:#E8ECEF;\">SECTION CONFIDENCE</strong><br>"
+            + "<br>".join(html.escape(line) for line in section_conf_lines)
+            + "</div>",
             "</td></tr>",
             # Source freshness row
             f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
@@ -284,9 +293,7 @@ class EmailFormatter:
             title_size = "15px" if is_hero else ("13px" if is_micro else "14px")
             pad_top = "0" if idx == 0 else ("8px" if is_micro else "11px")
             pad_bottom = "13px" if is_hero else ("9px" if is_micro else "11px")
-            read_line = self._chart_read_line(asset.caption)
-            takeaway_line = self._chart_takeaway_line(asset.caption)
-            explain_line = self._chart_explainer_paragraph(asset.key, asset.caption)
+            read_line, why_line, lens_line = self._chart_copy_triplet(asset.key, asset.caption)
             modules.append(
                 f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
             )
@@ -301,10 +308,10 @@ class EmailFormatter:
                 "width=\"640\" style=\"display:block;width:100%;max-width:640px;height:auto;margin-top:0;border:0;\">"
             )
             modules.append(
-                f"<div style=\"font-size:11px;line-height:1.35;color:#9BA3AB;padding:7px 0 0 0;\">{html.escape(takeaway_line)}</div>"
+                f"<div style=\"font-size:11px;line-height:1.35;color:#9BA3AB;padding:7px 0 0 0;\"><span style=\"color:#AFC3D6;font-size:10px;letter-spacing:0.04em;font-weight:800;\">WHY IT MATTERS</span> {html.escape(why_line)}</div>"
             )
             modules.append(
-                f"<div style=\"font-size:12px;line-height:1.45;color:#B6C4D3;padding:6px 0 0 0;\">{html.escape(explain_line)}</div>"
+                f"<div style=\"font-size:12px;line-height:1.45;color:#B6C4D3;padding:6px 0 0 0;\"><span style=\"color:#AFC3D6;font-size:10px;letter-spacing:0.04em;font-weight:800;\">PORTFOLIO LENS</span> {html.escape(lens_line)}</div>"
             )
             modules.append("</td></tr>")
         modules.append("</table>")
@@ -359,14 +366,6 @@ class EmailFormatter:
         return text
 
     @staticmethod
-    def _chart_takeaway_line(caption: str | None) -> str:
-        text = (caption or "Interpretation uses deterministic chart values and fixed market rules.").strip()
-        words = text.split()
-        if len(words) > 30:
-            text = " ".join(words[:30]).rstrip(".,;:") + "."
-        return f"Takeaway: {text}"
-
-    @staticmethod
     def _chart_explainer_paragraph(chart_key: str | None, caption: str | None) -> str:
         key = str(chart_key or "").strip().lower()
         base = (caption or "").strip()
@@ -416,6 +415,36 @@ class EmailFormatter:
             short = " ".join(base.split()[:26]).rstrip(".,;:")
             return f"Signal context is {bias}: {short}."
         return "Signal context is mixed: treat this panel as a directional cue only when confirmed by breadth and cross-asset alignment."
+
+    def _chart_copy_triplet(self, chart_key: str | None, caption: str | None) -> tuple[str, str, str]:
+        read_line = self._chart_read_line(caption)
+        why_line = self._chart_explainer_paragraph(chart_key, caption)
+        lens_line = self._chart_portfolio_lens(chart_key, caption)
+        read_line, why_line, lens_line = distinct_lines(read_line, why_line, lens_line)
+        if not chart_copy_is_distinct(read_line, why_line, lens_line):
+            why_line = "Why it matters: confirm the move with breadth and cross-asset follow-through before upgrading conviction."
+            lens_line = "Portfolio lens: prioritize concentration, directional beta, and macro-sensitivity in position sizing."
+        return read_line, why_line, lens_line
+
+    @staticmethod
+    def _chart_portfolio_lens(chart_key: str | None, caption: str | None) -> str:
+        key = str(chart_key or "").strip().lower()
+        base = (caption or "").strip()
+        if key == "cross_asset_impulse_strip":
+            return "Macro leadership usually transmits first through rates, energy, and volatility sleeves before broad index confirmation."
+        if key == "breadth_leadership_panel":
+            return "If breadth remains split, avoid treating headline index strength as broad risk confirmation."
+        if key == "pnl_attribution_waterfall":
+            return "Largest weighted contributors are driving total return; confirm whether gains are concentrated or broad."
+        if key == "event_linked_annotated_trend":
+            return "Persistence after the catalyst window matters more than the first-day reaction when sizing follow-through risk."
+        if key == "portfolio_concentration_risk":
+            return "High top-weight concentration increases idiosyncratic shock risk and can dominate macro tape."
+        if key == "global_relative_performance":
+            return "Regional leaders should align with portfolio geography; widening spreads can lift tracking-error risk."
+        if base:
+            return "Anchor this signal to current exposures before changing posture; avoid reacting to one chart in isolation."
+        return "Use this panel with the setup read and dominant driver before changing portfolio posture."
 
     def _top_desk_read(self, briefing: MorningBriefing) -> str:
         lines = [html.escape(line) for line in self._top_desk_read_lines(briefing)]
@@ -681,6 +710,17 @@ class EmailFormatter:
         return f"Quotes as of {timestamp} · sources: {src}"
 
     def _freshness_breakdown_lines(self, briefing: MorningBriefing, generated_local: str) -> list[str]:
+        if briefing.data_freshness:
+            lines = [
+                f"Market Prices: {briefing.data_freshness.get('Market Prices', 'unavailable')}",
+                f"News: {briefing.data_freshness.get('News', f'live, generated {generated_local}')}",
+                f"Macro/FRED: {briefing.data_freshness.get('Macro/FRED', 'latest available release')}",
+                f"Portfolio P&L: {briefing.data_freshness.get('Portfolio P&L', 'based on prior-close prices')}",
+            ]
+            summary = contract_warning_summary(briefing.contract_warnings or [])
+            lines.append(f"Contract checks: {summary}")
+            return lines
+
         quotes = self._freshness_quotes(briefing)
         latest_ts = max((quote.timestamp for quote in quotes if quote.timestamp), default=None)
         if latest_ts is None:
@@ -707,7 +747,31 @@ class EmailFormatter:
             src_line,
         ]
 
-    def _confidence_label(self, briefing: MorningBriefing, bundle_meta: dict) -> str:
+    def _confidence_summary(self, briefing: MorningBriefing, bundle_meta: dict) -> str:
+        if briefing.section_confidence:
+            levels = [str(v).upper() for v in briefing.section_confidence.values()]
+            if "LOW" in levels:
+                if levels.count("LOW") >= 2:
+                    return "MEDIUM"
+                return "MED-HIGH"
+            if all(level == "HIGH" for level in levels):
+                return "HIGH"
+            return "MED-HIGH"
+        return self._confidence_label_legacy(briefing, bundle_meta)
+
+    def _section_confidence_lines(self, briefing: MorningBriefing) -> list[str]:
+        if briefing.section_confidence:
+            return [f"{name}: {value}" for name, value in briefing.section_confidence.items()]
+        return [
+            "Regime: MEDIUM",
+            "Market prices: MEDIUM",
+            "News: MEDIUM",
+            "Macro/rates: MEDIUM",
+            "Portfolio: MEDIUM",
+            "Geo risk: MEDIUM",
+        ]
+
+    def _confidence_label_legacy(self, briefing: MorningBriefing, bundle_meta: dict) -> str:
         score = 0.0
         base_conf = str(bundle_meta.get("data_confidence") or briefing.market_setup_analysis_confidence or "medium").strip().lower()
         if base_conf in {"high", "med-high", "medium-high"}:

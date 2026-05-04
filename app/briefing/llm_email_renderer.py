@@ -256,6 +256,10 @@ class LLMEmailRenderer:
             "rules": {
                 "max_body_chars": self.settings.llm_email_max_chars,
                 "min_source_urls": min(3, len(ordered_urls)),
+                "llm_role": "prose_only",
+                "deterministic_contract": (
+                    "LLM cannot choose chart types, chart order, values, rankings, labels, annotations, or regime classification."
+                ),
             },
         }
 
@@ -304,6 +308,7 @@ class LLMEmailRenderer:
                             "- Never prefix numbers with currency symbols ($, €, £). Write 'WTI at 83.2', not '$83.2'.\n"
                             "- Do not repeat raw numbers already shown in deterministic tables; interpret instead.\n"
                             "- Never contradict the numeric payload.\n"
+                            "- You are prose-only. Never choose or alter chart types/order/values/labels/regimes.\n"
                             "- Body must be under max_body_chars."
                         ),
                     },

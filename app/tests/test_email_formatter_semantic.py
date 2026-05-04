@@ -55,3 +55,26 @@ def test_session_quality_accent_applies_to_header_rule():
 
     # Session accent should be one of configured deterministic bucket colors.
     assert any(color in html_body for color in ["#5C1111", "#9B2C2C", "#2F3744", "#0F7A4A", "#16A34A"])
+
+
+def test_email_formatter_uses_section_confidence_and_freshness_blocks():
+    formatter = EmailFormatter("Europe/Madrid")
+    briefing = _sample_briefing()
+    briefing.section_confidence = {
+        "Regime": "HIGH",
+        "Market prices": "MEDIUM",
+        "News": "HIGH",
+        "Macro/rates": "HIGH",
+        "Portfolio": "MEDIUM",
+        "Geo risk": "MEDIUM",
+    }
+    briefing.data_freshness = {
+        "Market Prices": "prior close, 2026-05-01 22:00 CEST",
+        "News": "live, generated 2026-05-04 12:02 CEST",
+        "Macro/FRED": "latest available release (2026-05-03)",
+        "Portfolio P&L": "based on quote snapshot 2026-05-01 22:00 CEST",
+    }
+    html_body = formatter._html_body(briefing, "<b>MARKET SETUP</b>\nSPX: 7230.12 +21.11 (+0.29%)", "Morning Briefing | Mon 04 May")
+    assert "SECTION CONFIDENCE" in html_body
+    assert "Regime: HIGH" in html_body
+    assert "Market Prices: prior close, 2026-05-01 22:00 CEST" in html_body

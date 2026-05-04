@@ -1,0 +1,41 @@
+{
+  "generated_at": "2026-05-04T08:00:00+00:00",
+  "market_setup": {
+    "index_quotes": [
+      {"symbol": "SPX", "display_name": "S&P 500 (SPX)", "current_price": 7230.12, "change": 21.11, "change_percent": 0.29, "source": "yfinance"},
+      {"symbol": "COMP", "display_name": "Nasdaq Composite (COMP)", "current_price": 25114.44, "change": 222.13, "change_percent": 0.89, "source": "yfinance"},
+      {"symbol": "DJIA", "display_name": "Dow Jones (DJIA)", "current_price": 49499.27, "change": -152.87, "change_percent": -0.31, "source": "yfinance"},
+      {"symbol": "^FTSE", "display_name": "FTSE 100", "current_price": 10363.90, "change": -14.92, "change_percent": -0.14, "source": "yfinance"},
+      {"symbol": "VIX", "display_name": "VIX", "current_price": 17.50, "change": 0.49, "change_percent": 2.89, "source": "yfinance"}
+    ],
+    "macro_quotes": [
+      {"symbol": "CL=F", "display_name": "WTI Crude Oil (CL1:COM)", "current_price": 102.88, "change": 0.99, "change_percent": 0.97, "source": "yfinance"},
+      {"symbol": "GC=F", "display_name": "Gold (GC1:COM)", "current_price": 4558.40, "change": -39.40, "change_percent": -0.85, "source": "yfinance"},
+      {"symbol": "DXY", "display_name": "Trade-Weighted USD Index", "current_price": 118.73, "change": 0.0139, "change_percent": 0.01, "source": "fred"}
+    ],
+    "market_breadth": [
+      {"symbol": "XLK", "display_name": "Technology", "change_percent": 1.49},
+      {"symbol": "XLE", "display_name": "Energy", "change_percent": -1.34},
+      {"symbol": "XLF", "display_name": "Financials", "change_percent": 0.21}
+    ]
+  },
+  "macro_context": [
+    {"series_id": "DGS2", "name": "US 2Y Treasury Yield", "value": 3.88, "change": -0.04, "date": "2026-05-03", "source": "fred"},
+    {"series_id": "DGS10", "name": "US 10Y Treasury Yield", "value": 4.40, "change": -0.02, "date": "2026-05-03", "source": "fred"},
+    {"series_id": "T10Y2Y", "name": "10Y-2Y Yield Spread", "value": 0.51, "change": -0.01, "date": "2026-05-03", "source": "fred"}
+  ],
+  "commodity_strip": [
+    {"series_id": "DCOILWTICO", "name": "WTI Crude Oil (USD/bbl)", "value": 99.89, "change": 1.46, "change_percent": 1.49, "date": "2026-05-02", "source": "fred"},
+    {"series_id": "GOLDPMGBD228NLBM", "name": "Gold (USD/troy oz)", "value": 4560.10, "change": -22.1, "change_percent": -0.48, "date": "2026-05-02", "source": "fred"}
+  ],
+  "global_news": [
+    {
+      "title": "European shares fall as tariff threats weigh on automakers",
+      "summary": "Investors monitor Middle East and Strait of Hormuz developments as oil stays elevated.",
+      "source": "newsapi",
+      "event_type": "geopolitical",
+      "cluster_size": 3,
+      "tickers": ["SPY"]
+    }
+  ]
+}

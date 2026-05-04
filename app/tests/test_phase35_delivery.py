@@ -175,7 +175,8 @@ def test_email_formatter_uses_continuous_finance_canvas():
     assert "SOURCE" in rendered.html_body
     assert "REGIME" in rendered.html_body
     assert "READ" in rendered.html_body
-    assert "Takeaway:" in rendered.html_body
+    assert "WHY IT MATTERS" in rendered.html_body
+    assert "PORTFOLIO LENS" in rendered.html_body
     assert "Dominant driver:" in rendered.html_body
     assert "border-radius" not in rendered.html_body
     assert rendered.html_body.index("READ") < rendered.html_body.index("<img src=\"cid:market-snapshot-cid\"")

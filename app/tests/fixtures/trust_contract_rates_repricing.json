@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-06-10T08:00:00+00:00",
+  "market_setup": {
+    "index_quotes": [
+      {"symbol": "SPX", "display_name": "S&P 500 (SPX)", "current_price": 7010.10, "change": -45.22, "change_percent": -0.64, "source": "yfinance"},
+      {"symbol": "COMP", "display_name": "Nasdaq Composite (COMP)", "current_price": 24100.22, "change": -260.1, "change_percent": -1.07, "source": "yfinance"},
+      {"symbol": "DAX", "display_name": "DAX", "current_price": 24150.3, "change": -111.5, "change_percent": -0.46, "source": "yfinance"},
+      {"symbol": "VIX", "display_name": "VIX", "current_price": 20.9, "change": 1.3, "change_percent": 6.6, "source": "yfinance"}
+    ],
+    "macro_quotes": [
+      {"symbol": "CL=F", "display_name": "WTI Crude Oil (CL1:COM)", "current_price": 89.44, "change": 0.12, "change_percent": 0.13, "source": "yfinance"},
+      {"symbol": "GC=F", "display_name": "Gold (GC1:COM)", "current_price": 4612.20, "change": 24.10, "change_percent": 0.53, "source": "yfinance"}
+    ],
+    "market_breadth": [
+      {"symbol": "XLK", "display_name": "Technology", "change_percent": -1.42},
+      {"symbol": "XLF", "display_name": "Financials", "change_percent": -0.66},
+      {"symbol": "XLU", "display_name": "Utilities", "change_percent": 0.42}
+    ]
+  },
+  "macro_context": [
+    {"series_id": "DGS2", "name": "US 2Y Treasury Yield", "value": 4.24, "change": 0.08, "date": "2026-06-09", "source": "fred"},
+    {"series_id": "DGS10", "name": "US 10Y Treasury Yield", "value": 4.62, "change": 0.09, "date": "2026-06-09", "source": "fred"},
+    {"series_id": "T10Y2Y", "name": "10Y-2Y Yield Spread", "value": 0.38, "change": 0.01, "date": "2026-06-09", "source": "fred"}
+  ],
+  "commodity_strip": [
+    {"series_id": "DCOILWTICO", "name": "WTI Crude Oil (USD/bbl)", "value": 89.44, "change": 0.12, "change_percent": 0.13, "date": "2026-06-09", "source": "fred"},
+    {"series_id": "GOLDPMGBD228NLBM", "name": "Gold (USD/troy oz)", "value": 4612.20, "change": 24.10, "change_percent": 0.53, "date": "2026-06-09", "source": "fred"}
+  ],
+  "global_news": [
+    {
+      "title": "Treasury yields jump after stronger inflation data",
+      "summary": "Rates repricing drives duration-sensitive underperformance across global equities.",
+      "source": "newsapi",
+      "event_type": "macro_release",
+      "cluster_size": 4,
+      "tickers": ["IEF"]
+    }
+  ]
+}

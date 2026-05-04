@@ -64,6 +64,7 @@ class MorningBriefing(BaseModel):
     portfolio_impact_bullets: list[str] = Field(default_factory=list)
     portfolio_action_posture: str = ""
     geo_risk_level: str = ""
+    geo_risk_raw_level: str = ""
     geo_risk_summary: str = ""
     regime_snapshot: dict[str, str] = Field(default_factory=dict)
     regime_shift: dict[str, str] = Field(default_factory=dict)
@@ -82,6 +83,10 @@ class MorningBriefing(BaseModel):
     session_quality_bucket: str = ""
     session_quality_color_hex: str = ""
     session_quality_label: str = ""
+    section_confidence: dict[str, str] = Field(default_factory=dict)
+    data_freshness: dict[str, str] = Field(default_factory=dict)
+    contract_warnings: list[str] = Field(default_factory=list)
+    canonical_prices: dict[str, dict] = Field(default_factory=dict)
     morning_chart_bundle: dict = Field(default_factory=dict)
     morning_chart_selection: list[dict[str, str]] = Field(default_factory=list)
     chart_assets: list[ChartAsset] = Field(default_factory=list)

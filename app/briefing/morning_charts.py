@@ -27,6 +27,18 @@ SMALL_CAP_KEYS = ("russell", "rut")
 LARGE_CAP_KEYS = ("spx", "s&p 500", "dow")
 GROWTH_KEYS = ("nasdaq", "ixic")
 DEFENSIVE_KEYS = ("dow",)
+CHART_SPEC_REQUIRED_KEYS = (
+    "chart_key",
+    "variant",
+    "available",
+    "priority",
+    "reason_if_hidden",
+    "title",
+    "caption",
+    "series",
+    "annotations",
+    "email_dimensions",
+)
 
 
 @dataclass
@@ -76,6 +88,7 @@ def build_morning_chart_bundle(
         if multiplier != 1.0:
             item.priority = round(item.priority * multiplier, 4)
     selected = _select_candidates(candidates)
+    contract_errors = validate_chart_contract({"charts": [item.spec for item in candidates], "selected": selected})
 
     # Anomaly detection: flag unusually extreme impulse days
     anomaly_meta: dict[str, Any] = {}
@@ -109,6 +122,7 @@ def build_morning_chart_bundle(
             "llm_email_enabled": bool(profile.delivery.get("llm_email_morning", True)),
             "llm_shadow_mode": bool(profile.delivery.get("llm_shadow_mode", True)),
             "data_confidence": _confidence_label(normalized),
+            "contract_errors": contract_errors,
             **anomaly_meta,
         },
     }
@@ -144,6 +158,34 @@ def chart_summary_lines(bundle: dict[str, Any], *, limit: int = 6) -> list[str]:
             reason = str(spec.get("reason_if_hidden") or "unavailable")
             lines.append(f"{role.title()}: {title} unavailable ({reason})")
     return lines
+
+
+def validate_chart_contract(bundle: dict[str, Any]) -> list[str]:
+    """Validate deterministic chart contract shape.
+
+    This is a guardrail only: renderers still skip unavailable charts.
+    """
+    errors: list[str] = []
+    charts = list(bundle.get("charts") or [])
+    selected = [str(item.get("chart_key") or "") for item in (bundle.get("selected") or [])]
+    seen_keys: set[str] = set()
+    for idx, chart in enumerate(charts):
+        key = str(chart.get("chart_key") or "")
+        if not key:
+            errors.append(f"charts[{idx}] missing chart_key")
+            continue
+        if key in seen_keys:
+            errors.append(f"duplicate chart_key: {key}")
+        seen_keys.add(key)
+        for req in CHART_SPEC_REQUIRED_KEYS:
+            if req not in chart:
+                errors.append(f"{key} missing required field '{req}'")
+        if chart.get("available") is False and not chart.get("reason_if_hidden"):
+            errors.append(f"{key} unavailable without reason_if_hidden")
+    for key in selected:
+        if key and key not in seen_keys:
+            errors.append(f"selected chart missing from charts list: {key}")
+    return errors
 
 
 def _normalize_inputs(
