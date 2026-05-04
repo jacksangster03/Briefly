@@ -25,23 +25,24 @@ from matplotlib.ticker import MaxNLocator
 
 logger = get_logger("chart_renderer")
 
-POSITIVE = "#00D4AA"
-NEGATIVE = "#FF6B6B"
-NEUTRAL = "#4A90E2"
-ACCENT = "#FF6B00"
-BG = "#071629"
-PANEL = "#0B1D30"
+POSITIVE = "#00C2A8"
+NEGATIVE = "#FF5C64"
+NEUTRAL = "#8FA4BA"
+ACCENT = "#FF7A00"
+WARNING = "#D18C00"
+BG = "#03101D"
+PANEL = "#081A2B"
 GRID = "#2A3441"
 AXIS = "#3D4451"
-MUTED = "#7A8FA0"
-TEXT = "#E8ECEF"
+MUTED = "#7F93A8"
+TEXT = "#EAF2FF"
 SUBTLE = "#14263A"
 
 REGION_COLORS = {
     "us": ACCENT,
-    "europe": "#4A90E2",
-    "asia": "#B08EFF",
-    "other": "#9BA3AB",
+    "europe": "#6FA8E8",
+    "asia": POSITIVE,
+    "other": NEUTRAL,
 }
 
 
@@ -59,27 +60,31 @@ class ChartRenderer:
     def _style_axes(
         ax,
         *,
-        title: str,
+        title: str = "",
         xlabel: str | None = None,
         ylabel: str | None = None,
         grid_axis: str = "y",
         lock_x_ticks: bool = False,
         lock_y_ticks: bool = False,
     ) -> None:
-        ax.set_title(title, loc="left", fontsize=14.5, weight="bold", color=TEXT, pad=10)
+        if title:
+            ax.set_title(title, loc="left", fontsize=14.5, weight="bold", color=TEXT, pad=10)
         if xlabel:
             ax.set_xlabel(xlabel, color=MUTED, fontsize=9.0)
         if ylabel:
             ax.set_ylabel(ylabel, color=MUTED, fontsize=9.0)
-        ax.tick_params(axis="x", colors=MUTED, labelsize=8.5)
-        ax.tick_params(axis="y", colors=MUTED, labelsize=8.5)
+        ax.tick_params(axis="x", colors=MUTED, labelsize=8.7, pad=5)
+        ax.tick_params(axis="y", colors=MUTED, labelsize=8.7, pad=5)
         if not lock_x_ticks:
             ax.xaxis.set_major_locator(MaxNLocator(nbins=8))
         if not lock_y_ticks:
             ax.yaxis.set_major_locator(MaxNLocator(nbins=6))
         ax.grid(axis=grid_axis, color=GRID, linewidth=0.5, alpha=0.58)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
+        for axis_name in ("top", "right"):
+            ax.spines[axis_name].set_visible(False)
+        for axis_name in ("left", "bottom"):
+            ax.spines[axis_name].set_color(AXIS)
+            ax.spines[axis_name].set_linewidth(0.8)
 
     @staticmethod
     def _value_box(
@@ -102,15 +107,17 @@ class ChartRenderer:
             fontsize=fontsize,
             color=color,
             weight="bold",
-            bbox={"facecolor": BG, "edgecolor": "none", "alpha": 0.82, "pad": 1.2},
+            bbox={"facecolor": BG, "edgecolor": "none", "alpha": 0.86, "pad": 1.2},
             zorder=6,
         )
 
     @staticmethod
     def _series_color(row: dict, idx: int) -> str:
         family = str(row.get("family") or "").lower()
-        if idx == 0:
+        if idx == 0 and float(row.get("change_pct") or 0.0) >= 0:
             return ACCENT
+        if float(row.get("change_pct") or 0.0) < 0:
+            return NEGATIVE
         return REGION_COLORS.get(family, REGION_COLORS["other"])
 
     @staticmethod
@@ -123,12 +130,16 @@ class ChartRenderer:
         return ranked[:limit]
 
     @staticmethod
-    def _label_positions(values: list[float], *, min_gap: float = 0.34) -> list[float]:
+    def _label_positions(values: list[float], *, min_gap: float = 0.34, low: float | None = None, high: float | None = None) -> list[float]:
         indexed = sorted(enumerate(values), key=lambda item: item[1])
         adjusted = [float(value) for value in values]
         previous: float | None = None
         for original_idx, value in indexed:
             next_value = float(value) if previous is None else max(float(value), previous + min_gap)
+            if high is not None:
+                next_value = min(next_value, high)
+            if low is not None:
+                next_value = max(next_value, low)
             adjusted[original_idx] = next_value
             previous = next_value
         return adjusted
@@ -460,7 +471,7 @@ class ChartRenderer:
         if label_rows:
             n_pts = max(len(line.get_xdata()) for line in ax.lines) if ax.lines else 5
             tick_positions = list(range(n_pts))
-            tick_labels = [f"T-{n_pts - 1 - i}" if i < n_pts - 1 else "T" for i in range(n_pts)]
+            tick_labels = [f"T-{n_pts - 1 - i}" if i < n_pts - 1 else "Today" for i in range(n_pts)]
             ax.set_xticks(tick_positions)
             ax.set_xticklabels(tick_labels, fontsize=9, color=MUTED)
 
@@ -475,7 +486,13 @@ class ChartRenderer:
                 fontsize=8.4,
                 weight="bold",
             )
-            adjusted = self._label_positions([row[3] for row in label_rows])
+            y_low = min(min(line.get_ydata()) for line in ax.lines) if ax.lines else None
+            y_high = max(max(line.get_ydata()) for line in ax.lines) if ax.lines else None
+            adjusted = self._label_positions(
+                [row[3] for row in label_rows],
+                low=(y_low + 0.12 if y_low is not None else None),
+                high=(y_high - 0.12 if y_high is not None else None),
+            )
             for row, y_pos in zip(label_rows, adjusted):
                 idx, label, x_val, y_val, color = row
                 excess = y_val - 100.0
@@ -489,13 +506,14 @@ class ChartRenderer:
                 )
         self._style_axes(
             ax,
-            title=str(spec.get("title") or "Global Equity Leadership"),
+            title="",
             xlabel="Trading session",
             ylabel="Rebased to 100",
             grid_axis="y",
+            lock_x_ticks=True,
         )
         ax.margins(x=0.2, y=0.18)
-        fig.subplots_adjust(left=0.08, right=0.82, top=0.86, bottom=0.18)
+        fig.subplots_adjust(left=0.10, right=0.82, top=0.94, bottom=0.19)
         return self._to_asset(
             fig,
             key="global_relative_performance",
@@ -517,14 +535,21 @@ class ChartRenderer:
         ]
         tick_labels = [self._truncate_label(label, max_len=28) for label in labels]
         values = [float(row.get("impulse") or 0.0) for row in points]
+        units = [str(row.get("unit") or "pct") for row in points]
+        normalized_values: list[float] = []
+        for value, unit in zip(values, units):
+            if unit == "bps":
+                normalized_values.append(max(-2.5, min(2.5, value / 6.0)))
+            else:
+                normalized_values.append(max(-2.5, min(2.5, value / 1.2)))
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
 
         # Cap the visual range if one outlier dominates (>3x the median abs value)
-        abs_vals = sorted([abs(v) for v in values if v != 0.0])
+        abs_vals = sorted([abs(v) for v in normalized_values if v != 0.0])
         median_abs = abs_vals[len(abs_vals) // 2] if abs_vals else 1.0
         cap = max(abs_vals) if not abs_vals or max(abs_vals) <= median_abs * 3.5 else median_abs * 3.5
-        display_values = [max(-cap, min(cap, v)) for v in values]
-        capped_any = any(abs(v) > cap for v in values)
+        display_values = [max(-cap, min(cap, v)) for v in normalized_values]
+        capped_any = any(abs(v) > cap for v in normalized_values)
 
         fig, ax = self._figure(8.8, 4.9)
         y_pos = list(range(len(labels)))
@@ -561,12 +586,12 @@ class ChartRenderer:
                 ha="left" if dv >= 0 else "right",
                 fontsize=8.5,
             )
-        subtitle = "Rates · Commodities · Risk gauges  |  zero = neutral"
+        subtitle = "Normalized impulse score · rates (bps) and commodities/risk (%)"
         if capped_any:
             subtitle += "  (scale capped)"
         self._style_axes(
             ax,
-            title=str(spec.get("title") or "Cross-Asset Impulses"),
+            title="",
             xlabel=subtitle,
             grid_axis="x",
             lock_y_ticks=True,
@@ -657,7 +682,7 @@ class ChartRenderer:
             )
         self._style_axes(
             ax,
-            title=str(spec.get("title") or "Portfolio Movers vs Benchmark"),
+            title="",
             xlabel="Excess return vs benchmark (%)",
             grid_axis="x",
             lock_y_ticks=True,
@@ -711,7 +736,7 @@ class ChartRenderer:
         ax.text(0.74, 0.06, "Overweight losers", transform=ax.transAxes, color=MUTED, fontsize=8.0)
         self._style_axes(
             ax,
-            title=str(spec.get("title") or "Sector Exposure vs Move"),
+            title="",
             xlabel="Portfolio exposure (%)",
             ylabel="Sector move (%)",
             grid_axis="both",
@@ -796,12 +821,13 @@ class ChartRenderer:
         )
         self._style_axes(
             ax,
-            title=str(spec.get("title") or f"{label} Event-Linked Trend"),
+            title="",
             xlabel="30D session",
             ylabel="Price",
             grid_axis="y",
+            lock_x_ticks=True,
         )
-        fig.subplots_adjust(left=0.1, right=0.95, top=0.86, bottom=0.18)
+        fig.subplots_adjust(left=0.10, right=0.95, top=0.94, bottom=0.18)
         return self._to_asset(
             fig,
             key="event_linked_annotated_trend",
@@ -814,10 +840,35 @@ class ChartRenderer:
         rows = list(spec.get("series") or [])
         if not rows:
             return None
-        labels = [self._truncate_label(str(row.get("name") or ""), max_len=32) for row in rows]
-        values = [float(row.get("value") or 0.0) for row in rows]
+        breadth_row = next((row for row in rows if "breadth" in str(row.get("name") or "").lower()), None)
+        factor_rows = [row for row in rows if row is not breadth_row]
+        if not factor_rows:
+            return None
+
+        labels = [self._truncate_label(str(row.get("name") or ""), max_len=32) for row in factor_rows]
+        values = [float(row.get("value") or 0.0) for row in factor_rows]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
-        fig, ax = self._figure(8.8, max(4.5, 0.5 * len(labels) + 2.0))
+
+        fig = plt.figure(figsize=(8.8, max(4.8, 0.5 * len(labels) + 2.4)), dpi=200)
+        fig.patch.set_facecolor(BG)
+        gs = fig.add_gridspec(2, 1, height_ratios=[1.1, 4.3], hspace=0.28)
+        ax_top = fig.add_subplot(gs[0])
+        ax = fig.add_subplot(gs[1])
+        ax_top.set_facecolor(BG)
+        ax.set_facecolor(BG)
+
+        breadth_val = float((breadth_row or {}).get("value") or 0.0)
+        ax_top.barh([0], [breadth_val], color=POSITIVE if breadth_val >= 50 else NEGATIVE, alpha=0.85, height=0.54)
+        ax_top.set_xlim(0, 100)
+        ax_top.set_yticks([0])
+        ax_top.set_yticklabels(["Breadth % Up"], fontsize=8.8, color=TEXT, fontweight="bold")
+        ax_top.set_xticks([0, 25, 50, 75, 100])
+        ax_top.set_xticklabels(["0", "25", "50", "75", "100"], fontsize=8, color=MUTED)
+        ax_top.grid(axis="x", color=GRID, linewidth=0.5, alpha=0.58)
+        for spine in ax_top.spines.values():
+            spine.set_visible(False)
+        self._value_box(ax_top, min(98.0, breadth_val + 2.2), 0, f"{breadth_val:.1f}%", color=TEXT, ha="left", fontsize=8.5)
+
         y_pos = list(range(len(labels)))
         ax.barh(y_pos, values, color=colors, alpha=0.82, height=0.58)
         ax.axvline(0, color=ACCENT, linewidth=1.5, alpha=0.90, zorder=3)
@@ -825,13 +876,12 @@ class ChartRenderer:
         ax.set_yticklabels(labels, fontsize=8.5, color=TEXT, fontweight="bold")
         ax.invert_yaxis()
 
-        # Symmetric x-axis around zero so diverging nature is clear
         x_range = max((abs(v) for v in values), default=1.0)
-        pad = x_range * 0.35
+        pad = max(0.2, x_range * 0.35)
         ax.set_xlim(-x_range - pad, x_range + pad)
 
         for idx, value in enumerate(values):
-            offset = x_range * 0.06
+            offset = max(0.04, x_range * 0.08)
             self._value_box(
                 ax,
                 value + (offset if value >= 0 else -offset),
@@ -843,17 +893,17 @@ class ChartRenderer:
             )
         self._style_axes(
             ax,
-            title=str(spec.get("title") or "Breadth & Leadership"),
-            xlabel="Signal value (negative = bearish, positive = bullish)",
+            title="",
+            xlabel="Leadership factor signal (negative = defensive, positive = pro-cyclical)",
             grid_axis="x",
             lock_y_ticks=True,
+            lock_x_ticks=True,
         )
-        # Wide left margin so y-axis labels are never clipped
         fig.subplots_adjust(
             left=self._left_margin_for_labels(labels, min_margin=0.30, max_margin=0.43),
-            right=0.91,
-            top=0.86,
-            bottom=0.18,
+            right=0.93,
+            top=0.95,
+            bottom=0.14,
         )
         return self._to_asset(
             fig,
@@ -873,7 +923,7 @@ class ChartRenderer:
         colors = [POSITIVE if (float(value or 0.0) >= 0) else NEGATIVE for value in impulses]
         fig, ax = self._figure(8.0, 2.9)
         ax.axis("off")
-        ax.set_title(str(spec.get("title") or "Rates & Curve"), loc="left", fontsize=15, weight="bold", color=TEXT, pad=9)
+        # Title intentionally omitted inside image; email section header provides title.
         x0 = 0.03
         for idx, label in enumerate(labels):
             xpos = x0 + idx * 0.31
@@ -916,12 +966,12 @@ class ChartRenderer:
         regime_color = {
             "calm": POSITIVE,
             "normal": ACCENT,
-            "elevated": "#D18C00",
+            "elevated": WARNING,
             "stress": NEGATIVE,
         }.get(regime, NEUTRAL)
         fig, ax = self._figure(8.0, 2.9)
         ax.axis("off")
-        ax.set_title(str(spec.get("title") or "Volatility Regime"), loc="left", fontsize=15, weight="bold", color=TEXT, pad=9)
+        # Title intentionally omitted inside image; email section header provides title.
         level_text = "n/a" if level is None else f"{float(level):.2f}"
         delta_text = "n/a" if delta is None else f"{float(delta):+.2f}%"
         ax.plot([0.04, 0.42], [0.72, 0.72], transform=ax.transAxes, color=ACCENT, linewidth=1.8, alpha=0.8)
@@ -955,7 +1005,7 @@ class ChartRenderer:
         largest = float(values.get("Largest Position") or 0.0)
         holdings = int(values.get("Active Holdings") or 0)
         state = str(meta.get("risk_state") or "moderate")
-        state_color = {"balanced": POSITIVE, "moderate": ACCENT, "concentrated": "#D18C00"}.get(state, NEUTRAL)
+        state_color = {"balanced": POSITIVE, "moderate": ACCENT, "concentrated": WARNING}.get(state, NEUTRAL)
 
         # Thresholds for visual reference lines
         top5_threshold = 75.0
@@ -969,7 +1019,7 @@ class ChartRenderer:
         for spine in ax.spines.values():
             spine.set_visible(False)
         ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
-        ax.set_title(str(spec.get("title") or "Portfolio Concentration"), loc="left", fontsize=14.5, weight="bold", color=TEXT, pad=10)
+        # Title intentionally omitted inside image; email section header provides title.
 
         bar_height = 0.38
 
@@ -1058,7 +1108,7 @@ class ChartRenderer:
             )
         self._style_axes(
             ax,
-            title=str(spec.get("title") or "Earnings Relevance"),
+            title="",
             xlabel="Count",
             grid_axis="x",
         )
@@ -1102,7 +1152,7 @@ class ChartRenderer:
 
         shape = str((spec.get("meta") or {}).get("shape") or "")
         ax.legend(frameon=False, labelcolor=MUTED, fontsize=8.5)
-        self._style_axes(ax, title=str(spec.get("title") or "Yield Curve Shape"),
+        self._style_axes(ax, title="",
                          xlabel="Tenor", ylabel="Yield (%)", grid_axis="y")
         ax.text(0.01, 0.04, f"Shape: {shape.upper()}" if shape else "",
                 transform=ax.transAxes, color=MUTED, fontsize=8.2, weight="bold")
@@ -1143,7 +1193,7 @@ class ChartRenderer:
                 color=structure_color, fontsize=11, weight="bold",
                 ha="center", va="top",
                 bbox={"facecolor": SUBTLE, "edgecolor": GRID, "linewidth": 0.5, "pad": 3})
-        self._style_axes(ax, title=str(spec.get("title") or "VIX Term Structure"),
+        self._style_axes(ax, title="",
                          xlabel="Session", ylabel="VIX Level", grid_axis="y")
         ax.margins(x=0.18, y=0.18)
         fig.subplots_adjust(left=0.10, right=0.86, top=0.86, bottom=0.18)
@@ -1152,7 +1202,10 @@ class ChartRenderer:
                               caption=str(spec.get("caption") or ""), filename="vix-term-structure.png")
 
     def render_pnl_waterfall_from_spec(self, spec: dict) -> ChartAsset | None:
-        bars = list(spec.get("series") or [])
+        bars = [
+            row for row in list(spec.get("series") or [])
+            if str(row.get("symbol") or "").strip() not in {"", "-", "N/A"}
+        ]
         if not bars:
             return None
         total = float((spec.get("annotations") or [{}])[0].get("value") or 0.0)
@@ -1169,9 +1222,6 @@ class ChartRenderer:
         colors = [POSITIVE if c >= 0 else NEGATIVE for c in contribs]
 
         # Append TOTAL bar (visually separated by inserting a gap row)
-        labels.append("")  # spacer
-        contribs.append(0.0)
-        colors.append(BG)
         labels.append("TOTAL")
         contribs.append(total)
         colors.append(ACCENT)
@@ -1193,8 +1243,6 @@ class ChartRenderer:
 
         offset = x_range * 0.06
         for i, contrib in enumerate(contribs):
-            if contrib == 0.0:
-                continue  # skip spacer
             series_label = labels[i] or "TOTAL"
             self._value_box(ax, contrib + (offset if contrib >= 0 else -offset), i,
                             f"{series_label} {contrib:+.2f}%",
@@ -1204,7 +1252,7 @@ class ChartRenderer:
         ax.set_yticks(y_pos)
         ax.set_yticklabels(labels, color=TEXT, fontsize=9, fontweight="bold")
         ax.invert_yaxis()
-        self._style_axes(ax, title=str(spec.get("title") or "P&L Attribution"),
+        self._style_axes(ax, title="",
                          xlabel="Weighted daily contribution (%)", grid_axis="x", lock_y_ticks=True)
         fig.subplots_adjust(left=0.16, right=0.92, top=0.86, bottom=0.14)
         return self._to_asset(fig, key="pnl_attribution_waterfall",
@@ -1232,8 +1280,7 @@ class ChartRenderer:
         fig, ax = self._figure(8.0, max(2.8, 0.52 * n_rows + 1.4))
         ax.set_facecolor(BG)
         ax.axis("off")
-        ax.set_title(str(spec.get("title") or "Momentum / RSI"), loc="left",
-                     fontsize=14.5, weight="bold", color=TEXT, pad=10)
+        # Title intentionally omitted inside image; email section header provides title.
 
         cell_w = 0.20
         cell_h = 0.72 / max(n_rows, 1)
@@ -1316,7 +1363,7 @@ class ChartRenderer:
         ax.set_yticklabels(labels, color=TEXT, fontsize=9.3, fontweight="bold")
         ax.invert_yaxis()
         ax.set_xlim(-x_max - x_pad, x_max + x_pad * 2.5)
-        self._style_axes(ax, title=str(spec.get("title") or "Implied Earnings Moves"),
+        self._style_axes(ax, title="",
                          xlabel="Options-implied ±move (%)", grid_axis="x", lock_y_ticks=True)
         ax.grid(False)
         ax.text(0.01, 0.04, "Orange = portfolio  ·  Teal = watchlist  ·  ATM straddle / spot",
@@ -1337,7 +1384,13 @@ class ChartRenderer:
     ) -> ChartAsset:
         buffer = BytesIO()
         try:
-            fig.savefig(buffer, format="png", bbox_inches="tight", facecolor=fig.get_facecolor())
+            fig.savefig(
+                buffer,
+                format="png",
+                facecolor=fig.get_facecolor(),
+                bbox_inches=None,
+                pad_inches=0.06,
+            )
         finally:
             plt.close(fig)
         content = buffer.getvalue()

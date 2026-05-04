@@ -169,9 +169,10 @@ def test_email_formatter_uses_continuous_finance_canvas():
     )
 
     rendered = formatter.format_morning_briefing(briefing)
-    assert "background:#071629" in rendered.html_body
+    assert "background:#030A12" in rendered.html_body
+    assert "background:#06111F" in rendered.html_body
     assert "font-size:20px" in rendered.html_body
-    assert "#FF6B00" in rendered.html_body
+    assert "#FF7A00" in rendered.html_body
     assert "SOURCE" in rendered.html_body
     assert "REGIME" in rendered.html_body
     assert "READ" in rendered.html_body
@@ -180,7 +181,27 @@ def test_email_formatter_uses_continuous_finance_canvas():
     assert "Dominant driver:" in rendered.html_body
     assert "border-radius" not in rendered.html_body
     assert rendered.html_body.index("READ") < rendered.html_body.index("<img src=\"cid:market-snapshot-cid\"")
-    assert '<strong style="color:#FF6B00;font-weight:800;">Setup read:</strong>' in rendered.html_body
+    assert '<strong style="color:#FF7A00;font-weight:800;">Setup read:</strong>' in rendered.html_body
+
+
+def test_email_formatter_desktop_and_narrow_width_snapshots():
+    desktop = EmailFormatter("Europe/Madrid", content_width=680)
+    narrow = EmailFormatter("Europe/Madrid", content_width=560)
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 4, 12, 8, 45, tzinfo=timezone.utc),
+        session_mode="sunday",
+        chart_assets=[_sample_chart_asset()],
+        morning_chart_selection=[{"chart_key": "market_snapshot", "role": "hero", "reason": "test"}],
+        morning_chart_bundle={"regime_tags": ["mixed"], "meta": {"data_confidence": "high"}},
+    )
+    desktop_html = desktop.format_morning_briefing(briefing).html_body
+    narrow_html = narrow.format_morning_briefing(briefing).html_body
+    assert 'width="680"' in desktop_html
+    assert "max-width:680px" in desktop_html
+    assert 'width="560"' in narrow_html
+    assert "max-width:560px" in narrow_html
+    assert "max-width:640px;height:auto" in desktop_html
+    assert "max-width:640px;height:auto" in narrow_html
 
 
 def test_email_formatter_includes_quote_freshness_metadata():

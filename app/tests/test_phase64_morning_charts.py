@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 
 import pytest
 pytest.importorskip("httpx")
+pytest.importorskip("PIL")
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.briefing.chart_builder import MorningChartBuilder
 from app.briefing.chart_renderer import ChartRenderer
 from app.briefing.morning_charts import build_morning_chart_bundle, selected_chart_specs
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MarketSetup, MorningBriefing
+from app.schemas.delivery import ChartAsset
 from app.schemas.events import MacroDataPoint, PricePoint, QuoteData, SectorSnapshot
 from app.schemas.portfolio import PortfolioHolding
 from app.settings import Settings
@@ -180,6 +184,117 @@ def test_chart_renderer_renders_available_morning_specs():
     assert all(asset.content.startswith(b"\x89PNG") for asset in assets if asset is not None)
     assert any(asset.key == "global_relative_performance" for asset in assets if asset is not None)
     assert any(asset.key == "cross_asset_impulse_strip" for asset in assets if asset is not None)
+
+
+def test_chart_renderer_global_shows_full_x_axis_labels_and_avoids_clipped_text(monkeypatch):
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=_sample_briefing(),
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+    )
+    spec = next(item for item in selected_chart_specs(bundle) if item.get("chart_key") == "global_relative_performance")
+
+    captured: dict = {}
+
+    def _capture(self, fig, *, key: str, title: str, caption: str, filename: str):
+        fig.canvas.draw()
+        ax = fig.axes[0]
+        labels = [tick.get_text() for tick in ax.get_xticklabels()]
+        captured["labels"] = labels
+        # Ensure text artists are within figure canvas bounds.
+        renderer = fig.canvas.get_renderer()
+        fw, fh = fig.canvas.get_width_height()
+        for text in ax.texts:
+            box = text.get_window_extent(renderer=renderer)
+            assert box.x0 >= -2
+            assert box.y0 >= -2
+            assert box.x1 <= fw + 2
+            assert box.y1 <= fh + 2
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        return ChartAsset(
+            key=key,
+            title=title,
+            caption=caption,
+            filename=filename,
+            content_type="image/png",
+            content_id="test-cid",
+            content=buf.getvalue(),
+        )
+
+    monkeypatch.setattr(ChartRenderer, "_to_asset", _capture, raising=False)
+    asset = ChartRenderer().render_global_relative_from_spec(spec)
+    assert asset is not None
+    assert any(label == "Today" for label in captured["labels"])
+    assert len([label for label in captured["labels"] if label]) >= 5
+
+
+def test_chart_renderer_breadth_separates_breadth_pct_from_factor_axis(monkeypatch):
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=_sample_briefing(),
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+    )
+    spec = next(item for item in selected_chart_specs(bundle) if item.get("chart_key") == "breadth_leadership_panel")
+    captured: dict = {}
+
+    def _capture(self, fig, *, key: str, title: str, caption: str, filename: str):
+        captured["axes_count"] = len(fig.axes)
+        captured["xlabel_bottom"] = fig.axes[-1].get_xlabel()
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        return ChartAsset(
+            key=key,
+            title=title,
+            caption=caption,
+            filename=filename,
+            content_type="image/png",
+            content_id="test-cid",
+            content=buf.getvalue(),
+        )
+
+    monkeypatch.setattr(ChartRenderer, "_to_asset", _capture, raising=False)
+    asset = ChartRenderer().render_breadth_leadership_from_spec(spec)
+    assert asset is not None
+    assert captured["axes_count"] == 2
+    assert "Leadership factor signal" in captured["xlabel_bottom"]
+
+
+def test_chart_renderer_cross_asset_uses_normalized_axis_and_no_in_chart_title(monkeypatch):
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=_sample_briefing(),
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+    )
+    spec = next(item for item in selected_chart_specs(bundle) if item.get("chart_key") == "cross_asset_impulse_strip")
+    captured: dict = {}
+
+    def _capture(self, fig, *, key: str, title: str, caption: str, filename: str):
+        ax = fig.axes[0]
+        captured["xlabel"] = ax.get_xlabel()
+        captured["title"] = ax.get_title()
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        png = buf.getvalue()
+        # Lightweight snapshot sanity check: rendered chart is non-empty and decodable.
+        image = Image.open(BytesIO(png))
+        assert image.size[0] > 1200
+        assert image.size[1] > 700
+        return ChartAsset(
+            key=key,
+            title=title,
+            caption=caption,
+            filename=filename,
+            content_type="image/png",
+            content_id="test-cid",
+            content=png,
+        )
+
+    monkeypatch.setattr(ChartRenderer, "_to_asset", _capture, raising=False)
+    asset = ChartRenderer().render_cross_asset_impulse_from_spec(spec)
+    assert asset is not None
+    assert "Normalized impulse score" in captured["xlabel"]
+    assert captured["title"] == ""
 
 
 def test_briefing_morning_charts_route_renders_preview(monkeypatch, validation_test_settings):

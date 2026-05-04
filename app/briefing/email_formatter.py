@@ -26,9 +26,20 @@ _MOVE_TOKEN_RE = re.compile(r"([+\-−]\d[\d,]*(?:\.\d+)?%?)")
 _PAREN_MOVE_RE = re.compile(r"(\([+\-−]?\d[\d,]*(?:\.\d+)?%?\))")
 _PAIR_MOVE_RE = re.compile(r"([+\-−]\d[\d,]*(?:\.\d+)?\s*\([+\-−]?\d[\d,]*(?:\.\d+)?%\))")
 _EMAIL_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
-_CANVAS_BG = "#071629"
-_GOOD_SHADE_SCALE = ["#6EE7C8", "#00D4AA", "#00B894", "#0F7A4A"]
-_BAD_SHADE_SCALE = ["#FFB4B4", "#FF6B6B", "#E14A4A", "#9B2C2C"]
+_OUTER_BG = "#030A12"
+_CANVAS_BG = "#06111F"
+_SECTION_BG = "#081A2B"
+_CHART_PANEL_BG = "#03101D"
+_DIVIDER = "#153047"
+_TEXT_PRIMARY = "#EAF2FF"
+_TEXT_SECONDARY = "#A9B8C8"
+_TEXT_MUTED = "#7F93A8"
+_FOCUS_ORANGE = "#FF7A00"
+_POSITIVE = "#00C2A8"
+_NEGATIVE = "#FF5C64"
+_NEUTRAL_MOVE = "#8FA4BA"
+_GOOD_SHADE_SCALE = ["#7BE0CF", _POSITIVE, "#0FA98F", "#0B7A66"]
+_BAD_SHADE_SCALE = ["#FFB3B3", _NEGATIVE, "#E14A4A", "#A3373F"]
 _SESSION_BUCKETS = [
     (-1.0, -0.6, "SEVERE_STRESS", "#5C1111", "SEVERE STRESS"),
     (-0.6, -0.25, "CAUTIOUS", "#9B2C2C", "CAUTIOUS"),
@@ -39,13 +50,13 @@ _SESSION_BUCKETS = [
 
 # Regime → (background tint hex, accent hex, display label)
 _REGIME_STYLES: dict[str, tuple[str, str, str]] = {
-    "risk_on":          (_CANVAS_BG, "#00D4AA", "RISK ON"),
-    "defensive":        (_CANVAS_BG, "#FF6B6B", "DEFENSIVE"),
-    "oil_shock":        (_CANVAS_BG, "#FF6B00", "OIL SHOCK"),
-    "rates_led":        (_CANVAS_BG, "#4A90E2", "RATES LED"),
-    "regional_split":   (_CANVAS_BG, "#B08EFF", "REGIONAL SPLIT"),
-    "breadth_divergence": (_CANVAS_BG, "#4A90E2", "BREADTH DIVERGENCE"),
-    "mixed":            (_CANVAS_BG, "#7A8FA0", "MIXED"),
+    "risk_on":          (_SECTION_BG, _POSITIVE, "RISK ON"),
+    "defensive":        (_SECTION_BG, _NEGATIVE, "DEFENSIVE"),
+    "oil_shock":        (_SECTION_BG, _FOCUS_ORANGE, "OIL SHOCK"),
+    "rates_led":        (_SECTION_BG, "#6FA8E8", "RATES LED"),
+    "regional_split":   (_SECTION_BG, "#92A5BD", "REGIONAL SPLIT"),
+    "breadth_divergence": (_SECTION_BG, "#6FA8E8", "BREADTH DIVERGENCE"),
+    "mixed":            (_SECTION_BG, _TEXT_MUTED, "MIXED"),
 }
 
 # Section header → anchor slug mapping
@@ -73,9 +84,10 @@ _NAV_ITEMS = [
 class EmailFormatter:
     """Render Outlook-safe HTML email while preserving Telegram narrative."""
 
-    def __init__(self, timezone_name: str = "UTC"):
+    def __init__(self, timezone_name: str = "UTC", content_width: int = 680):
         self.telegram_formatter = TelegramFormatter(timezone_name)
         self.timezone_name = timezone_name
+        self.content_width = max(560, min(760, int(content_width)))
         self.enable_move_intensity_shading = os.getenv("EMAIL_ENABLE_MOVE_INTENSITY_SHADING", "true").strip().lower() not in {"0", "false", "off", "no"}
         self.enable_session_quality_accents = os.getenv("EMAIL_ENABLE_SESSION_QUALITY_ACCENTS", "true").strip().lower() not in {"0", "false", "off", "no"}
         self._move_shading_baselines: dict[str, float] = {}
@@ -126,69 +138,69 @@ class EmailFormatter:
         all_tags_text = " · ".join(str(t).replace("_", " ").upper() for t in regime_tags) or "MIXED"
 
         parts = [
-            f"<html><body bgcolor=\"{_CANVAS_BG}\" style=\"margin:0;padding:0;background:{_CANVAS_BG};background-color:{_CANVAS_BG};font-family:{_EMAIL_FONT_STACK};color:#E8ECEF;\">",
-            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
-            f"<tr><td align=\"center\" bgcolor=\"{_CANVAS_BG}\" style=\"padding:8px 4px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
-            f"<table role=\"presentation\" width=\"680\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"width:680px;max-width:680px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};border:1px solid #1F3447;\">",
+            f"<html><body bgcolor=\"{_OUTER_BG}\" style=\"margin:0;padding:0;background:{_OUTER_BG};background-color:{_OUTER_BG};font-family:{_EMAIL_FONT_STACK};color:{_TEXT_PRIMARY};\">",
+            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_OUTER_BG}\" style=\"background:{_OUTER_BG};background-color:{_OUTER_BG};\">",
+            f"<tr><td align=\"center\" bgcolor=\"{_OUTER_BG}\" style=\"padding:8px 4px;background:{_OUTER_BG};background-color:{_OUTER_BG};\">",
+            f"<table role=\"presentation\" width=\"{self.content_width}\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"width:{self.content_width}px;max-width:{self.content_width}px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};border:1px solid {_DIVIDER};\">",
             # Regime colour bar (3px top accent)
             f"<tr><td style=\"height:3px;line-height:3px;font-size:0;background:{regime_accent};background-color:{regime_accent};\">&nbsp;</td></tr>",
             # Header row
-            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:13px 16px 11px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
+            f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:13px 16px 11px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
             "<td valign=\"bottom\" style=\"width:62%;\">",
-            f"<div style=\"font-size:20px;line-height:1.08;font-weight:800;color:#E8ECEF;letter-spacing:-0.01em;\">{html.escape(title)}</div>",
-            f"<div style=\"margin-top:5px;font-size:12px;line-height:1.35;color:#7A8FA0;\">{html.escape(lead)}</div>",
+            f"<div style=\"font-size:20px;line-height:1.08;font-weight:800;color:{_TEXT_PRIMARY};letter-spacing:-0.01em;\">{html.escape(title)}</div>",
+            f"<div style=\"margin-top:5px;font-size:12px;line-height:1.35;color:{_TEXT_SECONDARY};\">{html.escape(lead)}</div>",
             "</td>",
             "<td valign=\"bottom\" align=\"right\" style=\"width:38%;\">",
-            f"<div style=\"font-size:13px;line-height:1.2;font-weight:700;color:#E8ECEF;letter-spacing:-0.01em;\">{html.escape(date_label)}</div>",
+            f"<div style=\"font-size:13px;line-height:1.2;font-weight:700;color:{_TEXT_PRIMARY};letter-spacing:-0.01em;\">{html.escape(date_label)}</div>",
             "</td></tr></table>",
             "</td></tr>",
             # Full-width regime banner row
-            f"<tr><td style=\"padding:6px 16px;border-bottom:1px solid #1F3447;background:{regime_bg};\">",
+            f"<tr><td style=\"padding:6px 16px;border-bottom:1px solid {_DIVIDER};background:{regime_bg};\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
             f"<td style=\"font-size:11px;line-height:1.3;font-weight:800;color:{regime_accent};letter-spacing:0.06em;\">",
             f"&#9646; REGIME: {html.escape(regime_label)}",
             "</td>",
-            f"<td align=\"right\" style=\"font-size:9.5px;color:#7A8FA0;\">{html.escape(all_tags_text)}</td>",
+            f"<td align=\"right\" style=\"font-size:9.5px;color:{_TEXT_MUTED};\">{html.escape(all_tags_text)}</td>",
             "</tr></table>",
             "</td></tr>",
             # Meta row
-            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
+            f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:7px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
-            f"<td style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">GENERATED</strong> {html.escape(generated_local)}</td>",
-            f"<td align=\"center\" style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">PROFILE</strong> {html.escape(profile_name)}</td>",
-            f"<td align=\"right\" style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">MODE</strong> {html.escape(delivery_mode)} · <strong style=\"color:#E8ECEF;\">CONF</strong> {html.escape(confidence)}</td>",
+            f"<td style=\"font-size:10.5px;line-height:1.35;color:{_TEXT_SECONDARY};\"><strong style=\"color:{_TEXT_PRIMARY};\">GENERATED</strong> {html.escape(generated_local)}</td>",
+            f"<td align=\"center\" style=\"font-size:10.5px;line-height:1.35;color:{_TEXT_SECONDARY};\"><strong style=\"color:{_TEXT_PRIMARY};\">PROFILE</strong> {html.escape(profile_name)}</td>",
+            f"<td align=\"right\" style=\"font-size:10.5px;line-height:1.35;color:{_TEXT_SECONDARY};\"><strong style=\"color:{_TEXT_PRIMARY};\">MODE</strong> {html.escape(delivery_mode)} · <strong style=\"color:{_TEXT_PRIMARY};\">CONF</strong> {html.escape(confidence)}</td>",
             "</tr></table>",
             "</td></tr>",
             # Section confidence row
-            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
-            "<div style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\">"
-            "<strong style=\"color:#E8ECEF;\">SECTION CONFIDENCE</strong><br>"
+            f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:7px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">",
+            f"<div style=\"font-size:10.5px;line-height:1.35;color:{_TEXT_SECONDARY};\">"
+            f"<strong style=\"color:{_TEXT_PRIMARY};\">SECTION CONFIDENCE</strong><br>"
             + "<br>".join(html.escape(line) for line in section_conf_lines)
             + "</div>",
             "</td></tr>",
             # Source freshness row
-            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
-            "<div style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\">"
-            "<strong style=\"color:#E8ECEF;\">DATA FRESHNESS · SOURCE</strong><br>"
+            f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:7px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">",
+            f"<div style=\"font-size:10.5px;line-height:1.35;color:{_TEXT_SECONDARY};\">"
+            f"<strong style=\"color:{_TEXT_PRIMARY};\">DATA FRESHNESS · SOURCE</strong><br>"
             + "<br>".join(html.escape(line) for line in freshness_lines)
             + "</div>",
             "</td></tr>",
             # Jump-link nav row
-            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:6px 16px 6px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
+            f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:6px 16px 6px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">",
             self._nav_row(),
             "</td></tr>",
         ]
 
         if desk_read:
             parts.append(
-                f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:9px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};"
-                "font-size:12.5px;line-height:1.38;color:#E8ECEF;\">"
+                f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:9px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};"
+                f"font-size:12.5px;line-height:1.38;color:{_TEXT_PRIMARY};\">"
                 f"{desk_read}</td></tr>"
             )
 
         if briefing.chart_assets:
-            parts.append(f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:10px 16px 0 16px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">")
+            parts.append(f"<tr><td bgcolor=\"{_CHART_PANEL_BG}\" style=\"padding:10px 16px 0 16px;background:{_CHART_PANEL_BG};background-color:{_CHART_PANEL_BG};\">")
             parts.append(self._chart_modules(briefing))
             parts.append("</td></tr>")
 
@@ -200,7 +212,7 @@ class EmailFormatter:
         if breadth_row:
             parts.append(breadth_row)
 
-        parts.append(f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:0 16px 16px 16px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">")
+        parts.append(f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:0 16px 16px 16px;background:{_SECTION_BG};background-color:{_SECTION_BG};\">")
         parts.append(self._brief_modules(full_html))
         parts.append("</td></tr>")
 
@@ -211,7 +223,7 @@ class EmailFormatter:
     @staticmethod
     def _nav_row() -> str:
         links = " &nbsp;|&nbsp; ".join(
-            f"<a href=\"#{slug}\" style=\"color:#7A8FA0;font-size:10px;font-weight:700;text-decoration:none;"
+            f"<a href=\"#{slug}\" style=\"color:{_TEXT_MUTED};font-size:10px;font-weight:700;text-decoration:none;"
             f"letter-spacing:0.04em;\">{html.escape(label).upper()}</a>"
             for slug, label in _NAV_ITEMS
         )
@@ -225,7 +237,7 @@ class EmailFormatter:
         for m in strip:
             chg_pct = m.change_percent
             if chg_pct is not None:
-                color = "#00D4AA" if chg_pct >= 0 else "#FF6B6B"
+                color = _POSITIVE if chg_pct >= 0 else _NEGATIVE
                 sign = "+" if chg_pct >= 0 else ""
                 chg_html = f"<span style=\"color:{color};\">{sign}{chg_pct:.2f}%</span>"
             else:
@@ -233,8 +245,8 @@ class EmailFormatter:
             name = (m.name or m.series_id).replace(" (USD/bbl)", "").replace(" (USD/troy oz)", "").replace(" (USD/MMBtu)", "")
             val = f"{m.value:,.2f}"
             cells.append(
-                f"<td style=\"padding:3px 10px 3px 0;font-size:11px;color:#E8ECEF;white-space:nowrap;\">"
-                f"<span style=\"color:#9BA3AB;\">{html.escape(name)}</span>&nbsp;"
+                f"<td style=\"padding:3px 10px 3px 0;font-size:11px;color:{_TEXT_PRIMARY};white-space:nowrap;\">"
+                f"<span style=\"color:{_TEXT_MUTED};\">{html.escape(name)}</span>&nbsp;"
                 f"<strong>{html.escape(val)}</strong>&nbsp;{chg_html}</td>"
             )
         # Two columns
@@ -243,9 +255,9 @@ class EmailFormatter:
             pair = cells[i:i+2]
             rows_html += f"<tr>{''.join(pair)}</tr>"
         return (
-            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:8px 16px;border-bottom:1px solid #1F3447;"
-            f"background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
-            f"<div style=\"font-size:10px;color:#9BA3AB;letter-spacing:0.05em;font-weight:700;"
+            f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:8px 16px;border-bottom:1px solid {_DIVIDER};"
+            f"background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
+            f"<div style=\"font-size:10px;color:{_TEXT_MUTED};letter-spacing:0.05em;font-weight:700;"
             f"margin-bottom:5px;\">COMMODITIES</div>"
             f"<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\">{rows_html}</table>"
             f"</td></tr>"
@@ -260,21 +272,21 @@ class EmailFormatter:
         cells = []
         for b in rows:
             chg = float(b.change_percent or 0)
-            color = "#00D4AA" if chg >= 0 else "#FF6B6B"
+            color = _POSITIVE if chg >= 0 else _NEGATIVE
             sign = "+" if chg >= 0 else ""
             cells.append(
                 f"<td style=\"padding:2px 8px 2px 0;font-size:10px;white-space:nowrap;\">"
-                f"<span style=\"color:#9BA3AB;\">{html.escape(b.display_name or b.symbol)}</span>&nbsp;"
-                f"<span style=\"color:{color};\">{sign}{chg:.1f}%</span></td>"
+                    f"<span style=\"color:{_TEXT_MUTED};\">{html.escape(b.display_name or b.symbol)}</span>&nbsp;"
+                    f"<span style=\"color:{color};\">{sign}{chg:.1f}%</span></td>"
             )
         rows_html = ""
         for i in range(0, len(cells), 4):
             rows_html += f"<tr>{''.join(cells[i:i+4])}</tr>"
-        summary_color = "#00D4AA" if up >= dn else "#FF6B6B"
+        summary_color = _POSITIVE if up >= dn else _NEGATIVE
         return (
-            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:8px 16px;border-bottom:1px solid #1F3447;"
-            f"background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
-            f"<div style=\"font-size:10px;color:#9BA3AB;letter-spacing:0.05em;font-weight:700;"
+            f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:8px 16px;border-bottom:1px solid {_DIVIDER};"
+            f"background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
+            f"<div style=\"font-size:10px;color:{_TEXT_MUTED};letter-spacing:0.05em;font-weight:700;"
             f"margin-bottom:5px;\">SECTOR BREADTH &nbsp;"
             f"<span style=\"color:{summary_color};\">{up}↑ {dn}↓</span></div>"
             f"<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\">{rows_html}</table>"
@@ -284,7 +296,7 @@ class EmailFormatter:
     def _chart_modules(self, briefing: MorningBriefing) -> str:
         roles = {row.get("chart_key"): row.get("role") for row in (briefing.morning_chart_selection or [])}
         modules = [
-            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"border-collapse:collapse;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
+            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CHART_PANEL_BG}\" style=\"border-collapse:collapse;background:{_CHART_PANEL_BG};background-color:{_CHART_PANEL_BG};\">"
         ]
         for idx, asset in enumerate(briefing.chart_assets):
             role = str(roles.get(asset.key) or ("hero" if idx == 0 else "support"))
@@ -295,23 +307,23 @@ class EmailFormatter:
             pad_bottom = "13px" if is_hero else ("9px" if is_micro else "11px")
             read_line, why_line, lens_line = self._chart_copy_triplet(asset.key, asset.caption)
             modules.append(
-                f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
+                f"<tr><td bgcolor=\"{_CHART_PANEL_BG}\" style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid {_DIVIDER};background:{_CHART_PANEL_BG};background-color:{_CHART_PANEL_BG};\">"
             )
             modules.append(
-                f"<div style=\"font-size:{title_size};line-height:1.15;font-weight:800;color:#E8ECEF;letter-spacing:-0.01em;padding:0 0 4px 0;\">{html.escape(asset.title)}</div>"
+                f"<div style=\"font-size:{title_size};line-height:1.15;font-weight:800;color:{_TEXT_PRIMARY};letter-spacing:-0.01em;padding:0 0 4px 0;\">{html.escape(asset.title)}</div>"
             )
             modules.append(
-                f"<div style=\"font-size:12px;line-height:1.35;color:#7A8FA0;padding:0 0 11px 0;\"><span style=\"color:#FF6B00;font-size:10px;letter-spacing:0.05em;font-weight:800;\">READ</span> {html.escape(read_line)}</div>"
+                f"<div style=\"font-size:12px;line-height:1.35;color:{_TEXT_SECONDARY};padding:0 0 11px 0;\"><span style=\"color:{_FOCUS_ORANGE};font-size:10px;letter-spacing:0.05em;font-weight:800;\">READ</span> {html.escape(read_line)}</div>"
             )
             modules.append(
                 f"<img src=\"cid:{html.escape(asset.content_id)}\" alt=\"{html.escape(asset.title)}\" "
                 "width=\"640\" style=\"display:block;width:100%;max-width:640px;height:auto;margin-top:0;border:0;\">"
             )
             modules.append(
-                f"<div style=\"font-size:11px;line-height:1.35;color:#9BA3AB;padding:7px 0 0 0;\"><span style=\"color:#AFC3D6;font-size:10px;letter-spacing:0.04em;font-weight:800;\">WHY IT MATTERS</span> {html.escape(why_line)}</div>"
+                f"<div style=\"font-size:11px;line-height:1.35;color:{_TEXT_SECONDARY};padding:7px 0 0 0;\"><span style=\"color:{_TEXT_MUTED};font-size:10px;letter-spacing:0.04em;font-weight:800;\">WHY IT MATTERS</span> {html.escape(why_line)}</div>"
             )
             modules.append(
-                f"<div style=\"font-size:12px;line-height:1.45;color:#B6C4D3;padding:6px 0 0 0;\"><span style=\"color:#AFC3D6;font-size:10px;letter-spacing:0.04em;font-weight:800;\">PORTFOLIO LENS</span> {html.escape(lens_line)}</div>"
+                f"<div style=\"font-size:12px;line-height:1.45;color:{_TEXT_PRIMARY};padding:6px 0 0 0;\"><span style=\"color:{_TEXT_MUTED};font-size:10px;letter-spacing:0.04em;font-weight:800;\">PORTFOLIO LENS</span> {html.escape(lens_line)}</div>"
             )
             modules.append("</td></tr>")
         modules.append("</table>")
@@ -339,16 +351,16 @@ class EmailFormatter:
             if len(lines) > 1:
                 body = self._format_section_body(lines[1:], section_title)
                 return (
-                    f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"margin-top:10px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
-                    f"<tr><td{anchor_id} bgcolor=\"{_CANVAS_BG}\" style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
-                    f"<div style=\"font-size:15px;line-height:1.18;font-weight:800;letter-spacing:-0.01em;color:#E8ECEF;margin:0 0 6px 0;\">{html.escape(header_text)}</div>"
+                    f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_SECTION_BG}\" style=\"margin-top:10px;background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
+                    f"<tr><td{anchor_id} bgcolor=\"{_SECTION_BG}\" style=\"padding:11px 0 9px 0;font-size:13px;color:{_TEXT_PRIMARY};line-height:1.38;border-top:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
+                    f"<div style=\"font-size:15px;line-height:1.18;font-weight:800;letter-spacing:-0.01em;color:{_TEXT_PRIMARY};margin:0 0 6px 0;\">{html.escape(header_text)}</div>"
                     f"{body}"
                     "</td></tr></table>"
                 )
         body = self._format_section_body(lines, section_title)
         return (
-            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"margin-top:10px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
-            f"<tr><td{anchor_id} bgcolor=\"{_CANVAS_BG}\" style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
+            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_SECTION_BG}\" style=\"margin-top:10px;background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
+            f"<tr><td{anchor_id} bgcolor=\"{_SECTION_BG}\" style=\"padding:11px 0 9px 0;font-size:13px;color:{_TEXT_PRIMARY};line-height:1.38;border-top:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
             f"{body}"
             "</td></tr></table>"
         )
@@ -488,7 +500,7 @@ class EmailFormatter:
     def _emphasize_market_labels(body: str) -> str:
         def repl(match: re.Match[str]) -> str:
             label = html.escape(match.group("label"))
-            return f'<strong style="color:#FF6B00;font-weight:800;">{label}:</strong>'
+            return f'<strong style="color:{_FOCUS_ORANGE};font-weight:800;">{label}:</strong>'
 
         return _LABEL_RE.sub(repl, body)
 
@@ -584,13 +596,13 @@ class EmailFormatter:
     def _color_for_change(self, token: str, context: str) -> str:
         value = EmailFormatter._extract_signed_value(token)
         if value is None:
-            return "#E8ECEF"
+            return _TEXT_PRIMARY
         if abs(value) < 1e-12:
-            return "#9BA3AB"
+            return _NEUTRAL_MOVE
         positive_is_good = context not in {"stress", "rates"}
         good_move = (value > 0 and positive_is_good) or (value < 0 and not positive_is_good)
         if not self.enable_move_intensity_shading:
-            return "#00D4AA" if good_move else "#FF6B6B"
+            return _POSITIVE if good_move else _NEGATIVE
         return self._shade_for_intensity(
             abs(value),
             context=context,
