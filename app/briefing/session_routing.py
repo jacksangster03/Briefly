@@ -56,3 +56,17 @@ def session_window_for_key(key: str) -> SessionWindow:
     if mapped == "closing_wrap":
         return SessionWindow("closing_wrap", "Closing Wrap / Next-Day Setup", time(22, 0), time(23, 59))
     return SessionWindow("morning", "Morning Briefing", time(6, 0), time(10, 30))
+
+
+def next_session_window(*, now: datetime, timezone_name: str) -> SessionWindow:
+    """Return the next chronological session window from current local time."""
+    tz = ZoneInfo(timezone_name)
+    local_now = now.astimezone(tz) if now.tzinfo else now.replace(tzinfo=tz)
+    tod = local_now.timetz().replace(tzinfo=None)
+    for window in SESSION_WINDOWS:
+        if tod < window.start:
+            return window
+    # After the last daytime window, next session is closing wrap.
+    if tod >= time(22, 0):
+        return SessionWindow("morning", "Morning Briefing", time(6, 0), time(10, 30))
+    return SessionWindow("closing_wrap", "Closing Wrap / Next-Day Setup", time(22, 0), time(23, 59))

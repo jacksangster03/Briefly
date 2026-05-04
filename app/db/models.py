@@ -68,7 +68,7 @@ class SentMessage(Base):
     __tablename__ = "sent_messages"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    message_type = Column(String(50), nullable=False)  # morning_brief | intraday | breaking
+    message_type = Column(String(50), nullable=False)  # session_brief:<session_key> | breaking | other
     channel = Column(String(50), nullable=False)        # telegram | email
     event_ids = Column(JSON, default=list)
     content_preview = Column(Text, default="")

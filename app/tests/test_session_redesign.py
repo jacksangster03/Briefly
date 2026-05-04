@@ -4,13 +4,14 @@ from datetime import datetime, timezone
 
 from click.testing import CliRunner
 
+from app.briefing.formatter import TelegramFormatter
 from app.briefing.morning_charts import build_morning_chart_bundle
 from app.briefing.session_materiality import compute_materiality
-from app.briefing.session_routing import resolve_session_window
+from app.briefing.session_routing import next_session_window, resolve_session_window
 from app.cli import cli
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MarketSetup, MorningBriefing
-from app.schemas.events import MacroDataPoint, QuoteData
+from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, QuoteData, SectorSnapshot
 from app.schemas.portfolio import PortfolioHolding
 
 
@@ -94,6 +95,15 @@ def test_session_window_routing_boundaries():
     assert resolve_session_window(now=datetime(2026, 5, 4, 12, 0, tzinfo=timezone.utc), timezone_name=tz).key == "us_pre_open"
     assert resolve_session_window(now=datetime(2026, 5, 4, 14, 0, tzinfo=timezone.utc), timezone_name=tz).key == "us_intraday_risk"
     assert resolve_session_window(now=datetime(2026, 5, 4, 16, 0, tzinfo=timezone.utc), timezone_name=tz).key == "into_close"
+    assert resolve_session_window(now=datetime(2026, 5, 4, 21, 5, tzinfo=timezone.utc), timezone_name=tz).key == "closing_wrap"
+
+
+def test_next_session_window():
+    tz = "Europe/Madrid"
+    nxt = next_session_window(now=datetime(2026, 5, 4, 11, 10, tzinfo=timezone.utc), timezone_name=tz)
+    assert nxt.key == "us_pre_open"
+    nxt2 = next_session_window(now=datetime(2026, 5, 4, 22, 10, tzinfo=timezone.utc), timezone_name=tz)
+    assert nxt2.key == "morning"
 
 
 def test_materiality_high_score_routes_to_breaking():
@@ -131,6 +141,7 @@ def test_intraday_desk_stack_includes_required_session_cards():
     assert "watchlist_movers_card" in keys
     assert "setup_confirmation_card" in keys
     assert "pnl_attribution_waterfall" in keys
+    assert bundle["meta"]["required_charts_missing"] == []
 
 
 def test_vix_174_is_watchful():
@@ -143,6 +154,40 @@ def test_vix_174_is_watchful():
     )
     chart_map = {row["chart_key"]: row for row in bundle["charts"]}
     assert chart_map["volatility_regime_card"]["meta"]["regime"] == "watchful"
+
+
+def test_intraday_output_is_shorter_and_omits_full_calendar():
+    formatter = TelegramFormatter("Europe/Madrid")
+    morning = _sample_briefing("morning")
+    morning.session_title = "Morning Briefing"
+    morning.session_mode = "weekday"
+    morning.earnings_calendar = [
+        EarningsEvent(symbol="MSFT", company_name="Microsoft", report_date="2026-05-05"),
+        EarningsEvent(symbol="NVDA", company_name="NVIDIA", report_date="2026-05-06"),
+    ]
+    morning.global_news = [
+        NormalisedEvent(event_id="g1", title="Macro item", summary="Rates and oil update", source="reuters"),
+    ]
+    morning.top_themes = [
+        NormalisedEvent(event_id="t1", title="Theme item", summary="Guidance shift", source="reuters"),
+    ]
+    morning.sector_scan = [SectorSnapshot(sector_key="tech", display_name="Technology", etf_symbol="XLK", top_events=[])]
+    for i in range(20):
+        morning.what_changed_lines.append(f"line {i}")
+    intraday = _sample_briefing("us_intraday_risk")
+    intraday.session_title = "US Intraday Risk Check"
+    intraday.session_mode = "weekday"
+    intraday.earnings_calendar = morning.earnings_calendar
+    morning_text = "\n".join(formatter.format_morning_briefing(morning))
+    intraday_text = "\n".join(formatter.format_morning_briefing(intraday))
+    assert intraday_text.count("<b>") < morning_text.count("<b>")
+    assert "WHAT CHANGED" in intraday_text
+    assert "EARNINGS CALENDAR" not in intraday_text
+
+
+def test_provider_health_note_user_facing():
+    note = TelegramFormatter._provider_health_note("alpha_vantage:0, finnhub:100, fmp:0, gdelt:0")
+    assert note == "Provider notes: GDELT unavailable; FMP unavailable; core providers available."
 
 
 def test_cli_morning_force_override_passes_force_flag(monkeypatch):

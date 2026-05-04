@@ -20,6 +20,17 @@ _METRIC_SYMBOLS = {
     "asia_avg_pct": "__ASIA_AVG_PCT__",
     "portfolio_contrib_pct": "__PORTF_CONTRIB_PCT__",
     "session_quality": "__SESSION_QUALITY__",
+    "regime_code": "__REGIME_CODE__",
+    "watchlist_leader_pct": "__WATCHLIST_LEADER_PCT__",
+    "watchlist_laggard_pct": "__WATCHLIST_LAGGARD_PCT__",
+}
+
+_REGIME_CODES: dict[str, int] = {
+    "severe stress": -2,
+    "cautious": -1,
+    "mixed": 0,
+    "constructive": 1,
+    "strong risk-on": 2,
 }
 
 
@@ -54,6 +65,11 @@ def snapshot_metrics(briefing: MorningBriefing) -> dict[str, float]:
     charts = {str(row.get("chart_key")): row for row in (bundle.get("charts") or [])}
     pnl = charts.get("pnl_attribution_waterfall") or {}
     total_contrib = float(((pnl.get("meta") or {}).get("total_contribution") or 0.0))
+    watchlist_moves = [float(q.change_percent or 0.0) for q in (briefing.watchlist_quotes or [])]
+    leader = max(watchlist_moves) if watchlist_moves else 0.0
+    laggard = min(watchlist_moves) if watchlist_moves else 0.0
+    regime_label = str(briefing.session_quality_label or "").strip().lower()
+    regime_code = float(_REGIME_CODES.get(regime_label, 0))
 
     return {
         "vix_level": _quote_level("VIX"),
@@ -67,6 +83,9 @@ def snapshot_metrics(briefing: MorningBriefing) -> dict[str, float]:
         "asia_avg_pct": (sum(asia) / len(asia)) if asia else 0.0,
         "portfolio_contrib_pct": total_contrib,
         "session_quality": float(briefing.session_quality_score or 0.0),
+        "regime_code": regime_code,
+        "watchlist_leader_pct": leader,
+        "watchlist_laggard_pct": laggard,
     }
 
 
@@ -142,6 +161,14 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
     if not previous:
         return ["No prior comparable snapshot available."]
     lines: list[str] = []
+
+    prev_regime = int(round(float(previous.get("regime_code", 0.0))))
+    cur_regime = int(round(float(current.get("regime_code", prev_regime))))
+    if prev_regime != cur_regime:
+        prev_label = next((name for name, code in _REGIME_CODES.items() if code == prev_regime), "mixed")
+        cur_label = next((name for name, code in _REGIME_CODES.items() if code == cur_regime), "mixed")
+        lines.append(f"Regime: {prev_label.title()} -> {cur_label.title()}")
+
     def _delta(name: str, key: str, suffix: str, scale: float = 1.0) -> None:
         cur = float(current.get(key, 0.0))
         prv = float(previous.get(key, 0.0))
@@ -158,4 +185,13 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
     _delta("Europe avg", "eu_avg_pct", "%")
     _delta("Asia avg", "asia_avg_pct", "%")
     _delta("Portfolio contribution", "portfolio_contrib_pct", "%")
-    return lines[:7]
+    if "watchlist_leader_pct" in current or "watchlist_laggard_pct" in current:
+        cur_leader = float(current.get("watchlist_leader_pct", 0.0))
+        cur_laggard = float(current.get("watchlist_laggard_pct", 0.0))
+        prv_leader = float(previous.get("watchlist_leader_pct", cur_leader))
+        prv_laggard = float(previous.get("watchlist_laggard_pct", cur_laggard))
+        lines.append(
+            f"Watchlist leadership spread: {(cur_leader - cur_laggard):+.2f}pp "
+            f"({(cur_leader - cur_laggard) - (prv_leader - prv_laggard):+.2f}pp)"
+        )
+    return lines[:8]

@@ -149,7 +149,8 @@ def build_morning_chart_bundle(
     }
     if selection_meta.get("required_charts_missing"):
         logger.warning(
-            "Chart stack missing required coverage | mode=%s stack=%s tags=%s selected=%s missing=%s",
+            "Chart stack missing required coverage | session=%s mode=%s stack=%s tags=%s selected=%s missing=%s",
+            briefing.session_key,
             _chart_density_mode(profile, briefing),
             _stack_key_for_session_regime(briefing, normalized, regime_tags),
             regime_tags,
@@ -157,9 +158,11 @@ def build_morning_chart_bundle(
             selection_meta.get("required_charts_missing"),
         )
     logger.info(
-        "Chart stack mode=%s stack=%s selected=%s suppressed=%s",
+        "Chart stack | session=%s mode=%s stack=%s tags=%s selected=%s suppressed=%s",
+        briefing.session_key,
         _chart_density_mode(profile, briefing),
         _stack_key_for_session_regime(briefing, normalized, regime_tags),
+        regime_tags,
         selection_meta.get("selected_charts"),
         selection_meta.get("suppressed_charts"),
     )
@@ -727,6 +730,22 @@ def _select_candidates(
             if len(selection_keys) >= min_charts:
                 break
 
+    # Final pass: avoid silently dropping required tag coverage when an available chart exists.
+    for group in required_groups:
+        if any(key in selection_keys for key in group):
+            continue
+        fallback = next((key for key in group if key in available_keys), None)
+        if fallback is None:
+            continue
+        if fallback not in selection_keys:
+            if len(selection_keys) >= target_charts:
+                removable = next((key for key in reversed(selection_keys) if key not in protected_keys), None)
+                if removable is not None:
+                    selection_keys.remove(removable)
+                    suppressed.append(f"{removable}:replaced_for_required_coverage")
+            selection_keys.append(fallback)
+            suppressed.append(f"{fallback}:forced_required_coverage")
+
     roles: list[dict[str, str]] = []
     micro_counter = 0
     for idx, key in enumerate(selection_keys):
@@ -745,6 +764,7 @@ def _select_candidates(
         else:
             role = "support"
         roles.append({"chart_key": key, "role": role, "reason": item.reason})
+
     selected_set = set(selection_keys)
     required_missing = [
         "/".join(group)

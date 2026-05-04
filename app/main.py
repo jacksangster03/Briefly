@@ -25,7 +25,7 @@ from app.briefing.breaking_generator import BreakingAlertGenerator
 from app.briefing.llm_email_renderer import LLMEmailRenderer
 from app.briefing.morning_generator import MorningBriefingGenerator
 from app.briefing.session_materiality import compute_materiality
-from app.briefing.session_routing import resolve_session_window, session_window_for_key
+from app.briefing.session_routing import next_session_window, resolve_session_window, session_window_for_key
 from app.briefing.session_snapshot import load_previous_snapshot, persist_snapshot, snapshot_metrics
 from app.cadence.engine import DecisionEngine
 from app.cadence.state_store import (
@@ -635,10 +635,15 @@ def run_morning_briefing(
             and briefing.session_key not in always_send
         ):
             if materiality.decision in {"suppress", "hold_for_next_session"}:
+                next_window = next_session_window(
+                    now=briefing.generated_at,
+                    timezone_name=profile.timezone or settings.timezone,
+                )
                 logger.info(
-                    "Cadence decision (session): %s | session=%s next_eligible_session=next_window",
+                    "Cadence decision (session): %s | session=%s next_eligible_session=%s",
                     materiality.decision,
                     briefing.session_key,
+                    next_window.key,
                 )
                 return
             if materiality.decision == "breaking_alert":
@@ -703,12 +708,13 @@ def run_morning_briefing(
     delivered_ok = False
     for messenger in telegram_messengers:
         _send_telegram_chart_preview(messenger, briefing.chart_assets, settings)
+    delivery_msg_type = f"session_brief:{briefing.session_key or session_key}"
     if telegram_messengers:
         for messenger in telegram_messengers:
             telegram_ok = _deliver(
                 [messenger],
                 messages,
-                "morning_brief",
+                delivery_msg_type,
                 display_events,
                 settings=settings,
             )
@@ -729,13 +735,13 @@ def run_morning_briefing(
             active_email_content.subject,
             active_email_content.plain_text,
             active_email_content.inline_assets,
-            "morning_email_preview",
+            f"session_email_preview:{briefing.session_key or session_key}",
         )
     for messenger in email_messengers:
         email_ok = _deliver_rich_email(
             messenger,
             active_email_content,
-            "morning_brief",
+            delivery_msg_type,
             display_events,
             settings=settings,
         )
@@ -753,7 +759,8 @@ def run_morning_briefing(
             )
 
     logger.info(
-        "Morning delivery status | telegram=%s (%s) | email=%s (%s)",
+        "%s delivery status | telegram=%s (%s) | email=%s (%s)",
+        briefing.session_title or "Session",
         channel_status.get("telegram", "skipped"),
         channel_reason.get("telegram", "n/a"),
         channel_status.get("email", "skipped"),
