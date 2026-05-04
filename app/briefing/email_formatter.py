@@ -19,6 +19,9 @@ _BOLD_HEADER_RE = re.compile(r"^<b>([^<]+)</b>\s*$")
 _LABEL_RE = re.compile(
     r"(?P<label>Dominant driver|Setup read|Portfolio impact|Action posture|Regional skew|Watchlist|Earnings Calendar|Geo risk meter|Regime shift):"
 )
+_MOVE_TOKEN_RE = re.compile(r"([+\-−]\d[\d,]*(?:\.\d+)?%?)")
+_PAREN_MOVE_RE = re.compile(r"(\([+\-−]?\d[\d,]*(?:\.\d+)?%?\))")
+_PAIR_MOVE_RE = re.compile(r"([+\-−]\d[\d,]*(?:\.\d+)?\s*\([+\-−]?\d[\d,]*(?:\.\d+)?%\))")
 _EMAIL_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
 
 # Regime → (background tint hex, accent hex, display label)
@@ -216,8 +219,10 @@ class EmailFormatter:
         first = lines[0] if lines else ""
         header_match = _BOLD_HEADER_RE.match(first)
         anchor_id = ""
+        section_title: str | None = None
         if header_match:
             header_text = header_match.group(1)
+            section_title = header_text
             slug = next(
                 (v for k, v in _SECTION_ANCHORS.items() if k in header_text.lower()),
                 None,
@@ -225,7 +230,7 @@ class EmailFormatter:
             if slug:
                 anchor_id = f" id=\"{slug}\""
             if len(lines) > 1:
-                body = self._emphasize_market_labels("<br>".join(line for line in lines[1:] if line is not None))
+                body = self._format_section_body(lines[1:], section_title)
                 return (
                     f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;\">"
                     f"<tr><td{anchor_id} style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;\">"
@@ -233,13 +238,17 @@ class EmailFormatter:
                     f"{body}"
                     "</td></tr></table>"
                 )
-        body = self._emphasize_market_labels("<br>".join(lines))
+        body = self._format_section_body(lines, section_title)
         return (
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;\">"
             f"<tr><td{anchor_id} style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;\">"
             f"{body}"
             "</td></tr></table>"
         )
+
+    def _format_section_body(self, lines: list[str], section_title: str | None) -> str:
+        colored_lines = [self._colorize_structured_line(line, section_title) for line in lines if line is not None]
+        return self._emphasize_market_labels("<br>".join(colored_lines))
 
     @staticmethod
     def _chart_read_line(caption: str | None) -> str:
@@ -332,6 +341,100 @@ class EmailFormatter:
             return f'<strong style="color:#FF6B00;font-weight:800;">{label}:</strong>'
 
         return _LABEL_RE.sub(repl, body)
+
+    def _colorize_structured_line(self, line: str, section_title: str | None) -> str:
+        raw = line or ""
+        if "<span style=\"color:#" in raw:
+            return raw
+        plain = _HTML_TAG_RE.sub("", raw).strip()
+        if not plain:
+            return raw
+        if not self._is_structured_move_line(plain, section_title):
+            return raw
+
+        context = self._line_context(plain)
+        if " | " in plain and ":" not in plain:
+            return self._colorize_watchlist_strip(raw, context)
+
+        # Colorize paired move segments: +1.23 (+0.45%) and stop to avoid nested span wrapping.
+        if _PAIR_MOVE_RE.search(plain):
+            return _PAIR_MOVE_RE.sub(
+                lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)),
+                raw,
+            )
+
+        # Then colorize remaining parenthetical changes: (-0.0200)
+        out = _PAREN_MOVE_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), raw)
+        # Finally colorize standalone % tokens in compact strips.
+        out = _MOVE_TOKEN_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), out)
+        return out
+
+    @staticmethod
+    def _wrap_color(token: str, color: str) -> str:
+        return f"<span style=\"color:{color};\">{token}</span>"
+
+    def _colorize_watchlist_strip(self, line: str, context: str) -> str:
+        return re.sub(
+            r"([A-Z0-9\.\-]+)\s+([+\-−]\d[\d,]*(?:\.\d+)?%)",
+            lambda m: f"{m.group(1)} {self._wrap_color(m.group(2), self._color_for_change(m.group(2), context))}",
+            line,
+        )
+
+    @staticmethod
+    def _is_structured_move_line(plain: str, section_title: str | None) -> bool:
+        lower = plain.lower()
+        if lower.startswith(
+            (
+                "dominant driver:",
+                "setup read:",
+                "regional skew:",
+                "action posture:",
+                "net takeaway:",
+                "why market-relevant:",
+                "quotes as of",
+                "watchlist is ",
+            )
+        ):
+            return False
+
+        section = (section_title or "").strip().lower()
+        in_target_section = section in {"market setup", "macro context", "watchlist", "sector scan", "portfolio impact today"}
+        has_move = bool(_PAIR_MOVE_RE.search(plain) or _PAREN_MOVE_RE.search(plain) or re.search(r"[+\-−]\d[\d,]*(?:\.\d+)?%", plain))
+        if not has_move:
+            return False
+        if " | " in plain:
+            return True
+        if ":" in plain and in_target_section:
+            return True
+        # compact mover summaries in other sections
+        if ":" in plain and re.search(r"\([A-Z]{1,5}\s+[+\-−]\d", plain):
+            return True
+        return False
+
+    @staticmethod
+    def _line_context(plain: str) -> str:
+        lower = plain.lower()
+        name = lower.split(":", 1)[0] if ":" in lower else lower
+        if any(tok in name for tok in ("vix", "move index", "volatility", "fear", "stress")):
+            return "stress"
+        if any(tok in name for tok in ("yield", "treasury", "curve", "10y", "2y", "30y")):
+            return "rates"
+        return "risk"
+
+    @staticmethod
+    def _color_for_change(token: str, context: str) -> str:
+        cleaned = token.replace(",", "").replace("(", "").replace(")", "").replace("%", "").replace("−", "-").strip()
+        match = re.search(r"[+\-]?\d+(?:\.\d+)?", cleaned)
+        if not match:
+            return "#E8ECEF"
+        value = float(match.group(0))
+        if value == 0:
+            return "#9BA3AB"
+        if context == "stress":
+            return "#FF6B6B" if value > 0 else "#00D4AA"
+        if context == "rates":
+            return "#FF6B6B" if value > 0 else "#00D4AA"
+        return "#00D4AA" if value > 0 else "#FF6B6B"
 
     def _freshness_summary(self, briefing: MorningBriefing) -> str:
         quotes = self._freshness_quotes(briefing)
