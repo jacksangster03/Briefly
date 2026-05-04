@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import html
+import os
 import re
+import statistics
 from collections import Counter
 from datetime import datetime
 
@@ -24,6 +26,15 @@ _PAREN_MOVE_RE = re.compile(r"(\([+\-−]?\d[\d,]*(?:\.\d+)?%?\))")
 _PAIR_MOVE_RE = re.compile(r"([+\-−]\d[\d,]*(?:\.\d+)?\s*\([+\-−]?\d[\d,]*(?:\.\d+)?%\))")
 _EMAIL_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
 _CANVAS_BG = "#071629"
+_GOOD_SHADE_SCALE = ["#6EE7C8", "#00D4AA", "#00B894", "#0F7A4A"]
+_BAD_SHADE_SCALE = ["#FFB4B4", "#FF6B6B", "#E14A4A", "#9B2C2C"]
+_SESSION_BUCKETS = [
+    (-1.0, -0.6, "SEVERE_STRESS", "#5C1111", "SEVERE STRESS"),
+    (-0.6, -0.25, "CAUTIOUS", "#9B2C2C", "CAUTIOUS"),
+    (-0.25, 0.25, "MIXED", "#2F3744", "MIXED"),
+    (0.25, 0.6, "CONSTRUCTIVE", "#0F7A4A", "CONSTRUCTIVE"),
+    (0.6, 1.01, "STRONG_RISK_ON", "#16A34A", "STRONG RISK ON"),
+]
 
 # Regime → (background tint hex, accent hex, display label)
 _REGIME_STYLES: dict[str, tuple[str, str, str]] = {
@@ -64,6 +75,9 @@ class EmailFormatter:
     def __init__(self, timezone_name: str = "UTC"):
         self.telegram_formatter = TelegramFormatter(timezone_name)
         self.timezone_name = timezone_name
+        self.enable_move_intensity_shading = os.getenv("EMAIL_ENABLE_MOVE_INTENSITY_SHADING", "true").strip().lower() not in {"0", "false", "off", "no"}
+        self.enable_session_quality_accents = os.getenv("EMAIL_ENABLE_SESSION_QUALITY_ACCENTS", "true").strip().lower() not in {"0", "false", "off", "no"}
+        self._move_shading_baselines: dict[str, float] = {}
 
     def format_morning_briefing(self, briefing: MorningBriefing) -> EmailRenderResult:
         messages = self.telegram_formatter.format_morning_briefing(briefing)
@@ -83,6 +97,7 @@ class EmailFormatter:
         return f"Morning Briefing | {date_str}"
 
     def _html_body(self, briefing: MorningBriefing, full_html: str, subject: str) -> str:
+        self._move_shading_baselines = self._build_move_shading_baselines(briefing)
         regime_tags = list((briefing.morning_chart_bundle or {}).get("regime_tags") or [])
         bundle_meta = dict((briefing.morning_chart_bundle or {}).get("meta") or {})
         delivery_mode = str(bundle_meta.get("delivery_mode") or "deterministic")
@@ -95,9 +110,16 @@ class EmailFormatter:
         title, date_label = self._split_subject(subject)
         desk_read = self._top_desk_read(briefing)
 
-        # Regime banner: pick first matching tag for styling
+        # Regime banner: deterministic session quality accent takes precedence.
         primary_tag = next((t for t in regime_tags if t in _REGIME_STYLES), "mixed")
         regime_bg, regime_accent, regime_label = _REGIME_STYLES.get(primary_tag, _REGIME_STYLES["mixed"])
+        if self.enable_session_quality_accents:
+            session = self._compute_session_quality(briefing)
+            regime_accent = str(session["color_hex"])
+            regime_label = str(session["label"])
+            bundle_meta["session_quality_score"] = round(float(session["score"]), 3)
+            bundle_meta["session_quality_bucket"] = str(session["bucket"])
+            bundle_meta["session_quality_color_hex"] = regime_accent
         all_tags_text = " · ".join(str(t).replace("_", " ").upper() for t in regime_tags) or "MIXED"
 
         parts = [
@@ -106,7 +128,7 @@ class EmailFormatter:
             f"<tr><td align=\"center\" bgcolor=\"{_CANVAS_BG}\" style=\"padding:8px 4px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
             f"<table role=\"presentation\" width=\"680\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"width:680px;max-width:680px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};border:1px solid #1F3447;\">",
             # Regime colour bar (3px top accent)
-            f"<tr><td style=\"height:3px;line-height:3px;font-size:0;background:{regime_accent};\">&nbsp;</td></tr>",
+            f"<tr><td style=\"height:3px;line-height:3px;font-size:0;background:{regime_accent};background-color:{regime_accent};\">&nbsp;</td></tr>",
             # Header row
             f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:13px 16px 11px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
@@ -162,6 +184,7 @@ class EmailFormatter:
         parts.append("</td></tr>")
 
         parts.extend(["</table>", "</td></tr></table>", "</body></html>"])
+        self._move_shading_baselines = {}
         return "".join(parts)
 
     @staticmethod
@@ -445,26 +468,168 @@ class EmailFormatter:
     def _line_context(plain: str) -> str:
         lower = plain.lower()
         name = lower.split(":", 1)[0] if ":" in lower else lower
+        if any(tok in name for tok in ("wti", "crude", "brent", "copper", "gold", "commodity")):
+            return "commodity"
         if any(tok in name for tok in ("vix", "move index", "volatility", "fear", "stress")):
             return "stress"
         if any(tok in name for tok in ("yield", "treasury", "curve", "10y", "2y", "30y")):
             return "rates"
         return "risk"
 
-    @staticmethod
-    def _color_for_change(token: str, context: str) -> str:
-        cleaned = token.replace(",", "").replace("(", "").replace(")", "").replace("%", "").replace("−", "-").strip()
-        match = re.search(r"[+\-]?\d+(?:\.\d+)?", cleaned)
-        if not match:
+    def _color_for_change(self, token: str, context: str) -> str:
+        value = EmailFormatter._extract_signed_value(token)
+        if value is None:
             return "#E8ECEF"
-        value = float(match.group(0))
-        if value == 0:
+        if abs(value) < 1e-12:
             return "#9BA3AB"
-        if context == "stress":
-            return "#FF6B6B" if value > 0 else "#00D4AA"
-        if context == "rates":
-            return "#FF6B6B" if value > 0 else "#00D4AA"
-        return "#00D4AA" if value > 0 else "#FF6B6B"
+        positive_is_good = context not in {"stress", "rates"}
+        good_move = (value > 0 and positive_is_good) or (value < 0 and not positive_is_good)
+        if not self.enable_move_intensity_shading:
+            return "#00D4AA" if good_move else "#FF6B6B"
+        return self._shade_for_intensity(
+            abs(value),
+            context=context,
+            good_move=good_move,
+        )
+
+    @staticmethod
+    def _extract_signed_value(token: str) -> float | None:
+        text = (token or "").replace(",", "").replace("−", "-")
+        percent_match = re.search(r"([+\-]?\d+(?:\.\d+)?)\s*%", text)
+        if percent_match:
+            return float(percent_match.group(1))
+        match = re.search(r"[+\-]?\d+(?:\.\d+)?", text)
+        if not match:
+            return None
+        return float(match.group(0))
+
+    @staticmethod
+    def _clamp(value: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, value))
+
+    def _build_move_shading_baselines(self, briefing: MorningBriefing) -> dict[str, float]:
+        risk_moves = [
+            abs(float(q.change_percent))
+            for q in (briefing.market_setup.index_quotes or [])
+            if self._line_context(q.display_name or q.symbol) == "risk"
+        ]
+        stress_moves = [
+            abs(float(q.change_percent))
+            for q in (briefing.market_setup.index_quotes or [])
+            if self._line_context(q.display_name or q.symbol) == "stress"
+        ]
+        commodity_moves = [
+            abs(float(q.change_percent))
+            for q in (briefing.market_setup.index_quotes or [])
+            if any(k in (q.display_name or "").lower() for k in ("wti", "crude", "gold", "copper", "brent"))
+        ]
+        rates_moves = [
+            abs(float(point.change or 0.0))
+            for point in (briefing.macro_context or [])
+            if any(k in (point.name or "").lower() for k in ("yield", "treasury", "10y-2y", "curve"))
+        ]
+        baselines = {
+            "risk": self._median_or_default(risk_moves, 0.55),
+            "stress": self._median_or_default(stress_moves, 1.8),
+            "commodity": self._median_or_default(commodity_moves, 1.0),
+            "rates": self._median_or_default(rates_moves, 0.02),
+        }
+        baselines["default"] = baselines["risk"]
+        return baselines
+
+    @staticmethod
+    def _median_or_default(values: list[float], default: float) -> float:
+        usable = [v for v in values if v > 0]
+        if not usable:
+            return default
+        return max(default * 0.4, float(statistics.median(usable)))
+
+    @staticmethod
+    def _intensity_index(ratio: float) -> int:
+        if ratio <= 0.75:
+            return 0
+        if ratio <= 1.25:
+            return 1
+        if ratio <= 2.0:
+            return 2
+        return 3
+
+    def _shade_for_intensity(self, magnitude: float, *, context: str, good_move: bool) -> str:
+        baseline = float(self._move_shading_baselines.get(context, self._move_shading_baselines.get("default", 0.55)))
+        ratio = magnitude / baseline if baseline > 0 else 1.0
+        idx = self._intensity_index(ratio)
+        return _GOOD_SHADE_SCALE[idx] if good_move else _BAD_SHADE_SCALE[idx]
+
+    def _compute_session_quality(self, briefing: MorningBriefing) -> dict[str, float | str]:
+        quotes = list(briefing.market_setup.index_quotes or [])
+        equities = [q for q in quotes if self._line_context(q.display_name or q.symbol) == "risk"]
+        up = sum(1 for q in equities if float(q.change_percent) > 0)
+        down = sum(1 for q in equities if float(q.change_percent) < 0)
+        total = max(1, len(equities))
+        breadth = (up - down) / total
+
+        region_moves = self._extract_regional_moves(briefing.market_setup_analysis)
+        if region_moves:
+            index_dir = self._clamp((0.45 * region_moves.get("us", 0.0) + 0.30 * region_moves.get("europe", 0.0) + 0.25 * region_moves.get("asia", 0.0)) / 1.5, -1.0, 1.0)
+        else:
+            index_dir = self._clamp(
+                statistics.mean([float(q.change_percent) for q in equities]) / 1.5 if equities else 0.0,
+                -1.0,
+                1.0,
+            )
+
+        vix_quote = next((q for q in quotes if "vix" in (q.display_name or q.symbol).lower()), briefing.market_setup.vix)
+        vix_level = float(vix_quote.current_price) if vix_quote else 17.0
+        vol_support = -self._clamp(((vix_level - 15.0) / 7.0) / 1.5, -1.0, 1.0)
+
+        us10y = next((p for p in (briefing.macro_context or []) if "us 10y treasury yield" in (p.name or "").lower()), None)
+        curve = next((p for p in (briefing.macro_context or []) if "10y-2y yield spread" in (p.name or "").lower()), None)
+        rates_support = self._clamp(-(float(us10y.change or 0.0)) / 0.08, -1.0, 1.0) if us10y else 0.0
+        curve_support = self._clamp((float(curve.change or 0.0)) / 0.06, -1.0, 1.0) if curve else 0.0
+        rates_block = 0.65 * rates_support + 0.35 * curve_support
+
+        wti = next((q for q in quotes if "wti" in (q.display_name or "").lower() or "crude" in (q.display_name or "").lower()), None)
+        gold = next((q for q in quotes if "gold" in (q.display_name or "").lower()), None)
+        oil_move = float(wti.change_percent) if wti else 0.0
+        gold_move = float(gold.change_percent) if gold else 0.0
+        commodity_support = self._clamp(((-oil_move) * 0.75 + (-gold_move) * 0.25) / 3.0, -1.0, 1.0)
+
+        geo = (briefing.geo_risk_level or "").strip().lower()
+        geo_support = {
+            "low": 0.15,
+            "moderate": -0.20,
+            "elevated": -0.50,
+            "high": -0.50,
+            "extreme": -0.80,
+        }.get(geo, -0.10 if geo else 0.0)
+
+        score = self._clamp(
+            0.24 * breadth
+            + 0.22 * index_dir
+            + 0.18 * vol_support
+            + 0.14 * rates_block
+            + 0.12 * commodity_support
+            + 0.10 * geo_support,
+            -1.0,
+            1.0,
+        )
+        for lo, hi, bucket, color_hex, label in _SESSION_BUCKETS:
+            if lo <= score < hi:
+                return {"score": score, "bucket": bucket, "color_hex": color_hex, "label": label}
+        last = _SESSION_BUCKETS[-1]
+        return {"score": score, "bucket": last[2], "color_hex": last[3], "label": last[4]}
+
+    @staticmethod
+    def _extract_regional_moves(text: str | None) -> dict[str, float]:
+        if not text:
+            return {}
+        lower = text.lower().replace("−", "-")
+        out: dict[str, float] = {}
+        for region in ("us", "europe", "asia"):
+            match = re.search(rf"{region}\s*([+\-]\d+(?:\.\d+)?)%", lower)
+            if match:
+                out[region] = float(match.group(1))
+        return out
 
     def _freshness_summary(self, briefing: MorningBriefing) -> str:
         quotes = self._freshness_quotes(briefing)
