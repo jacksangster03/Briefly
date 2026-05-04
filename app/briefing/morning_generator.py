@@ -14,7 +14,8 @@ from app.briefing.chart_builder import MorningChartBuilder
 from app.briefing.global_news_selector import select_global_market_events
 from app.briefing.market_setup_interpreter import interpret_market_setup
 from app.briefing.portfolio_impact import build_portfolio_impact
-from app.briefing.regime_context import build_regime_context
+from app.briefing.regime_context import build_regime_context, compute_geo_risk_level
+from app.briefing.regime_tracker import classify_regime, persist_regime_snapshot
 from app.briefing.regional_lens import build_regional_lens
 from app.briefing.theme_builder import build_top_themes
 from app.logger import get_logger
@@ -414,6 +415,13 @@ class MorningBriefingGenerator:
         briefing.dominant_tape_driver = setup_interpretation.dominant_driver
         briefing.market_setup_analysis_confidence = setup_interpretation.confidence
         briefing.market_setup_signal_tags = setup_interpretation.tags
+
+        geo_level, geo_summary = self._build_geo_risk_meter(briefing)
+        briefing.geo_risk_level = geo_level
+        briefing.geo_risk_summary = geo_summary
+        regime_snapshot, regime_shift = self._track_regime_snapshot(briefing)
+        briefing.regime_snapshot = regime_snapshot
+        briefing.regime_shift = regime_shift
         regional_lens, regional_skew = build_regional_lens(
             index_quotes=briefing.market_setup.index_quotes,
             global_news=briefing.global_news,
@@ -655,6 +663,19 @@ class MorningBriefingGenerator:
         enriched = enriched[: self.rules.max_earnings]
         enriched = [_compute_earnings_surprise(event) for event in enriched]
 
+        prior_surprise_cache: dict[str, float | None] = {}
+        finnhub = self.news_svc.finnhub
+        if finnhub and finnhub.is_configured():
+            for event in enriched:
+                if event.prior_quarter_surprise_pct is not None:
+                    continue
+                symbol = (event.symbol or "").upper()
+                if not symbol:
+                    continue
+                if symbol not in prior_surprise_cache:
+                    prior_surprise_cache[symbol] = finnhub.get_prior_quarter_surprise_pct(symbol)
+                event.prior_quarter_surprise_pct = prior_surprise_cache[symbol]
+
         missing = [
             event for event in enriched
             if event.is_relevant and (event.eps_estimate is None or event.eps_actual is None)
@@ -663,6 +684,88 @@ class MorningBriefingGenerator:
             enrich_earnings_from_yfinance(missing)
 
         return enriched
+
+    def _track_regime_snapshot(self, briefing: MorningBriefing) -> tuple[dict[str, str], dict[str, str]]:
+        vix_level = None
+        for quote in briefing.market_setup.index_quotes + briefing.market_setup.macro_quotes:
+            text = f"{quote.display_name} {quote.symbol}".lower()
+            if "vix" in text:
+                vix_level = float(quote.current_price or 0.0)
+                break
+        oil_delta = 0.0
+        for quote in briefing.market_setup.macro_quotes:
+            text = f"{quote.display_name} {quote.symbol}".lower()
+            if "wti" in text or "crude" in text:
+                oil_delta = float(quote.change_percent or 0.0)
+                break
+        ten_y_delta_bps = None
+        if briefing.market_setup.treasury_10y and briefing.market_setup.treasury_10y.change is not None:
+            ten_y_delta_bps = float(briefing.market_setup.treasury_10y.change) * 100.0
+        breadth_ratio = None
+        if briefing.market_setup.market_breadth:
+            positive = sum(1 for row in briefing.market_setup.market_breadth if float(row.change_percent or 0.0) > 0.0)
+            breadth_ratio = positive / max(1, len(briefing.market_setup.market_breadth))
+
+        decision = classify_regime(
+            setup_tags=briefing.market_setup_signal_tags,
+            vix_level=vix_level,
+            breadth_ratio=breadth_ratio,
+            oil_delta_pct=oil_delta,
+            ten_y_delta_bps=ten_y_delta_bps,
+        )
+        shift = persist_regime_snapshot(
+            profile_name=self.profile.name,
+            decision=decision,
+            setup_tags=briefing.market_setup_signal_tags,
+            vix_level=vix_level,
+            geo_risk_level=briefing.geo_risk_level,
+        )
+        snapshot = {
+            "risk_regime": decision.risk_regime,
+            "trend_regime": decision.trend_regime,
+            "factor_regime": decision.factor_regime,
+        }
+        return snapshot, shift
+
+    def _build_geo_risk_meter(self, briefing: MorningBriefing) -> tuple[str, str]:
+        vix_level = None
+        for quote in briefing.market_setup.index_quotes + briefing.market_setup.macro_quotes:
+            text = f"{quote.display_name} {quote.symbol}".lower()
+            if "vix" in text:
+                vix_level = float(quote.current_price or 0.0)
+                break
+
+        oil_delta = 0.0
+        gold_delta = 0.0
+        usd_delta = 0.0
+        for quote in briefing.market_setup.macro_quotes:
+            text = f"{quote.display_name} {quote.symbol}".lower()
+            if "wti" in text or "crude" in text:
+                oil_delta = float(quote.change_percent or 0.0)
+            elif "gold" in text:
+                gold_delta = float(quote.change_percent or 0.0)
+            elif "usd" in text or "dollar" in text or "dxy" in text:
+                usd_delta = float(quote.change_percent or 0.0)
+
+        safe_haven_strength = max(0.0, gold_delta) + max(0.0, usd_delta)
+        geo_terms = ("iran", "israel", "hormuz", "blockade", "missile", "ceasefire", "sanction", "shipping", "war")
+        events = briefing.global_news + briefing.top_themes
+        if not events:
+            density = 0.0
+        else:
+            geo_hits = 0
+            for event in events:
+                text = f"{event.title} {event.summary}".lower()
+                if any(term in text for term in geo_terms):
+                    geo_hits += max(1, int(event.cluster_size or 1))
+            density = geo_hits / max(1.0, float(sum(max(1, int(evt.cluster_size or 1)) for evt in events)))
+
+        return compute_geo_risk_level(
+            vix_level=vix_level,
+            oil_delta_pct=oil_delta,
+            safe_haven_strength=safe_haven_strength,
+            news_keyword_density=density,
+        )
 
     def _build_earnings_relevance(self, earnings: list) -> dict[str, str]:
         portfolio = {holding.symbol.upper() for holding in self.profile.portfolio_holdings}

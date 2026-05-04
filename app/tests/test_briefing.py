@@ -152,11 +152,29 @@ class TestTelegramFormatter:
             ),
             dominant_tape_driver="Iran/Hormuz oil shock unwinding (WTI -3.3%) with inflation transmission in focus.",
             market_setup_analysis="Market tone is mixed with no single dominant impulse.",
+            geo_risk_summary="Geo risk MODERATE: VIX 18.1, oil +2.10%, haven +0.45, headline density 0.23.",
+            regime_shift={"risk_regime": "mixed->risk_on"},
         )
         email = EmailFormatter("Europe/Madrid").format_morning_briefing(briefing)
         assert "Dominant driver:" in email.html_body
         assert "Setup read:" in email.html_body
+        assert "Geo risk meter:" in email.html_body
+        assert "Regime shift:" in email.html_body
         assert "single dominant impulse" in email.html_body
+
+    def test_portfolio_impact_includes_geo_meter_and_regime_shift(self):
+        section = self.formatter._format_portfolio_impact(
+            bullets=["Macro pressure remains elevated."],
+            posture="review_diagnostics",
+            regime_context="Regime context: broad continuation versus recent sessions.",
+            positioning_alignment="Positioning alignment: broadly aligned with a constructive regime.",
+            geo_risk_level="ELEVATED",
+            geo_risk_summary="Geo risk ELEVATED: VIX 21.0, oil +3.30%, haven +0.90, headline density 0.41.",
+            regime_shift={"factor_regime": "balanced->oil_shock"},
+        )
+        assert "Geo risk meter: ELEVATED" in section
+        assert "Geo risk ELEVATED" in section
+        assert "Regime shift: factor regime balanced->oil_shock" in section
 
     def test_market_setup_analysis_mentions_divergence_and_vol_regime(self):
         setup = MarketSetup(

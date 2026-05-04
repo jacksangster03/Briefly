@@ -90,6 +90,9 @@ class TelegramFormatter:
             briefing.portfolio_action_posture,
             briefing.regime_context,
             briefing.positioning_alignment,
+            briefing.geo_risk_level,
+            briefing.geo_risk_summary,
+            briefing.regime_shift,
         )
         if impact:
             sections.append(impact)
@@ -346,20 +349,38 @@ class TelegramFormatter:
         posture: str,
         regime_context: str,
         positioning_alignment: str,
+        geo_risk_level: str = "",
+        geo_risk_summary: str = "",
+        regime_shift: dict[str, str] | None = None,
     ) -> str:
-        if not bullets and not regime_context and not positioning_alignment:
+        if (
+            not bullets
+            and not regime_context
+            and not positioning_alignment
+            and not geo_risk_summary
+            and not geo_risk_level
+            and not (regime_shift or {})
+        ):
             return ""
         lines = [f"<b>{SECTION_HEADERS['portfolio_impact']}</b>"]
         if posture:
             lines.append(f"Action posture: {posture.replace('_', ' ')}")
         for bullet in bullets[:3]:
             lines.append(f"- {bullet}")
+        if geo_risk_level:
+            lines.append(f"- Geo risk meter: {geo_risk_level}")
+        if geo_risk_summary:
+            lines.append(f"- {geo_risk_summary}")
         if regime_context:
             lines.append("")
             lines.append(f"<b>{SECTION_HEADERS['regime_context']}</b>")
             lines.append(regime_context)
         if positioning_alignment:
             lines.append(positioning_alignment)
+        shift = regime_shift or {}
+        if shift:
+            shift_text = ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in sorted(shift.items()))
+            lines.append(f"Regime shift: {shift_text}")
         return "\n".join(lines)
 
     def _format_themes_for_mode(
@@ -519,6 +540,7 @@ class TelegramFormatter:
         time_label = {
             "bmo": "pre-market",
             "amc": "post-market",
+            "dmh": "during-market",
             "during": "during-market",
         }.get(e.time, "")
 

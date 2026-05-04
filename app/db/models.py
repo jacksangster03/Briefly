@@ -278,6 +278,24 @@ class RiskMetricsSnapshot(Base):
     created_at = Column(DateTime, default=_utcnow)
 
 
+class RegimeSnapshot(Base):
+    """Persisted morning regime classification for auditability and transitions."""
+
+    __tablename__ = "regime_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    timestamp = Column(DateTime, nullable=False, default=_utcnow, index=True)
+    risk_regime = Column(String(32), nullable=False, default="mixed", index=True)
+    trend_regime = Column(String(32), nullable=False, default="continuation")
+    factor_regime = Column(String(32), nullable=False, default="balanced")
+    vix = Column(Float, nullable=True)
+    hy_oas = Column(Float, nullable=True)
+    trigger_notes = Column(Text, nullable=True)
+    setup_tags = Column(JSON, default=list)
+    geo_risk_level = Column(String(24), nullable=True)
+
+
 class CadenceMarker(Base):
     """Idempotency marker for once-per-day cadence sends."""
 

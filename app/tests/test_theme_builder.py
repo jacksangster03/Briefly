@@ -33,3 +33,31 @@ def test_theme_builder_prefers_holdings_linked_theme_over_filing_stub():
     )
     assert themes
     assert themes[0].title == "Nvidia guidance lifts AI capex outlook"
+
+
+def test_theme_builder_respects_portfolio_tag_priority():
+    tangential = NormalisedEvent(
+        title="Watchlist chatter on supplier checks",
+        source="newsapi",
+        event_type="company_news",
+        tickers=["NVDA"],
+        personal_relevance_score=0.85,
+        factual_confidence_score=0.70,
+        final_score=0.80,
+        portfolio_tag="TANGENTIAL",
+        cluster_size=2,
+    )
+    direct = NormalisedEvent(
+        title="Microsoft raises cloud margin guidance",
+        source="finnhub",
+        event_type="guidance",
+        tickers=["MSFT"],
+        personal_relevance_score=0.85,
+        factual_confidence_score=0.70,
+        final_score=0.72,
+        portfolio_tag="DIRECT",
+        cluster_size=1,
+    )
+    themes = build_top_themes([tangential, direct], max_themes=1, preferred_symbols=set())
+    assert themes
+    assert themes[0].title == "Microsoft raises cloud margin guidance"

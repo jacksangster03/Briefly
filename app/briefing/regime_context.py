@@ -59,3 +59,63 @@ def _alignment_label(*, current_setup_tags: list[str], latest: RiskMetricsSnapsh
     if "risk_off" in current_setup_tags:
         return "Positioning alignment: cautious posture remains appropriate."
     return "Positioning alignment: mixed — monitor confirmation from risk and breadth."
+
+
+def compute_geo_risk_level(
+    *,
+    vix_level: float | None,
+    oil_delta_pct: float | None,
+    safe_haven_strength: float | None,
+    news_keyword_density: float | None,
+) -> tuple[str, str]:
+    """Return (geo_risk_level, summary) using deterministic scalar thresholds."""
+    score = 0.0
+    if vix_level is not None:
+        if vix_level >= 26:
+            score += 2.2
+        elif vix_level >= 20:
+            score += 1.4
+        elif vix_level >= 16:
+            score += 0.7
+
+    oil_move = abs(float(oil_delta_pct or 0.0))
+    if oil_move >= 5.0:
+        score += 2.0
+    elif oil_move >= 3.0:
+        score += 1.3
+    elif oil_move >= 1.5:
+        score += 0.6
+
+    haven = abs(float(safe_haven_strength or 0.0))
+    if haven >= 2.5:
+        score += 1.4
+    elif haven >= 1.2:
+        score += 0.8
+    elif haven >= 0.6:
+        score += 0.4
+
+    density = float(news_keyword_density or 0.0)
+    if density >= 0.60:
+        score += 1.8
+    elif density >= 0.35:
+        score += 1.0
+    elif density >= 0.15:
+        score += 0.5
+
+    if score >= 5.5:
+        level = "EXTREME"
+    elif score >= 4.0:
+        level = "HIGH"
+    elif score >= 2.6:
+        level = "ELEVATED"
+    elif score >= 1.4:
+        level = "MODERATE"
+    else:
+        level = "LOW"
+
+    summary = (
+        f"Geo risk {level}: VIX {vix_level if vix_level is not None else 'n/a'}, "
+        f"oil {float(oil_delta_pct or 0.0):+.2f}%, haven {float(safe_haven_strength or 0.0):+.2f}, "
+        f"headline density {density:.2f}."
+    )
+    return level, summary

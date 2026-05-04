@@ -12,6 +12,13 @@ from app.processing.cleaners import truncate
 from app.processing.pipeline import is_actionable_event
 from app.schemas.events import NormalisedEvent
 
+_PORTFOLIO_TAG_PRIORITY = {
+    "DIRECT": 0.40,
+    "SECTOR": 0.26,
+    "MACRO": 0.18,
+    "TANGENTIAL": 0.10,
+}
+
 
 def build_top_themes(
     events: list[NormalisedEvent],
@@ -33,6 +40,8 @@ def build_top_themes(
         if editorial_gate and not editorial_gate(evt):
             continue
         rank = float(evt.final_score or 0.0)
+        tag = str(evt.portfolio_tag or evt.raw_data.get("portfolio_tag") or "").upper()
+        rank += _PORTFOLIO_TAG_PRIORITY.get(tag, 0.0)
         overlap = set(evt.tickers) & preferred_symbols
         if overlap:
             rank += 0.35

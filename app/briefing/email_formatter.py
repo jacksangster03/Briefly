@@ -17,7 +17,7 @@ from app.schemas.events import QuoteData
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _BOLD_HEADER_RE = re.compile(r"^<b>([^<]+)</b>\s*$")
 _LABEL_RE = re.compile(
-    r"(?P<label>Dominant driver|Setup read|Portfolio impact|Action posture|Regional skew|Watchlist|Earnings Calendar):"
+    r"(?P<label>Dominant driver|Setup read|Portfolio impact|Action posture|Regional skew|Watchlist|Earnings Calendar|Geo risk meter|Regime shift):"
 )
 _EMAIL_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
 
@@ -262,6 +262,14 @@ class EmailFormatter:
         lines = [f"Dominant driver: {driver}"]
         if briefing.market_setup_analysis:
             lines.append(f"Setup read: {briefing.market_setup_analysis}")
+        if briefing.geo_risk_summary:
+            lines.append(f"Geo risk meter: {briefing.geo_risk_summary}")
+        if briefing.regime_shift:
+            shift_text = ", ".join(
+                f"{k.replace('_', ' ')} {v}" for k, v in sorted((briefing.regime_shift or {}).items())
+            )
+            if shift_text:
+                lines.append(f"Regime shift: {shift_text}")
         return lines
 
     @staticmethod

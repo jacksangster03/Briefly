@@ -180,20 +180,54 @@ class FinnhubProvider(BaseProvider):
         calendar = data.get("earningsCalendar", []) if isinstance(data, dict) else []
         events = []
         for item in calendar:
+            symbol = item.get("symbol", "")
             events.append(EarningsEvent(
-                symbol=item.get("symbol", ""),
+                symbol=symbol,
                 report_date=item.get("date", ""),
                 fiscal_quarter=f"Q{item.get('quarter', '?')} {item.get('year', '')}",
                 eps_estimate=item.get("epsEstimate"),
                 eps_actual=item.get("epsActual"),
                 revenue_estimate=item.get("revenueEstimate"),
                 revenue_actual=item.get("revenueActual"),
+                surprise_percent=item.get("surprisePercent"),
                 time=item.get("hour", ""),
                 source="finnhub",
             ))
 
         logger.info("Fetched %d earnings events from Finnhub", len(events))
         return events
+
+    def get_prior_quarter_surprise_pct(self, symbol: str) -> float | None:
+        """Fetch previous-quarter EPS surprise % for a symbol."""
+        if not symbol:
+            return None
+        try:
+            data = self._get(
+                f"{BASE_URL}/stock/earnings",
+                params=self._params({"symbol": symbol, "limit": 4}),
+            )
+        except ProviderError:
+            return None
+
+        if not isinstance(data, list) or not data:
+            return None
+
+        def _coerce(row: dict) -> float | None:
+            raw = row.get("surprisePercent")
+            if raw is None:
+                return None
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return None
+
+        valid = [row for row in data if _coerce(row) is not None]
+        if not valid:
+            return None
+        # Most recent entry is current quarter; previous entry is prior quarter.
+        if len(valid) >= 2:
+            return _coerce(valid[1])
+        return _coerce(valid[0])
 
     # -- Company profile ------------------------------------------------------
 

@@ -63,6 +63,10 @@ class MorningBriefing(BaseModel):
     regional_skew_summary: str = ""
     portfolio_impact_bullets: list[str] = Field(default_factory=list)
     portfolio_action_posture: str = ""
+    geo_risk_level: str = ""
+    geo_risk_summary: str = ""
+    regime_snapshot: dict[str, str] = Field(default_factory=dict)
+    regime_shift: dict[str, str] = Field(default_factory=dict)
     regime_context: str = ""
     positioning_alignment: str = ""
     global_news: list[NormalisedEvent] = Field(default_factory=list)

@@ -76,6 +76,26 @@ HIGH_SIGNAL_KEYWORDS = {
     "sanction": 0.12,
 }
 
+MACRO_TAG_KEYWORDS = (
+    "yield",
+    "rates",
+    "inflation",
+    "fed",
+    "ecb",
+    "boj",
+    "dollar",
+    "usd",
+    "fx",
+    "oil",
+    "crude",
+    "gold",
+    "opec",
+    "tariff",
+    "sanction",
+    "shipping",
+    "geopolitic",
+)
+
 LOW_SIGNAL_PATTERNS = (
     "3 reasons to buy",
     "bull and bear of the day",
@@ -125,6 +145,8 @@ def score_event(
         event.personal_relevance_score or 0.0,
     )
     event.raw_data["portfolio_relevance"] = round(portfolio_score, 4)
+    event.portfolio_tag = _portfolio_tag(event, profile)
+    event.raw_data["portfolio_tag"] = event.portfolio_tag
 
     # 4. Novelty
     if sent_hashes and event.content_hash in sent_hashes:
@@ -253,6 +275,27 @@ def _portfolio_relevance(event: NormalisedEvent, profile: UserProfile) -> float:
             sector_readthrough = min(0.75, 0.40 + (0.50 * concentration))
 
     return max(direct_score, sector_readthrough)
+
+
+def _portfolio_tag(event: NormalisedEvent, profile: UserProfile) -> str:
+    """Deterministic portfolio priority tag used for newsroom ordering."""
+    holdings = set(profile.portfolio_symbols)
+    watchlist = {t.upper() for t in profile.all_watchlist_tickers}
+    tickers = {t.upper() for t in event.tickers}
+    if holdings and tickers & holdings:
+        return "DIRECT"
+
+    if event.sectors and profile.portfolio_sector_weights:
+        if any(profile.portfolio_sector_weights.get(sector, 0.0) >= 0.10 for sector in event.sectors):
+            return "SECTOR"
+
+    text = f"{event.title} {event.summary}".lower()
+    if any(keyword in text for keyword in MACRO_TAG_KEYWORDS):
+        return "MACRO"
+
+    if tickers & watchlist:
+        return "TANGENTIAL"
+    return ""
 
 
 def _sentiment_adjustment(event: NormalisedEvent) -> float:

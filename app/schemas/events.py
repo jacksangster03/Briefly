@@ -120,6 +120,7 @@ class NormalisedEvent(BaseModel):
     update_status: str = "new"             # new | material_update | duplicate
     reason_code: str = ""
     score_explanation: str = ""
+    portfolio_tag: str = ""               # DIRECT | SECTOR | MACRO | TANGENTIAL | ""
     raw_data: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("tickers", mode="before")
