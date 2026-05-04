@@ -120,6 +120,7 @@ class EmailFormatter:
             bundle_meta["session_quality_score"] = round(float(session["score"]), 3)
             bundle_meta["session_quality_bucket"] = str(session["bucket"])
             bundle_meta["session_quality_color_hex"] = regime_accent
+            bundle_meta["session_quality_label"] = regime_label
         all_tags_text = " · ".join(str(t).replace("_", " ").upper() for t in regime_tags) or "MIXED"
 
         parts = [
@@ -633,63 +634,26 @@ class EmailFormatter:
         return _GOOD_SHADE_SCALE[idx] if good_move else _BAD_SHADE_SCALE[idx]
 
     def _compute_session_quality(self, briefing: MorningBriefing) -> dict[str, float | str]:
-        quotes = list(briefing.market_setup.index_quotes or [])
-        equities = [q for q in quotes if self._line_context(q.display_name or q.symbol) == "risk"]
-        up = sum(1 for q in equities if float(q.change_percent) > 0)
-        down = sum(1 for q in equities if float(q.change_percent) < 0)
-        total = max(1, len(equities))
-        breadth = (up - down) / total
+        from app.briefing.session_quality import compute_session_quality as _sq_compute
 
-        region_moves = self._extract_regional_moves(briefing.market_setup_analysis)
-        if region_moves:
-            index_dir = self._clamp((0.45 * region_moves.get("us", 0.0) + 0.30 * region_moves.get("europe", 0.0) + 0.25 * region_moves.get("asia", 0.0)) / 1.5, -1.0, 1.0)
-        else:
-            index_dir = self._clamp(
-                statistics.mean([float(q.change_percent) for q in equities]) / 1.5 if equities else 0.0,
-                -1.0,
-                1.0,
-            )
+        # Use pre-computed fields if morning_generator already ran the score.
+        if briefing.session_quality_bucket:
+            return {
+                "score":      briefing.session_quality_score,
+                "bucket":     briefing.session_quality_bucket,
+                "color_hex":  briefing.session_quality_color_hex,
+                "label":      briefing.session_quality_label,
+            }
 
-        vix_quote = next((q for q in quotes if "vix" in (q.display_name or q.symbol).lower()), briefing.market_setup.vix)
-        vix_level = float(vix_quote.current_price) if vix_quote else 17.0
-        vol_support = -self._clamp(((vix_level - 15.0) / 7.0) / 1.5, -1.0, 1.0)
-
-        us10y = next((p for p in (briefing.macro_context or []) if "us 10y treasury yield" in (p.name or "").lower()), None)
-        curve = next((p for p in (briefing.macro_context or []) if "10y-2y yield spread" in (p.name or "").lower()), None)
-        rates_support = self._clamp(-(float(us10y.change or 0.0)) / 0.08, -1.0, 1.0) if us10y else 0.0
-        curve_support = self._clamp((float(curve.change or 0.0)) / 0.06, -1.0, 1.0) if curve else 0.0
-        rates_block = 0.65 * rates_support + 0.35 * curve_support
-
-        wti = next((q for q in quotes if "wti" in (q.display_name or "").lower() or "crude" in (q.display_name or "").lower()), None)
-        gold = next((q for q in quotes if "gold" in (q.display_name or "").lower()), None)
-        oil_move = float(wti.change_percent) if wti else 0.0
-        gold_move = float(gold.change_percent) if gold else 0.0
-        commodity_support = self._clamp(((-oil_move) * 0.75 + (-gold_move) * 0.25) / 3.0, -1.0, 1.0)
-
-        geo = (briefing.geo_risk_level or "").strip().lower()
-        geo_support = {
-            "low": 0.15,
-            "moderate": -0.20,
-            "elevated": -0.50,
-            "high": -0.50,
-            "extreme": -0.80,
-        }.get(geo, -0.10 if geo else 0.0)
-
-        score = self._clamp(
-            0.24 * breadth
-            + 0.22 * index_dir
-            + 0.18 * vol_support
-            + 0.14 * rates_block
-            + 0.12 * commodity_support
-            + 0.10 * geo_support,
-            -1.0,
-            1.0,
+        # Fallback: compute inline (e.g. in tests or when generator skipped the step).
+        sq = _sq_compute(
+            market_breadth=briefing.market_setup.market_breadth,
+            index_quotes=briefing.market_setup.index_quotes,
+            macro_context=briefing.macro_context,
+            commodity_strip=briefing.commodity_strip,
+            geo_risk_level=briefing.geo_risk_level,
         )
-        for lo, hi, bucket, color_hex, label in _SESSION_BUCKETS:
-            if lo <= score < hi:
-                return {"score": score, "bucket": bucket, "color_hex": color_hex, "label": label}
-        last = _SESSION_BUCKETS[-1]
-        return {"score": score, "bucket": last[2], "color_hex": last[3], "label": last[4]}
+        return {"score": sq.score, "bucket": sq.bucket, "color_hex": sq.color_hex, "label": sq.label}
 
     @staticmethod
     def _extract_regional_moves(text: str | None) -> dict[str, float]:

@@ -78,6 +78,10 @@ class MorningBriefing(BaseModel):
     watchlist_events: list[NormalisedEvent] = Field(default_factory=list)
     watchlist_quotes: list[QuoteData] = Field(default_factory=list)
     portfolio_quotes: list[QuoteData] = Field(default_factory=list)
+    session_quality_score: float = 0.0
+    session_quality_bucket: str = ""
+    session_quality_color_hex: str = ""
+    session_quality_label: str = ""
     morning_chart_bundle: dict = Field(default_factory=dict)
     morning_chart_selection: list[dict[str, str]] = Field(default_factory=list)
     chart_assets: list[ChartAsset] = Field(default_factory=list)

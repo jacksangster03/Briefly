@@ -16,6 +16,7 @@ from app.briefing.market_setup_interpreter import interpret_market_setup
 from app.briefing.portfolio_impact import build_portfolio_impact
 from app.briefing.regime_context import build_regime_context, compute_geo_risk_level
 from app.briefing.regime_tracker import classify_regime, persist_regime_snapshot
+from app.briefing.session_quality import compute_session_quality
 from app.briefing.regional_lens import build_regional_lens
 from app.briefing.theme_builder import build_top_themes
 from app.logger import get_logger
@@ -435,6 +436,17 @@ class MorningBriefingGenerator:
         regime_snapshot, regime_shift = self._track_regime_snapshot(briefing)
         briefing.regime_snapshot = regime_snapshot
         briefing.regime_shift = regime_shift
+        sq = compute_session_quality(
+            market_breadth=briefing.market_setup.market_breadth,
+            index_quotes=briefing.market_setup.index_quotes,
+            macro_context=briefing.macro_context,
+            commodity_strip=briefing.commodity_strip,
+            geo_risk_level=briefing.geo_risk_level,
+        )
+        briefing.session_quality_score = round(sq.score, 4)
+        briefing.session_quality_bucket = sq.bucket
+        briefing.session_quality_color_hex = sq.color_hex
+        briefing.session_quality_label = sq.label
         regional_lens, regional_skew = build_regional_lens(
             index_quotes=briefing.market_setup.index_quotes,
             global_news=briefing.global_news,
