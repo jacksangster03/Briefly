@@ -11,6 +11,7 @@ from app.schemas.delivery import ChartAsset
 from app.schemas.events import (
     EarningsEvent,
     MacroDataPoint,
+    MarketBreadth,
     NormalisedEvent,
     QuoteData,
     SectorSnapshot,
@@ -43,6 +44,7 @@ class MarketSetup(BaseModel):
     treasury_2y: MacroDataPoint | None = None
     vix: QuoteData | None = None
     summary_line: str = ""
+    market_breadth: list[MarketBreadth] = Field(default_factory=list)
 
 
 class MorningBriefing(BaseModel):
@@ -56,6 +58,7 @@ class MorningBriefing(BaseModel):
     market_setup_analysis_confidence: str = "low"
     market_setup_signal_tags: list[str] = Field(default_factory=list)
     macro_context: list[MacroDataPoint] = Field(default_factory=list)
+    commodity_strip: list[MacroDataPoint] = Field(default_factory=list)
     regional_lens: list[dict[str, str]] = Field(default_factory=list)
     regional_skew_summary: str = ""
     portfolio_impact_bullets: list[str] = Field(default_factory=list)

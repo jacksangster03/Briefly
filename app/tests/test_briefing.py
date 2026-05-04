@@ -292,6 +292,21 @@ class TestTelegramFormatter:
         full = "\n".join(self.formatter.format_morning_briefing(briefing))
         assert "Main catalyst: Iran/Hormuz oil shock unwinding" in full
 
+    def test_watchlist_summary_skips_low_signal_theme_title(self):
+        briefing = MorningBriefing(
+            watchlist_quotes=[
+                QuoteData(symbol="AAPL", display_name="Apple", current_price=190, change=2, change_percent=1.2),
+                QuoteData(symbol="NVDA", display_name="Nvidia", current_price=900, change=-4, change_percent=-0.4),
+            ],
+            top_themes=[
+                NormalisedEvent(title="Best CD rates today, May 3, 2026 (lock in up to 4.05% APY)", final_score=0.95),
+                NormalisedEvent(title="TSMC delays High NA EUV while doubling down on AI partnerships", final_score=0.8),
+            ],
+        )
+        full = "\n".join(self.formatter.format_morning_briefing(briefing))
+        assert "Main catalyst: Best CD rates today" not in full
+        assert "Main catalyst: TSMC delays High NA EUV" in full
+
     def test_morning_includes_regional_and_portfolio_impact_sections(self):
         briefing = MorningBriefing(
             regional_lens=[
@@ -641,6 +656,9 @@ class TestSectorSnapshot:
 
 class _DummyMarketData:
     def get_quotes(self, symbols):
+        return []
+
+    def get_price_history(self, symbol, period="1mo", interval="1d"):
         return []
 
 

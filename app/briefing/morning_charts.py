@@ -1087,23 +1087,39 @@ def _global_read_line(series: list[dict[str, Any]]) -> str:
 def _impulse_read_line(points: list[dict[str, Any]]) -> str:
     if not points:
         return "Macro impulse strip unavailable because rates and commodity inputs are missing."
-    driver = max(points, key=lambda row: abs(float(row.get("impulse") or 0.0)))
+    ranked = sorted(points, key=lambda row: abs(float(row.get("impulse") or 0.0)), reverse=True)
+    driver = ranked[0]
+    follower = ranked[1] if len(ranked) > 1 else None
     unit = "bp" if driver.get("unit") == "bps" else "%"
-    return f"{driver['name']} is the largest cross-asset impulse at {float(driver.get('impulse') or 0.0):+.2f}{unit}."
+    leader = f"{driver['name']} {float(driver.get('impulse') or 0.0):+.2f}{unit}"
+    if follower is None:
+        return f"Largest impulse is {leader}; cross-asset tone is otherwise muted."
+    follower_unit = "bp" if follower.get("unit") == "bps" else "%"
+    second = f"{follower['name']} {float(follower.get('impulse') or 0.0):+.2f}{follower_unit}"
+    return f"Largest impulses: {leader}, then {second}; read this as the morning macro transmission path."
 
 
 def _holdings_read_line(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return "Portfolio movers unavailable because holdings and watchlist quotes are missing."
-    driver = max(rows, key=lambda row: abs(float(row.get("excess_pct") or 0.0)))
-    return f"{driver['symbol']} is the biggest benchmark-relative mover at {float(driver.get('excess_pct') or 0.0):+.2f}% excess."
+    ranked = sorted(rows, key=lambda row: float(row.get("excess_pct") or 0.0), reverse=True)
+    leader = ranked[0]
+    laggard = ranked[-1]
+    return (
+        f"{leader['symbol']} leads at {float(leader.get('excess_pct') or 0.0):+.2f}% excess; "
+        f"{laggard['symbol']} lags at {float(laggard.get('excess_pct') or 0.0):+.2f}%."
+    )
 
 
 def _sector_read_line(points: list[dict[str, Any]]) -> str:
     if not points:
         return "Sector quadrant unavailable because sector exposure or ETF move inputs are missing."
     driver = max(points, key=lambda row: abs(float(row.get("y_change_pct") or 0.0)) + float(row.get("x_exposure") or 0.0) * 0.05)
-    return f"{driver['name']} is the key sector outlier at {float(driver.get('x_exposure') or 0.0):.1f}% exposure and {float(driver.get('y_change_pct') or 0.0):+.2f}% move."
+    direction = "winner" if float(driver.get("y_change_pct") or 0.0) >= 0 else "laggard"
+    return (
+        f"{driver['name']} is the key {direction} outlier: "
+        f"{float(driver.get('x_exposure') or 0.0):.1f}% exposure with {float(driver.get('y_change_pct') or 0.0):+.2f}% move."
+    )
 
 
 def _priority_global_relative(metrics: dict[str, Any], tags: list[str]) -> float:

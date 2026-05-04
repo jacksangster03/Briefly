@@ -504,7 +504,13 @@ class ChartRenderer:
         points = sorted(list(spec.get("series") or []), key=self._impulse_sort_key)
         if not points:
             return None
-        labels = [self._compact_impulse_label(str(row.get("name") or row.get("symbol") or "")) for row in points]
+        labels = [
+            self._truncate_label(
+                self._compact_impulse_label(str(row.get("name") or row.get("symbol") or "")),
+                max_len=28,
+            )
+            for row in points
+        ]
         values = [float(row.get("impulse") or 0.0) for row in points]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
 
@@ -538,7 +544,8 @@ class ChartRenderer:
             value = float(row.get("impulse") or 0.0)
             suffix = "bp" if unit == "bps" else "%"
             dv = display_values[idx]
-            x_text = dv + (x_pad * 0.32 if dv >= 0 else -x_pad * 0.32)
+            # Keep value boxes inside the plot area to avoid overlapping y-axis labels.
+            x_text = dv + (x_pad * 0.28 if dv >= 0 else x_pad * 0.18)
             label_text = f"{value:+.2f}{suffix}" + (" ▶" if abs(value) > cap else "")
             self._value_box(
                 ax,
@@ -546,7 +553,7 @@ class ChartRenderer:
                 idx,
                 label_text,
                 color=colors[idx],
-                ha="left" if dv >= 0 else "right",
+                ha="left",
                 fontsize=8.5,
             )
         subtitle = "Rates · Commodities · Risk gauges  |  zero = neutral"
@@ -559,7 +566,12 @@ class ChartRenderer:
             grid_axis="x",
         )
         ax.grid(False)
-        fig.subplots_adjust(left=0.25, right=0.94, top=0.86, bottom=0.18)
+        fig.subplots_adjust(
+            left=self._left_margin_for_labels(labels, min_margin=0.26, max_margin=0.38),
+            right=0.94,
+            top=0.86,
+            bottom=0.18,
+        )
         return self._to_asset(
             fig,
             key="cross_asset_impulse_strip",
@@ -584,12 +596,28 @@ class ChartRenderer:
             base = base.split("(", 1)[0].strip()
         return base
 
+    @staticmethod
+    def _truncate_label(label: str, max_len: int = 24) -> str:
+        text = (label or "").strip()
+        if len(text) <= max_len:
+            return text
+        return text[: max_len - 1].rstrip() + "…"
+
+    @staticmethod
+    def _left_margin_for_labels(labels: list[str], *, min_margin: float = 0.22, max_margin: float = 0.36) -> float:
+        """Estimate a safe left subplot margin for long y-axis labels."""
+        if not labels:
+            return min_margin
+        longest = max(len(label) for label in labels)
+        margin = min_margin + max(0.0, float(longest - 18)) * 0.0052
+        return max(min_margin, min(max_margin, margin))
+
     def render_holdings_excess_from_spec(self, spec: dict) -> ChartAsset | None:
         rows = list(spec.get("series") or [])
         if not rows:
             return None
         rows = sorted(rows, key=lambda row: float(row.get("excess_pct") or 0.0), reverse=True)[:8]
-        labels = [str(row.get("symbol") or row.get("name") or "") for row in rows]
+        labels = [self._truncate_label(str(row.get("symbol") or row.get("name") or ""), max_len=22) for row in rows]
         excess = [float(row.get("excess_pct") or 0.0) for row in rows]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in excess]
 
@@ -623,7 +651,12 @@ class ChartRenderer:
             xlabel="Excess return vs benchmark (%)",
             grid_axis="x",
         )
-        fig.subplots_adjust(left=0.16, right=0.89, top=0.86, bottom=0.18)
+        fig.subplots_adjust(
+            left=self._left_margin_for_labels(labels, min_margin=0.18, max_margin=0.30),
+            right=0.89,
+            top=0.86,
+            bottom=0.18,
+        )
         return self._to_asset(
             fig,
             key="holdings_excess_performance",
@@ -762,7 +795,7 @@ class ChartRenderer:
         rows = list(spec.get("series") or [])
         if not rows:
             return None
-        labels = [str(row.get("name") or "") for row in rows]
+        labels = [self._truncate_label(str(row.get("name") or ""), max_len=26) for row in rows]
         values = [float(row.get("value") or 0.0) for row in rows]
         colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
         fig, ax = self._figure(8.8, max(4.5, 0.5 * len(labels) + 2.0))
@@ -796,7 +829,12 @@ class ChartRenderer:
             grid_axis="x",
         )
         # Wide left margin so y-axis labels are never clipped
-        fig.subplots_adjust(left=0.32, right=0.91, top=0.86, bottom=0.18)
+        fig.subplots_adjust(
+            left=self._left_margin_for_labels(labels, min_margin=0.28, max_margin=0.40),
+            right=0.91,
+            top=0.86,
+            bottom=0.18,
+        )
         return self._to_asset(
             fig,
             key="breadth_leadership_panel",

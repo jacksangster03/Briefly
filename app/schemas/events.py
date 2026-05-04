@@ -53,6 +53,20 @@ class MacroDataPoint(BaseModel):
     source: str = "fred"
 
 
+class MarketBreadth(BaseModel):
+    """Breadth snapshot for an index or sector ETF."""
+
+    symbol: str
+    display_name: str = ""
+    change_percent: float = 0.0
+    day_high: float = 0.0
+    day_low: float = 0.0
+    volume: float | None = None
+    avg_volume_20d: float | None = None
+    volume_vs_avg: float | None = None   # ratio; 1.12 = 12% above 20d avg
+    source: str = "yfinance"
+
+
 class EarningsEvent(BaseModel):
     """Upcoming or recent earnings report."""
 
@@ -69,7 +83,8 @@ class EarningsEvent(BaseModel):
     revenue_estimate: float | None = None
     revenue_actual: float | None = None
     surprise_percent: float | None = None
-    time: str = ""          # bmo | amc | during
+    prior_quarter_surprise_pct: float | None = None  # last reported quarter vs estimate
+    time: str = ""          # bmo | amc | dmh
     source: str = ""
 
 

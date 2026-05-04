@@ -105,6 +105,11 @@ _SEO_REGEXES = [
     re.compile(r"\bvs\.?\s+\w+:\s+which\s+is\s+better\b", re.I),
     re.compile(r"\bis\s+.+\s+still\s+the\s+best\s+.+\s+to\s+buy\b", re.I),
     re.compile(r"\bbet\s+on\s+these\b", re.I),
+    re.compile(r"\bbest\s+cd\s+rates?\b", re.I),
+    re.compile(r"\block\s+in\s+up\s+to\s+\d+(?:\.\d+)?%\s*apy\b", re.I),
+    re.compile(r"\bhigh[-\s]?yield\s+savings\b", re.I),
+    re.compile(r"\bchecking\s+account\s+bonus\b", re.I),
+    re.compile(r"\bpersonal\s+finance\b", re.I),
 ]
 
 _OPINION_REGEXES = [

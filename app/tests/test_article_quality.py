@@ -35,6 +35,9 @@ class TestArticleType:
     def test_seo_is_still_best_to_buy(self):
         assert classify_article_type("Is Alphabet Still The Best AI Stock To Buy?") == "seo"
 
+    def test_seo_best_cd_rates(self):
+        assert classify_article_type("Best CD rates today, May 3, 2026 (lock in up to 4.05% APY)") == "seo"
+
     def test_opinion_url_path(self):
         assert classify_article_type(
             "Markets Will Be Choppy",

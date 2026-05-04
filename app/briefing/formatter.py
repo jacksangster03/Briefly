@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.processing.cleaners import truncate
 from app.briefing.global_news_selector import build_market_relevance_note
+from app.processing.article_quality import classify_article_type
 from app.briefing.templates import (
     MAX_EARNINGS_DISPLAY,
     MAX_INTRADAY_EVENTS,
@@ -600,20 +601,51 @@ class TelegramFormatter:
         catalyst = "no dominant catalyst yet"
         if dominant_driver:
             catalyst = truncate(dominant_driver, 120)
-        elif events:
-            ranked = sorted(
-                events,
-                key=lambda evt: (float(evt.final_score or 0.0), int(evt.cluster_size or 1)),
-                reverse=True,
-            )
-            catalyst = truncate(ranked[0].title, 110)
-        elif top_themes:
-            catalyst = truncate(top_themes[0].title, 110)
+        else:
+            best_evt = self._best_catalyst_event(events or [])
+            if best_evt is None:
+                best_evt = self._best_catalyst_event(top_themes or [])
+            if best_evt is not None:
+                catalyst = truncate(best_evt.title, 110)
         return (
             f"Watchlist is {direction}; leaders: {(top.display_name or top.symbol)} {float(top.change_percent or 0.0):+.2f}% "
             f"vs laggard {(bottom.display_name or bottom.symbol)} {float(bottom.change_percent or 0.0):+.2f}%. "
             f"Main catalyst: {catalyst}"
         )
+
+    def _best_catalyst_event(self, events: list[NormalisedEvent]) -> NormalisedEvent | None:
+        """Pick the strongest watchlist catalyst while suppressing low-signal headlines."""
+        if not events:
+            return None
+        ranked = sorted(
+            events,
+            key=lambda evt: (float(evt.final_score or 0.0), int(evt.cluster_size or 1)),
+            reverse=True,
+        )
+        for event in ranked:
+            title = (event.title or "").strip()
+            if not title:
+                continue
+            if self._is_low_signal_catalyst_title(title):
+                continue
+            return event
+        return ranked[0] if ranked else None
+
+    @staticmethod
+    def _is_low_signal_catalyst_title(title: str) -> bool:
+        text = (title or "").lower()
+        if classify_article_type(title) in {"preview", "listicle", "seo", "opinion"}:
+            return True
+        low_signal_terms = (
+            "best cd rates",
+            "apy",
+            "checking account",
+            "high-yield savings",
+            "price target",
+            "analyst note",
+            "analysts love",
+        )
+        return any(term in text for term in low_signal_terms)
 
     def _group_earnings(self, earnings: list[EarningsEvent]) -> dict[str, list[EarningsEvent]]:
         now_local = datetime.now(self.local_tz).date()

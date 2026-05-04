@@ -226,6 +226,37 @@ WEEKEND_LOW_TRUST_SOURCES = (
     "zacks",
     "thestreet",
 )
+TRUST_MARKET_LINK_TERMS = (
+    "inflation",
+    "rates",
+    "yield",
+    "treasury",
+    "fed",
+    "ecb",
+    "fomc",
+    "oil",
+    "crude",
+    "gold",
+    "dollar",
+    "fx",
+    "earnings",
+    "guidance",
+    "sanction",
+    "tariff",
+    "hormuz",
+    "iran",
+    "ceasefire",
+    "shipping",
+    "blockade",
+    "geopolitical",
+)
+TRUST_PERSONAL_FINANCE_PATTERNS = (
+    "best cd rates",
+    "apy",
+    "high-yield savings",
+    "checking account",
+    "personal finance",
+)
 
 
 def _compute_earnings_surprise(event: EarningsEvent) -> EarningsEvent:
@@ -333,6 +364,10 @@ class MorningBriefingGenerator:
         briefing.macro_context = self.macro_svc.get_morning_macro()
         briefing.macro_context.extend(self.macro_svc.get_ecb_snapshot())
         briefing.macro_context.extend(self.macro_svc.get_eurostat_snapshot())
+        try:
+            briefing.commodity_strip = self.macro_svc.get_commodity_strip()
+        except Exception:
+            briefing.commodity_strip = []
         ten_y, two_y = self.macro_svc.get_treasury_yields()
         briefing.market_setup.treasury_10y = ten_y
         briefing.market_setup.treasury_2y = two_y
@@ -405,6 +440,7 @@ class MorningBriefingGenerator:
             briefing.chart_assets = MorningChartBuilder(
                 profile=self.profile,
                 market_data=self.market_svc,
+                macro_data_svc=self.macro_svc,
             ).build(briefing)
         sent_ids: set[str] = set()
         for event in (
@@ -453,6 +489,24 @@ class MorningBriefingGenerator:
             for q in quotes:
                 q.display_name = name_map.get(q.symbol, q.symbol)
             setup.macro_quotes = quotes
+
+        # Breadth proxy (index + sectors) from yfinance fallback provider.
+        yfinance = getattr(self.market_svc, "yfinance", None)
+        if yfinance and yfinance.is_configured():
+            breadth_rows = []
+            try:
+                # S&P 500 proxy breadth context (volume vs 20D average).
+                core = yfinance.get_index_breadth("SPY")
+                if core is not None:
+                    core.display_name = core.display_name or "S&P 500 Proxy Breadth (SPY)"
+                    breadth_rows.append(core)
+            except Exception:
+                pass
+            try:
+                breadth_rows.extend(yfinance.get_sector_breadth())
+            except Exception:
+                pass
+            setup.market_breadth = breadth_rows
 
         return setup
 
@@ -857,6 +911,22 @@ class MorningBriefingGenerator:
             is_low_quality_for_section(article_type, source_quality)
             and not has_relevant_ticker
             and not has_catalyst
+        ):
+            return False
+
+        if (
+            section == "top_themes"
+            and not has_relevant_ticker
+            and not has_catalyst
+            and not has_readthrough
+            and not any(term in text_lower for term in TRUST_MARKET_LINK_TERMS)
+        ):
+            return False
+
+        if (
+            section == "top_themes"
+            and not has_relevant_ticker
+            and any(pattern in text_lower for pattern in TRUST_PERSONAL_FINANCE_PATTERNS)
         ):
             return False
 

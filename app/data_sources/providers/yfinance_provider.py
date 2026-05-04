@@ -11,7 +11,21 @@ from datetime import datetime, timezone
 
 from app.data_sources.base import BaseProvider
 from app.logger import get_logger
-from app.schemas.events import PricePoint, QuoteData
+from app.schemas.events import MarketBreadth, PricePoint, QuoteData
+
+_SECTOR_ETFS: dict[str, str] = {
+    "XLK": "Technology",
+    "XLF": "Financials",
+    "XLE": "Energy",
+    "XLV": "Health Care",
+    "XLI": "Industrials",
+    "XLB": "Materials",
+    "XLRE": "Real Estate",
+    "XLU": "Utilities",
+    "XLP": "Consumer Staples",
+    "XLY": "Consumer Discretionary",
+    "XLC": "Communication Services",
+}
 
 logger = get_logger("yfinance")
 
@@ -80,6 +94,71 @@ class YFinanceProvider(BaseProvider):
             quote = self.get_quote(sym)
             if quote:
                 results.append(quote)
+        return results
+
+    # -- Market breadth -------------------------------------------------------
+
+    def get_index_breadth(self, symbol: str) -> MarketBreadth | None:
+        """Volume-vs-20d-avg breadth for a single index or ETF."""
+        if not self._ensure_import():
+            return None
+        try:
+            ticker = self._yf.Ticker(symbol)
+            history = ticker.history(period="1mo", interval="1d", auto_adjust=False)
+            if history is None or history.empty or len(history) < 5:
+                return None
+
+            volumes = history["Volume"].dropna()
+            today_vol = float(volumes.iloc[-1]) if not volumes.empty else None
+            prior_vols = volumes.iloc[:-1].tail(20)
+            avg_vol_20d = float(prior_vols.mean()) if len(prior_vols) >= 5 else None
+            volume_vs_avg = (
+                round(today_vol / avg_vol_20d, 3)
+                if (today_vol and avg_vol_20d and avg_vol_20d > 0)
+                else None
+            )
+
+            info = ticker.fast_info
+            price = getattr(info, "last_price", 0.0) or 0.0
+            prev = getattr(info, "previous_close", 0.0) or 0.0
+            chg_pct = round((price - prev) / prev * 100, 2) if prev else 0.0
+
+            return MarketBreadth(
+                symbol=symbol,
+                change_percent=chg_pct,
+                day_high=round(getattr(info, "day_high", 0.0) or 0.0, 2),
+                day_low=round(getattr(info, "day_low", 0.0) or 0.0, 2),
+                volume=today_vol,
+                avg_volume_20d=round(avg_vol_20d, 0) if avg_vol_20d else None,
+                volume_vs_avg=volume_vs_avg,
+            )
+        except Exception as exc:
+            logger.warning("yfinance breadth failed for %s: %s", symbol, exc)
+            return None
+
+    def get_sector_breadth(self) -> list[MarketBreadth]:
+        """Return a MarketBreadth entry per SPDR sector ETF (up/down proxy)."""
+        if not self._ensure_import():
+            return []
+        results: list[MarketBreadth] = []
+        for symbol, name in _SECTOR_ETFS.items():
+            try:
+                ticker = self._yf.Ticker(symbol)
+                info = ticker.fast_info
+                price = getattr(info, "last_price", 0.0) or 0.0
+                prev = getattr(info, "previous_close", 0.0) or 0.0
+                chg_pct = round((price - prev) / prev * 100, 2) if prev else 0.0
+                results.append(MarketBreadth(
+                    symbol=symbol,
+                    display_name=name,
+                    change_percent=chg_pct,
+                    day_high=round(getattr(info, "day_high", 0.0) or 0.0, 2),
+                    day_low=round(getattr(info, "day_low", 0.0) or 0.0, 2),
+                    volume=getattr(info, "last_volume", None),
+                ))
+            except Exception as exc:
+                logger.warning("yfinance sector breadth failed for %s: %s", symbol, exc)
+        logger.info("Sector breadth: %d/%d ETFs fetched", len(results), len(_SECTOR_ETFS))
         return results
 
     # -- Price history -------------------------------------------------------

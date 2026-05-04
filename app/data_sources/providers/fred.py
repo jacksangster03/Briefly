@@ -15,11 +15,15 @@ BASE_URL = "https://api.stlouisfed.org/fred"
 
 # Key series for the morning briefing macro context
 DEFAULT_SERIES = {
-    "DGS10": "US 10Y Treasury Yield",
     "DGS2": "US 2Y Treasury Yield",
+    "DGS10": "US 10Y Treasury Yield",
+    "DGS30": "US 30Y Treasury Yield",
     "T10Y2Y": "10Y-2Y Yield Spread",
     "DTWEXBGS": "Trade-Weighted USD Index",
-    "DCOILWTICO": "WTI Crude Oil",
+    "DCOILWTICO": "WTI Crude Oil (USD/bbl)",
+    "DCOILBRENTEU": "Brent Crude Oil (USD/bbl)",
+    "GOLDAMGBD228NLBM": "Gold (USD/troy oz)",
+    "DHHNGSP": "Henry Hub Natural Gas (USD/MMBtu)",
     "UNRATE": "US Unemployment Rate",
     "CPIAUCSL": "US CPI (All Urban)",
     "FEDFUNDS": "Fed Funds Rate",

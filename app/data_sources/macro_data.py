@@ -11,11 +11,14 @@ from app.settings import Settings
 
 logger = get_logger("macro_data")
 
-# Morning briefing series: yields, USD, oil
-MORNING_SERIES = ["DGS10", "DGS2", "T10Y2Y", "DTWEXBGS"]
+# Morning briefing series: yields, USD, spread
+MORNING_SERIES = ["DGS2", "DGS10", "DGS30", "T10Y2Y", "DTWEXBGS"]
 
 # Full yield curve: 2Y, 5Y, 10Y, 30Y
 YIELD_CURVE_SERIES = ["DGS2", "DGS5", "DGS10", "DGS30"]
+
+# Commodity strip for the macro impulse grid
+COMMODITY_SERIES = ["DCOILWTICO", "DCOILBRENTEU", "GOLDAMGBD228NLBM", "DHHNGSP"]
 
 # Extended macro context
 EXTENDED_SERIES = ["UNRATE", "CPIAUCSL", "FEDFUNDS"]
@@ -97,6 +100,14 @@ class MacroDataService:
             if point is not None:
                 points.append(point)
         logger.info("ECB snapshot: %d items", len(points))
+        return points
+
+    def get_commodity_strip(self) -> list[MacroDataPoint]:
+        """Fetch WTI, Brent, gold, and natural gas from FRED."""
+        if not self.fred or not self.fred.is_configured():
+            return []
+        points = self.fred.get_macro_snapshot(COMMODITY_SERIES)
+        logger.info("Commodity strip: %d items", len(points))
         return points
 
     def get_eurostat_snapshot(self) -> list[MacroDataPoint]:
