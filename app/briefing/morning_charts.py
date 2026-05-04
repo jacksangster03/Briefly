@@ -7,11 +7,13 @@ Renderers consume these specs but do not decide visual hierarchy.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from app.personalization.user_profile import UserProfile
+from app.processing.cleaners import truncate
 from app.schemas.briefings import MorningBriefing
 from app.schemas.events import MacroDataPoint, PricePoint, QuoteData
 
@@ -39,6 +41,11 @@ CHART_SPEC_REQUIRED_KEYS = (
     "annotations",
     "email_dimensions",
 )
+
+
+def _feature_on(name: str, default: bool = True) -> bool:
+    raw = os.getenv(name, "true" if default else "false").strip().lower()
+    return raw not in {"0", "false", "off", "no"}
 
 
 @dataclass
@@ -87,7 +94,13 @@ def build_morning_chart_bundle(
         multiplier = feedback_weights.get(item.chart_key, 1.0)
         if multiplier != 1.0:
             item.priority = round(item.priority * multiplier, 4)
-    selected = _select_candidates(candidates)
+    selected = _select_candidates(
+        candidates,
+        profile=profile,
+        briefing=briefing,
+        normalized=normalized,
+        regime_tags=regime_tags,
+    )
     contract_errors = validate_chart_contract({"charts": [item.spec for item in candidates], "selected": selected})
 
     # Anomaly detection: flag unusually extreme impulse days
@@ -121,6 +134,8 @@ def build_morning_chart_bundle(
             "delivery_mode": "deterministic",
             "llm_email_enabled": bool(profile.delivery.get("llm_email_morning", True)),
             "llm_shadow_mode": bool(profile.delivery.get("llm_shadow_mode", True)),
+            "email_density_mode": _chart_density_mode(profile),
+            "chart_stack_key": _stack_key_for_regime(briefing, normalized, regime_tags),
             "data_confidence": _confidence_label(normalized),
             "contract_errors": contract_errors,
             **anomaly_meta,
@@ -333,6 +348,39 @@ def _build_candidates(
         )
     )
 
+    if _feature_on("FEATURE_REGIONAL_DIVERGENCE_SCORE", True):
+        specs.append(
+            ChartCandidate(
+                chart_key="regional_divergence_score",
+                category="support",
+                priority=0.78 + (0.09 if "regional_split" in regime_tags else 0.0),
+                spec=_regional_divergence_score_spec(normalized),
+                reason="Regional spread score surfaces where dispersion is widest.",
+            )
+        )
+
+    if _feature_on("FEATURE_GEO_CONFIRMATION_LADDER", True):
+        specs.append(
+            ChartCandidate(
+                chart_key="geo_confirmation_ladder",
+                category="micro",
+                priority=0.71 + (0.10 if ("oil_shock" in regime_tags or "defensive" in regime_tags) else 0.0),
+                spec=_geo_confirmation_ladder_spec(briefing, normalized),
+                reason="Geo confirmation ladder separates stress signals from non-confirmation.",
+            )
+        )
+
+    if _feature_on("FEATURE_OIL_TRANSMISSION_CARD", True):
+        specs.append(
+            ChartCandidate(
+                chart_key="oil_transmission_card",
+                category="micro",
+                priority=0.69 + (0.10 if ("oil_shock" in regime_tags or abs(float(normalized.get("oil_delta_pct") or 0.0)) >= 1.0) else 0.0),
+                spec=_oil_transmission_card_spec(briefing, normalized),
+                reason="Oil transmission card distinguishes inflation stress from broad risk-off.",
+            )
+        )
+
     specs.append(
         ChartCandidate(
             chart_key="breadth_leadership_panel",
@@ -353,15 +401,16 @@ def _build_candidates(
         )
     )
 
-    specs.append(
-        ChartCandidate(
-            chart_key="volatility_regime_card",
-            category="micro",
-            priority=0.66 + (0.07 if "defensive" in regime_tags else 0.0),
-            spec=_volatility_regime_spec(normalized),
-            reason="Volatility regime sets risk appetite context.",
+    if _feature_on("FEATURE_VIX_RISK_CARD", True):
+        specs.append(
+            ChartCandidate(
+                chart_key="volatility_regime_card",
+                category="micro",
+                priority=0.66 + (0.07 if "defensive" in regime_tags else 0.0),
+                spec=_volatility_regime_spec(normalized),
+                reason="Volatility regime sets risk appetite context.",
+            )
         )
-    )
 
     specs.append(
         ChartCandidate(
@@ -385,15 +434,16 @@ def _build_candidates(
 
     # --- New charts ---
 
-    specs.append(
-        ChartCandidate(
-            chart_key="yield_curve_shape",
-            category="support",
-            priority=0.72 + (0.10 if "rates_led" in regime_tags else 0.0),
-            spec=_yield_curve_spec(yield_curve_points or [], market_data_service),
-            reason="Yield curve shape and week-over-week shift in one glance.",
+    if _feature_on("FEATURE_YIELD_CURVE_CARD", True):
+        specs.append(
+            ChartCandidate(
+                chart_key="yield_curve_shape",
+                category="support",
+                priority=0.72 + (0.10 if "rates_led" in regime_tags else 0.0),
+                spec=_yield_curve_spec(yield_curve_points or [], market_data_service),
+                reason="Yield curve shape and week-over-week shift in one glance.",
+            )
         )
-    )
 
     specs.append(
         ChartCandidate(
@@ -451,37 +501,180 @@ def _build_candidates(
     return specs
 
 
-def _select_candidates(candidates: list[ChartCandidate]) -> list[dict[str, str]]:
+def _select_candidates(
+    candidates: list[ChartCandidate],
+    *,
+    profile: UserProfile,
+    briefing: MorningBriefing,
+    normalized: dict[str, Any],
+    regime_tags: list[str],
+) -> list[dict[str, str]]:
     by_key = {item.chart_key: item for item in candidates}
-    selected: list[dict[str, str]] = []
-
     available = [item for item in candidates if bool(item.spec.get("available"))]
-    hero = next((item for item in available if item.category == "hero"), None) or (available[0] if available else None)
-    if hero:
-        selected.append({"chart_key": hero.chart_key, "role": "hero", "reason": hero.reason})
-
-    supports = [item for item in available if item.category == "support" and item.chart_key != (hero.chart_key if hero else "")]
-    for item in supports[:2]:
-        selected.append({"chart_key": item.chart_key, "role": "support", "reason": item.reason})
-
-    portfolio = next((item for item in available if item.category == "portfolio"), None)
-    if portfolio and portfolio.chart_key not in {row["chart_key"] for row in selected}:
-        selected.append({"chart_key": portfolio.chart_key, "role": "optional_portfolio", "reason": portfolio.reason})
-
-    event = next((item for item in available if item.category == "event"), None)
-    if event and event.chart_key not in {row["chart_key"] for row in selected}:
-        selected.append({"chart_key": event.chart_key, "role": "optional_event", "reason": event.reason})
-
-    micro = [item for item in available if item.category == "micro" and item.chart_key not in {row["chart_key"] for row in selected}]
-    for idx, item in enumerate(micro[:2], start=1):
-        selected.append({"chart_key": item.chart_key, "role": f"micro_{idx}", "reason": item.reason})
-
-    if not selected:
+    if not available:
         fallback = next(iter(by_key.values()), None)
-        if fallback:
-            selected.append({"chart_key": fallback.chart_key, "role": "hero", "reason": "Fallback due to missing availability."})
+        return [{"chart_key": fallback.chart_key, "role": "hero", "reason": "Fallback due to missing availability."}] if fallback else []
 
-    return selected
+    if not _feature_on("FEATURE_DYNAMIC_CHART_STACK", True):
+        selected: list[dict[str, str]] = []
+        hero = next((item for item in available if item.category == "hero"), None) or available[0]
+        selected.append({"chart_key": hero.chart_key, "role": "hero", "reason": hero.reason})
+        for item in [row for row in available if row.category == "support" and row.chart_key != hero.chart_key][:2]:
+            selected.append({"chart_key": item.chart_key, "role": "support", "reason": item.reason})
+        portfolio = next((item for item in available if item.category == "portfolio"), None)
+        if portfolio and portfolio.chart_key not in {row["chart_key"] for row in selected}:
+            selected.append({"chart_key": portfolio.chart_key, "role": "optional_portfolio", "reason": portfolio.reason})
+        event = next((item for item in available if item.category == "event"), None)
+        if event and event.chart_key not in {row["chart_key"] for row in selected}:
+            selected.append({"chart_key": event.chart_key, "role": "optional_event", "reason": event.reason})
+        micro = [item for item in available if item.category == "micro" and item.chart_key not in {row["chart_key"] for row in selected}]
+        for idx, item in enumerate(micro[:2], start=1):
+            selected.append({"chart_key": item.chart_key, "role": f"micro_{idx}", "reason": item.reason})
+        return selected
+
+    density_mode = _chart_density_mode(profile)
+    max_charts = 5 if density_mode == "desk" else 8
+    stack_key = _stack_key_for_regime(briefing, normalized, regime_tags)
+    desired = _stack_policy(stack_key)
+
+    selection_keys: list[str] = []
+    available_keys = {item.chart_key for item in available}
+    for key in desired:
+        if key in available_keys:
+            # Hide low-value event chart in desk mode when catalyst label is unavailable.
+            if density_mode == "desk" and key == "event_linked_annotated_trend":
+                spec = by_key.get(key).spec if by_key.get(key) else {}
+                event_name = str((spec.get("meta") or {}).get("event_name") or "").strip().lower()
+                if not event_name or "unavailable" in event_name:
+                    continue
+            if key not in selection_keys:
+                selection_keys.append(key)
+        if len(selection_keys) >= max_charts:
+            break
+
+    # Portfolio relevance is mandatory in all stacks.
+    for must_key in ("pnl_attribution_waterfall", "portfolio_concentration_risk_card"):
+        if must_key in available_keys and must_key not in selection_keys:
+            if len(selection_keys) >= max_charts:
+                # Replace the last non-portfolio chart if capacity is full.
+                for idx in range(len(selection_keys) - 1, -1, -1):
+                    if selection_keys[idx] not in {"pnl_attribution_waterfall", "portfolio_concentration_risk_card"}:
+                        selection_keys[idx] = must_key
+                        break
+            else:
+                selection_keys.append(must_key)
+
+    # Fill remaining capacity with highest-priority available charts.
+    if len(selection_keys) < max_charts:
+        for item in sorted(available, key=lambda row: row.priority, reverse=True):
+            if item.chart_key not in selection_keys:
+                selection_keys.append(item.chart_key)
+            if len(selection_keys) >= max_charts:
+                break
+
+    roles: list[dict[str, str]] = []
+    micro_counter = 0
+    for idx, key in enumerate(selection_keys):
+        item = by_key.get(key)
+        if not item:
+            continue
+        if idx == 0:
+            role = "hero"
+        elif item.category == "micro":
+            micro_counter += 1
+            role = f"micro_{micro_counter}"
+        elif item.category == "portfolio":
+            role = "optional_portfolio"
+        elif item.category == "event":
+            role = "optional_event"
+        else:
+            role = "support"
+        roles.append({"chart_key": key, "role": role, "reason": item.reason})
+    return roles
+
+
+def _chart_density_mode(profile: UserProfile) -> str:
+    if not _feature_on("FEATURE_EMAIL_DENSITY_MODE", True):
+        return "full"
+    raw = str(profile.delivery.get("email_density_mode", "desk")).strip().lower()
+    return raw if raw in {"desk", "full"} else "desk"
+
+
+def _stack_key_for_regime(
+    briefing: MorningBriefing,
+    normalized: dict[str, Any],
+    regime_tags: list[str],
+) -> str:
+    tags = {str(t).lower() for t in regime_tags}
+    oil_move = abs(float(normalized.get("oil_delta_pct") or 0.0))
+    ten_y = abs(float(normalized.get("ten_y_change") or 0.0))
+    dispersion = float(normalized.get("dispersion") or 0.0)
+    vix_delta = float(normalized.get("vix_delta_pct") or 0.0)
+    if "oil_shock" in tags or (oil_move >= 2.0 and vix_delta >= 1.0):
+        return "energy_geo"
+    if "rates_led" in tags or ten_y >= 0.025:
+        return "rates_repricing"
+    if briefing.earnings_calendar and any(tok in " ".join((evt.title or "").lower() for evt in briefing.top_themes[:6]) for tok in ("earnings", "guidance", "ai", "semiconductor")):
+        return "earnings_tech"
+    if "regional_split" in tags or "breadth_divergence" in tags or dispersion >= 0.9:
+        return "mixed_regional_split"
+    return "balanced"
+
+
+def _stack_policy(stack_key: str) -> list[str]:
+    policies: dict[str, list[str]] = {
+        "energy_geo": [
+            "cross_asset_impulse_strip",
+            "geo_confirmation_ladder",
+            "oil_transmission_card",
+            "regional_divergence_score",
+            "pnl_attribution_waterfall",
+            "portfolio_concentration_risk_card",
+            "volatility_regime_card",
+            "global_relative_performance",
+        ],
+        "rates_repricing": [
+            "yield_curve_shape",
+            "cross_asset_impulse_strip",
+            "volatility_regime_card",
+            "breadth_leadership_panel",
+            "pnl_attribution_waterfall",
+            "rates_curve_micro_panel",
+            "portfolio_concentration_risk_card",
+            "regional_divergence_score",
+        ],
+        "earnings_tech": [
+            "global_relative_performance",
+            "holdings_excess_performance",
+            "sector_exposure_quadrant",
+            "earnings_relevance_strip",
+            "pnl_attribution_waterfall",
+            "portfolio_concentration_risk_card",
+            "implied_move_strip",
+            "breadth_leadership_panel",
+        ],
+        "mixed_regional_split": [
+            "regional_divergence_score",
+            "global_relative_performance",
+            "breadth_leadership_panel",
+            "volatility_regime_card",
+            "pnl_attribution_waterfall",
+            "portfolio_concentration_risk_card",
+            "cross_asset_impulse_strip",
+            "rates_curve_micro_panel",
+        ],
+        "balanced": [
+            "global_relative_performance",
+            "cross_asset_impulse_strip",
+            "breadth_leadership_panel",
+            "pnl_attribution_waterfall",
+            "portfolio_concentration_risk_card",
+            "regional_divergence_score",
+            "volatility_regime_card",
+            "rates_curve_micro_panel",
+        ],
+    }
+    return policies.get(stack_key, policies["balanced"])
 
 
 def _bundle_summary(normalized: dict[str, Any], regime_tags: list[str]) -> str:
@@ -689,6 +882,7 @@ def _event_linked_spec(briefing: MorningBriefing, market_data_service: Any) -> d
     x = [idx for idx, _ in enumerate(path)]
     y = [round(float(point.close), 4) for point in path]
     marker = max(1, len(path) - 6)
+    event_label = _event_label_for_trend(briefing, focus_symbol)
     return {
         "chart_key": "event_linked_annotated_trend",
         "variant": "30d",
@@ -698,11 +892,120 @@ def _event_linked_spec(briefing: MorningBriefing, market_data_service: Any) -> d
         "caption": f"{focus_symbol} trend is framed around the latest deterministic catalyst window.",
         "series": [{"name": focus_symbol, "symbol": focus_symbol, "x": x, "y": y}],
         "annotations": [
-            {"label": "event_window_start", "x": marker},
+            {"label": "event_window_start", "x": marker, "event_name": event_label},
             {"label": "latest", "x": len(path) - 1},
         ],
-        "meta": {"symbol": focus_symbol},
+        "meta": {"symbol": focus_symbol, "event_name": event_label},
         "email_dimensions": {"width": 1000, "height": 580},
+    }
+
+
+def _regional_divergence_score_spec(metrics: dict[str, Any]) -> dict[str, Any]:
+    us = float(metrics.get("us_avg") or 0.0)
+    eu = float(metrics.get("eu_avg") or 0.0)
+    asia = float(metrics.get("asia_avg") or 0.0)
+    rows = [
+        {"name": "US", "value": round(us, 3)},
+        {"name": "Europe", "value": round(eu, 3)},
+        {"name": "Asia", "value": round(asia, 3)},
+    ]
+    spread = round(max(us, eu, asia) - min(us, eu, asia), 3)
+    available = any(abs(float(row["value"])) > 0 for row in rows)
+    return {
+        "chart_key": "regional_divergence_score",
+        "variant": "regional_bar_spread",
+        "available": available,
+        "reason_if_hidden": None if available else "Regional benchmark moves unavailable.",
+        "title": "Regional Divergence",
+        "caption": f"Regional spread is {spread:.2f} pts between strongest and weakest sessions.",
+        "series": rows,
+        "annotations": [{"label": "spread", "value": spread}],
+        "meta": {"spread": spread},
+        "email_dimensions": {"width": 900, "height": 460},
+    }
+
+
+def _geo_confirmation_ladder_spec(briefing: MorningBriefing, metrics: dict[str, Any]) -> dict[str, Any]:
+    oil = float(metrics.get("oil_delta_pct") or 0.0)
+    vix_delta = float(metrics.get("vix_delta_pct") or 0.0)
+    gold = float(metrics.get("gold_delta_pct") or 0.0)
+    us = float(metrics.get("us_avg") or 0.0)
+    eu = float(metrics.get("eu_avg") or 0.0)
+    asia = float(metrics.get("asia_avg") or 0.0)
+    equity_confirm = (us + eu + asia) / 3.0 <= -0.4
+    oil_confirm = oil >= 1.0
+    vix_confirm = vix_delta >= 1.5
+    haven_confirm = gold >= 0.3
+    geo_level = str(briefing.geo_risk_level or "n/a")
+
+    rows = [
+        {"name": "Oil", "state": "YES" if oil_confirm else "MILD" if oil > 0 else "NO", "value": oil},
+        {"name": "VIX", "state": "YES" if vix_confirm else "NO", "value": vix_delta},
+        {"name": "Gold/Haven", "state": "YES" if haven_confirm else "NO", "value": gold},
+        {"name": "Equities", "state": "YES" if equity_confirm else "PARTIAL", "value": (us + eu + asia) / 3.0},
+    ]
+    if oil_confirm and vix_confirm and haven_confirm and equity_confirm:
+        conclusion = "broad stress confirmed"
+    elif oil_confirm or vix_confirm:
+        conclusion = "market-contained stress"
+    else:
+        conclusion = "limited confirmation"
+    return {
+        "chart_key": "geo_confirmation_ladder",
+        "variant": "confirmations",
+        "available": True,
+        "reason_if_hidden": None,
+        "title": "Geo Confirmation Ladder",
+        "caption": (
+            f"Oil {'confirms' if oil_confirm else 'is mild'}, VIX {'confirms' if vix_confirm else 'does not confirm'}, "
+            f"gold {'confirms' if haven_confirm else 'does not confirm'} haven demand; final geo label {geo_level} ({conclusion})."
+        ),
+        "series": rows,
+        "annotations": [{"label": "conclusion", "value": conclusion}],
+        "meta": {"geo_level": geo_level, "conclusion": conclusion},
+        "email_dimensions": {"width": 900, "height": 460},
+    }
+
+
+def _oil_transmission_card_spec(briefing: MorningBriefing, metrics: dict[str, Any]) -> dict[str, Any]:
+    oil_row = _find_quote(briefing.market_setup.macro_quotes, OIL_KEYS)
+    brent_row = _find_quote(briefing.market_setup.macro_quotes, ("brent", "bz=F", "co1:com"))
+    energy_etf = next((row for row in briefing.market_setup.market_breadth if str(row.symbol).upper() == "XLE"), None)
+    vix = float(metrics.get("vix_delta_pct") or 0.0)
+    gold = float(metrics.get("gold_delta_pct") or 0.0)
+    oil = float(oil_row.change_percent or 0.0) if oil_row else 0.0
+    brent = float(brent_row.change_percent or 0.0) if brent_row else 0.0
+    xle = float(energy_etf.change_percent or 0.0) if energy_etf else 0.0
+
+    if oil > 1.0 and vix > 1.0 and gold <= 0.2:
+        verdict = "inflation stress > haven panic"
+    elif oil > 1.0 and xle > 0:
+        verdict = "energy leadership confirms supply stress"
+    elif oil <= 0 and vix <= 0:
+        verdict = "energy pressure easing"
+    else:
+        verdict = "mixed transmission"
+
+    rows = [
+        {"name": "WTI", "value": round(oil, 3)},
+        {"name": "Brent", "value": round(brent, 3)},
+        {"name": "XLE", "value": round(xle, 3)},
+        {"name": "VIX", "value": round(vix, 3)},
+        {"name": "Gold", "value": round(gold, 3)},
+    ]
+    return {
+        "chart_key": "oil_transmission_card",
+        "variant": "macro_transmission",
+        "available": True,
+        "reason_if_hidden": None,
+        "title": "Oil Transmission",
+        "caption": (
+            f"WTI {oil:+.2f}% / Brent {brent:+.2f}% with XLE {xle:+.2f}%, VIX {vix:+.2f}% and gold {gold:+.2f}%: {verdict}."
+        ),
+        "series": rows,
+        "annotations": [{"label": "verdict", "value": verdict}],
+        "meta": {"verdict": verdict},
+        "email_dimensions": {"width": 900, "height": 460},
     }
 
 
@@ -967,18 +1270,40 @@ def _pnl_waterfall_spec(holdings_quotes: list[QuoteData], profile: UserProfile) 
 
     bars.sort(key=lambda r: r["contribution"], reverse=True)
     available = len(bars) >= 2
+    top_pos = next((row for row in bars if float(row.get("contribution") or 0.0) > 0.0), None)
+    top_neg = min(bars, key=lambda row: float(row.get("contribution") or 0.0), default=None)
+    lens_hint = ""
+    if top_pos and top_neg:
+        lens_hint = f" Lead: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}%; drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%."
     return {
         "chart_key": "pnl_attribution_waterfall",
         "variant": "daily_contribution",
         "available": available,
         "reason_if_hidden": None if available else "Insufficient weighted holdings for P&L attribution.",
         "title": "P&L Attribution",
-        "caption": f"Portfolio daily contribution: {total_contrib:+.2f}% weighted total across {len(bars)} positions.",
+        "caption": f"Portfolio daily contribution: {total_contrib:+.2f}% weighted total across {len(bars)} positions.{lens_hint}",
         "series": bars,
         "annotations": [{"label": "total", "value": round(total_contrib, 4)}],
         "meta": {"total_contribution": round(total_contrib, 4)},
         "email_dimensions": {"width": 1000, "height": 560},
     }
+
+
+def _event_label_for_trend(briefing: MorningBriefing, focus_symbol: str) -> str:
+    candidates = list(briefing.portfolio_focus or []) + list(briefing.top_themes or []) + list(briefing.global_news or [])
+    focus_upper = (focus_symbol or "").upper()
+    for evt in candidates:
+        text = f"{evt.title} {evt.summary}".strip()
+        if not text:
+            continue
+        if focus_upper and focus_upper in [t.upper() for t in (evt.tickers or [])]:
+            return truncate(text, 56)
+    for evt in candidates:
+        text = f"{evt.title} {evt.summary}".strip()
+        if not text:
+            continue
+        return truncate(text, 56)
+    return "latest catalyst unavailable"
 
 
 def _rsi_heatmap_spec(holdings_quotes: list[QuoteData], market_data_service: Any, profile: UserProfile) -> dict[str, Any]:

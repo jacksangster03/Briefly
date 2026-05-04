@@ -220,6 +220,12 @@ class ChartRenderer:
             return self.render_rsi_heatmap_from_spec(spec)
         if key == "implied_move_strip":
             return self.render_implied_move_from_spec(spec)
+        if key == "geo_confirmation_ladder":
+            return self.render_geo_confirmation_ladder_from_spec(spec)
+        if key == "regional_divergence_score":
+            return self.render_regional_divergence_from_spec(spec)
+        if key == "oil_transmission_card":
+            return self.render_oil_transmission_from_spec(spec)
         return None
 
     def render_market_snapshot(self, quotes: list[QuoteData]) -> ChartAsset | None:
@@ -967,6 +973,168 @@ class ChartRenderer:
             title=str(spec.get("title") or "Breadth & Leadership"),
             caption=str(spec.get("caption") or ""),
             filename="breadth-leadership.png",
+        )
+
+    def render_regional_divergence_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        labels = [str(row.get("name") or "") for row in rows]
+        values = [float(row.get("value") or 0.0) for row in rows]
+        colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
+        fig, ax = self._figure(8.2, 3.8)
+        y_pos = list(range(len(labels)))
+        ax.barh(y_pos, values, color=colors, alpha=0.84, height=0.56)
+        ax.axvline(0, color=ACCENT, linewidth=1.35, alpha=0.9)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, fontsize=9.5, color=TEXT, fontweight="bold")
+        ax.invert_yaxis()
+        x_range = max((abs(v) for v in values), default=1.0)
+        pad = max(0.15, x_range * 0.28)
+        ax.set_xlim(-x_range - pad, x_range + pad)
+        for idx, value in enumerate(values):
+            self._value_box(
+                ax,
+                value + (0.06 if value >= 0 else -0.06),
+                idx,
+                f"{value:+.2f}%",
+                color=colors[idx],
+                ha="left" if value >= 0 else "right",
+                fontsize=9.0,
+            )
+        spread = float(((spec.get("meta") or {}).get("spread") or 0.0))
+        ax.text(
+            0.99,
+            0.05,
+            f"Spread: {spread:.2f} pts",
+            transform=ax.transAxes,
+            ha="right",
+            va="bottom",
+            color=MUTED,
+            fontsize=8.3,
+            bbox={"facecolor": SUBTLE, "edgecolor": GRID, "linewidth": 0.5, "pad": 1.7},
+        )
+        self._style_axes(
+            ax,
+            title="",
+            xlabel="Average move (%)",
+            grid_axis="x",
+            lock_y_ticks=True,
+            lock_x_ticks=True,
+        )
+        fig.subplots_adjust(left=0.20, right=0.94, top=0.90, bottom=0.18)
+        return self._to_asset(
+            fig,
+            key="regional_divergence_score",
+            title=str(spec.get("title") or "Regional Divergence"),
+            caption=str(spec.get("caption") or ""),
+            filename="regional-divergence-score.png",
+        )
+
+    def render_geo_confirmation_ladder_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        fig, ax = self._figure(8.2, 3.8)
+        ax.axis("off")
+        y0 = 0.78
+        step = 0.18
+        for idx, row in enumerate(rows):
+            name = str(row.get("name") or "Signal")
+            state = str(row.get("state") or "NO").upper()
+            value = float(row.get("value") or 0.0)
+            color = POSITIVE if state == "YES" else (ACCENT if state in {"MILD", "PARTIAL"} else NEGATIVE)
+            y = y0 - idx * step
+            ax.text(0.03, y, name, transform=ax.transAxes, color=TEXT, fontsize=10.3, weight="bold", ha="left", va="center")
+            ax.text(
+                0.43,
+                y,
+                state,
+                transform=ax.transAxes,
+                color=color,
+                fontsize=9.3,
+                weight="bold",
+                bbox={"facecolor": SUBTLE, "edgecolor": GRID, "linewidth": 0.5, "pad": 1.8},
+                ha="left",
+                va="center",
+            )
+            ax.text(0.57, y, f"{value:+.2f}%", transform=ax.transAxes, color=MUTED, fontsize=9.0, ha="left", va="center")
+            ax.plot([0.03, 0.95], [y - 0.08, y - 0.08], transform=ax.transAxes, color=GRID, linewidth=0.6, alpha=0.55)
+        conclusion = str(((spec.get("meta") or {}).get("conclusion") or "")).strip()
+        geo_level = str(((spec.get("meta") or {}).get("geo_level") or "N/A")).strip().upper()
+        ax.text(
+            0.03,
+            0.06,
+            f"Final geo label: {geo_level} · {conclusion}",
+            transform=ax.transAxes,
+            color=MUTED,
+            fontsize=8.6,
+            ha="left",
+            va="bottom",
+        )
+        return self._to_asset(
+            fig,
+            key="geo_confirmation_ladder",
+            title=str(spec.get("title") or "Geo Confirmation Ladder"),
+            caption=str(spec.get("caption") or ""),
+            filename="geo-confirmation-ladder.png",
+        )
+
+    def render_oil_transmission_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        if not rows:
+            return None
+        labels = [str(row.get("name") or "") for row in rows]
+        values = [float(row.get("value") or 0.0) for row in rows]
+        colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
+        fig, ax = self._figure(8.2, 3.8)
+        y_pos = list(range(len(labels)))
+        ax.barh(y_pos, values, color=colors, alpha=0.82, height=0.55)
+        ax.axvline(0, color=ACCENT, linewidth=1.4, alpha=0.9)
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, fontsize=9.2, color=TEXT, fontweight="bold")
+        ax.invert_yaxis()
+        x_range = max((abs(v) for v in values), default=1.0)
+        pad = max(0.25, x_range * 0.28)
+        ax.set_xlim(-x_range - pad, x_range + pad)
+        for idx, value in enumerate(values):
+            self._value_box(
+                ax,
+                value + (0.06 if value >= 0 else -0.06),
+                idx,
+                f"{value:+.2f}%",
+                color=colors[idx],
+                ha="left" if value >= 0 else "right",
+                fontsize=8.9,
+            )
+        verdict = str(((spec.get("meta") or {}).get("verdict") or "")).strip()
+        if verdict:
+            ax.text(
+                0.99,
+                0.04,
+                verdict,
+                transform=ax.transAxes,
+                ha="right",
+                va="bottom",
+                color=MUTED,
+                fontsize=8.3,
+                bbox={"facecolor": SUBTLE, "edgecolor": GRID, "linewidth": 0.5, "pad": 1.7},
+            )
+        self._style_axes(
+            ax,
+            title="",
+            xlabel="Daily move (%)",
+            grid_axis="x",
+            lock_y_ticks=True,
+            lock_x_ticks=True,
+        )
+        fig.subplots_adjust(left=0.20, right=0.94, top=0.90, bottom=0.18)
+        return self._to_asset(
+            fig,
+            key="oil_transmission_card",
+            title=str(spec.get("title") or "Oil Transmission"),
+            caption=str(spec.get("caption") or ""),
+            filename="oil-transmission-card.png",
         )
 
     def render_rates_curve_micro_from_spec(self, spec: dict) -> ChartAsset | None:

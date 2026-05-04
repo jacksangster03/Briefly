@@ -120,7 +120,9 @@ def test_rates_repricing_fixture_contract_and_snapshots():
     )
     assert validate_chart_contract(bundle) == []
     assert selected
-    assert any(row["chart_key"] == "global_relative_performance" for row in selected)
+    selected_keys = {row["chart_key"] for row in selected}
+    assert ("yield_curve_shape" in selected_keys) or ("rates_curve_micro_panel" in selected_keys)
+    assert "cross_asset_impulse_strip" in selected_keys
 
 
 def test_chart_copy_triplet_is_distinct_and_outlook_safe():

@@ -280,6 +280,7 @@ def _load_profile_overrides(profile: UserProfile) -> None:
             "delivery.llm_shadow_mode",
             "delivery.quiet_hours_start",
             "delivery.quiet_hours_end",
+            "delivery.email_density_mode",
         }:
             profile.delivery[key.replace("delivery.", "")] = value
             continue

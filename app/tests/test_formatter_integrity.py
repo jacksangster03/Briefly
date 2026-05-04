@@ -64,3 +64,22 @@ def test_company_label_suppressed_when_confidence_low():
         raw_data={"symbol_confidence": 0.55},
     )
     assert formatter._company_label(evt) == ""
+
+
+def test_themes_section_shows_clean_fallback_when_empty():
+    formatter = TelegramFormatter("Europe/Madrid")
+    rendered = formatter._format_themes_for_mode([], session_mode="weekday")
+    assert "TOP THEMES" in rendered
+    assert "No high-confidence portfolio/watchlist themes passed relevance and source-quality filters this cycle." in rendered
+
+
+def test_provider_health_note_is_human_readable_not_raw_counts():
+    formatter = TelegramFormatter("Europe/Madrid")
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 5, 4, 8, 30, tzinfo=timezone.utc),
+        market_setup=MarketSetup(),
+        data_freshness={"Provider Health": "alpha_vantage:0, finnhub:100, fmp:0, gdelt:0"},
+    )
+    rendered = "\n".join(formatter.format_morning_briefing(briefing))
+    assert "Provider notes:" in rendered
+    assert "alpha_vantage:0" not in rendered

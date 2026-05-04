@@ -28,7 +28,7 @@ _PAIR_MOVE_RE = re.compile(r"([+\-−]\d[\d,]*(?:\.\d+)?\s*\([+\-−]?\d[\d,]*(?
 _EMAIL_FONT_STACK = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
 _OUTER_BG = "#030A12"
 _CANVAS_BG = "#06111F"
-_SECTION_BG = "#071423"
+_SECTION_BG = "#06111F"
 _CHART_PANEL_BG = "#03101D"
 _DIVIDER = "#153047"
 _TEXT_PRIMARY = "#EAF2FF"
@@ -123,6 +123,8 @@ class EmailFormatter:
         freshness_lines = self._freshness_breakdown_lines(briefing, generated_local)
         title, date_label = self._split_subject(subject)
         desk_read = self._top_desk_read(briefing)
+        trigger_lines = self._trigger_lines(briefing)
+        change_lines = self._what_changed_lines(briefing)
 
         # Regime banner: deterministic session quality accent takes precedence.
         primary_tag = next((t for t in regime_tags if t in _REGIME_STYLES), "mixed")
@@ -197,6 +199,22 @@ class EmailFormatter:
                 f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:9px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};"
                 f"font-size:12.5px;line-height:1.38;color:{_TEXT_PRIMARY};\">"
                 f"{desk_read}</td></tr>"
+            )
+        if trigger_lines:
+            parts.append(
+                f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:8px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
+                f"<div style=\"font-size:10px;line-height:1.4;color:{_TEXT_MUTED};letter-spacing:0.05em;font-weight:800;\">TODAY'S TRIGGERS</div>"
+                f"<div style=\"margin-top:4px;font-size:11.5px;line-height:1.4;color:{_TEXT_SECONDARY};\">"
+                + "<br>".join(html.escape(line) for line in trigger_lines)
+                + "</div></td></tr>"
+            )
+        if change_lines:
+            parts.append(
+                f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:8px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
+                f"<div style=\"font-size:10px;line-height:1.4;color:{_TEXT_MUTED};letter-spacing:0.05em;font-weight:800;\">WHAT CHANGED</div>"
+                f"<div style=\"margin-top:4px;font-size:11.5px;line-height:1.4;color:{_TEXT_SECONDARY};\">"
+                + "<br>".join(html.escape(line) for line in change_lines)
+                + "</div></td></tr>"
             )
 
         if briefing.chart_assets:
@@ -405,8 +423,8 @@ class EmailFormatter:
             )
         if key == "pnl_attribution_waterfall":
             return (
-                "Attribution reflects weighted contribution rather than simple return, so concentration can dominate the day even when headline "
-                "breadth looks benign. Focus first on whether gains are broad-based or reliant on one sleeve."
+                "Attribution is contribution-weighted, so concentration can dominate the day even when headline breadth looks balanced. "
+                "The key question is whether the total is broad-based or driven by one sleeve."
             )
         if key == "event_linked_annotated_trend":
             return (
@@ -415,8 +433,8 @@ class EmailFormatter:
             )
         if key == "portfolio_concentration_risk":
             return (
-                "Concentration should be read as a fragility gauge: when top-weight exposure is elevated, idiosyncratic headline risk can override "
-                "otherwise constructive macro tape and amplify both upside and drawdown paths."
+                "Concentration is a fragility gauge: when top-weight exposure is elevated, idiosyncratic headline risk can override "
+                "macro tape and amplify both upside and drawdown paths."
             )
         if key == "global_relative_performance":
             return (
@@ -447,11 +465,14 @@ class EmailFormatter:
         if key == "breadth_leadership_panel":
             return "If breadth remains split, avoid treating headline index strength as broad risk confirmation."
         if key == "pnl_attribution_waterfall":
-            return "Largest weighted contributors are driving total return; confirm whether gains are concentrated or broad."
+            symbols = re.findall(r"([A-Z]{2,6})\s+[+\-]\d+(?:\.\d+)?%", base or "")
+            if len(symbols) >= 2:
+                return f"{symbols[0]} is the main directional driver today; validate whether offsets from {symbols[1]} and other sleeves are broad enough."
+            return "Use top contributor vs top drag to decide whether the day is concentrated or broad."
         if key == "event_linked_annotated_trend":
             return "Persistence after the catalyst window matters more than the first-day reaction when sizing follow-through risk."
         if key == "portfolio_concentration_risk":
-            return "High top-weight concentration increases idiosyncratic shock risk and can dominate macro tape."
+            return "High top-weight concentration means daily P&L can be top-sleeve driven until contribution breadth broadens."
         if key == "global_relative_performance":
             return "Regional leaders should align with portfolio geography; widening spreads can lift tracking-error risk."
         if base:
@@ -471,22 +492,70 @@ class EmailFormatter:
 
     @staticmethod
     def _top_desk_read_lines(briefing: MorningBriefing) -> list[str]:
-        driver = (
-            briefing.dominant_tape_driver.strip()
-            if briefing.dominant_tape_driver
-            else "No single dominant driver; monitor setup read for mixed market impulses."
-        )
-        lines = [f"Dominant driver: {driver}"]
+        driver = briefing.dominant_tape_driver.strip() if briefing.dominant_tape_driver else "No single equity catalyst dominates."
+        posture = briefing.session_quality_label or briefing.regime_context or "mixed"
+        regional = briefing.regional_skew_summary or "regional read unavailable"
+        lines = [f"Desk read: {driver}"]
         if briefing.market_setup_analysis:
             lines.append(f"Setup read: {briefing.market_setup_analysis}")
+        lines.append(f"Risk posture: {posture}. Regional split: {regional}.")
         if briefing.geo_risk_summary:
-            lines.append(f"Geo risk meter: {briefing.geo_risk_summary}")
-        if briefing.regime_shift:
-            shift_text = ", ".join(
-                f"{k.replace('_', ' ')} {v}" for k, v in sorted((briefing.regime_shift or {}).items())
-            )
-            if shift_text:
-                lines.append(f"Regime shift: {shift_text}")
+            lines.append(f"Geo lens: {briefing.geo_risk_summary}")
+        if briefing.portfolio_action_posture:
+            lines.append(f"Portfolio implication: {briefing.portfolio_action_posture}.")
+        return lines[:4]
+
+    def _trigger_lines(self, briefing: MorningBriefing) -> list[str]:
+        triggers: list[str] = []
+        vix = next(
+            (
+                float(q.current_price)
+                for q in (briefing.market_setup.index_quotes + briefing.market_setup.macro_quotes)
+                if "VIX" in (q.display_name or q.symbol or "").upper() and q.current_price is not None
+            ),
+            None,
+        )
+        ten_y = next(
+            (
+                float(q.current_price)
+                for q in briefing.market_setup.macro_quotes
+                if "10Y" in (q.display_name or q.symbol or "").upper() and q.current_price is not None
+            ),
+            None,
+        )
+        oil = next(
+            (
+                float(q.current_price)
+                for q in briefing.market_setup.macro_quotes
+                if any(tok in (q.display_name or q.symbol or "").upper() for tok in ("WTI", "CRUDE")) and q.current_price is not None
+            ),
+            None,
+        )
+        europe_moves = [
+            float(q.change_percent or 0.0)
+            for q in briefing.market_setup.index_quotes
+            if any(tok in (q.display_name or q.symbol or "").upper() for tok in ("STOXX", "DAX", "CAC", "FTSE", "IBEX"))
+        ]
+        europe_avg = (sum(europe_moves) / len(europe_moves)) if europe_moves else None
+        if vix is not None:
+            triggers.append(f"VIX > 20 confirms broader risk-off pressure (now {vix:.2f}).")
+        if ten_y is not None:
+            triggers.append(f"US 10Y > 4.45% would reinforce rates-repricing pressure (now {ten_y:.2f}%).")
+        if oil is not None:
+            triggers.append(f"WTI > $107 would signal escalating energy shock (now ${oil:.2f}).")
+        if europe_avg is not None:
+            triggers.append(f"Europe average move below -1.5% would confirm deeper regional weakness (now {europe_avg:+.2f}%).")
+        triggers.append("Nasdaq turning negative would indicate the growth cushion is failing.")
+        return triggers[:5]
+
+    @staticmethod
+    def _what_changed_lines(briefing: MorningBriefing) -> list[str]:
+        if not briefing.regime_shift:
+            return ["No prior comparable snapshot available."]
+        lines: list[str] = []
+        for key, value in sorted(briefing.regime_shift.items()):
+            label = key.replace("_", " ").title()
+            lines.append(f"{label}: {value}")
         return lines
 
     @staticmethod

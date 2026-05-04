@@ -493,6 +493,7 @@ class MorningBriefingGenerator:
         briefing.session_quality_bucket = sq.bucket
         briefing.session_quality_color_hex = sq.color_hex
         briefing.session_quality_label = sq.label
+        briefing.dominant_tape_driver = self._harmonize_dominant_driver(briefing)
         regional_lens, regional_skew = build_regional_lens(
             index_quotes=active_setup.index_quotes,
             global_news=briefing.global_news,
@@ -564,6 +565,27 @@ class MorningBriefingGenerator:
             len(briefing.watchlist_events),
         )
         return briefing
+
+    @staticmethod
+    def _harmonize_dominant_driver(briefing: MorningBriefing) -> str:
+        """Ensure dominant driver wording does not conflict with regime label/tags."""
+        driver = (briefing.dominant_tape_driver or "").strip()
+        if not driver:
+            driver = "No single equity catalyst dominates; the tape is balanced across macro factors."
+        low_driver = driver.lower()
+        if "no single dominant driver identified" in low_driver:
+            driver = "No single equity catalyst dominates; the tape is balanced across macro factors."
+            low_driver = driver.lower()
+
+        session_label = (briefing.session_quality_label or "").lower()
+        tags = {str(t).lower() for t in (briefing.market_setup_signal_tags or [])}
+        has_cluster = any(
+            token in session_label
+            for token in ("energy", "commodity", "rates", "breadth divergence", "geo risk")
+        ) or bool(tags & {"commodity_pressure", "rates_headwind", "cross_region_divergence", "risk_off"})
+        if has_cluster and "no single equity catalyst dominates" in low_driver:
+            return "Regional divergence and risk-factor pressure are leading the tape; no single equity catalyst dominates."
+        return driver
 
     # -- Section builders -----------------------------------------------------
 
@@ -959,6 +981,25 @@ class MorningBriefingGenerator:
                     )
             except ValueError:
                 pass  # level not in order list (e.g. N/A) — leave unchanged
+
+        # Nuance rule: stale headlines + rising VIX + weak Europe should not read as outright LOW.
+        if level == "LOW":
+            europe_moves = [
+                float(q.change_percent or 0.0)
+                for q in briefing.market_setup.index_quotes
+                if any(tok in (q.display_name or q.symbol or "").upper() for tok in ("STOXX", "FTSE", "DAX", "CAC", "IBEX"))
+            ]
+            europe_avg = (sum(europe_moves) / len(europe_moves)) if europe_moves else 0.0
+            vix_rising = (vix_level or 0.0) >= 17.0 and any(
+                "VIX" in (q.display_name or q.symbol or "").upper() and float(q.change_percent or 0.0) >= 2.0
+                for q in briefing.market_setup.index_quotes + briefing.market_setup.macro_quotes
+            )
+            if density is None and vix_rising and europe_avg <= -0.5:
+                level = "LOW-TO-MODERATE"
+                summary = (
+                    f"Geo risk LOW-TO-MODERATE, market-contained: VIX {vix_level:.2f} is rising and Europe is weak ({europe_avg:+.2f}%), "
+                    f"but oil ({oil_delta:+.2f}%) and haven signals do not confirm a fresh shock."
+                )
 
         return level, raw_level, summary
 

@@ -78,6 +78,7 @@ def test_morning_chart_builder_builds_multiple_assets():
             ]
 
     profile = UserProfile(
+        delivery={"email_density_mode": "full"},
         portfolio_holdings=[
             PortfolioHolding(profile_name="default_user", symbol="NVDA", weight_pct=8.0, bucket="core"),
         ],
@@ -178,7 +179,9 @@ def test_email_formatter_uses_continuous_finance_canvas():
     assert "READ" in rendered.html_body
     assert "WHY IT MATTERS" in rendered.html_body
     assert "PORTFOLIO LENS" in rendered.html_body
-    assert "Dominant driver:" in rendered.html_body
+    assert "TODAY'S TRIGGERS" in rendered.html_body
+    assert "WHAT CHANGED" in rendered.html_body
+    assert "Desk read:" in rendered.html_body
     assert "border-radius" not in rendered.html_body
     assert rendered.html_body.index("READ") < rendered.html_body.index("<img src=\"cid:market-snapshot-cid\"")
     assert '<strong style="color:#FF7A00;font-weight:800;">Setup read:</strong>' in rendered.html_body

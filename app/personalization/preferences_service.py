@@ -28,6 +28,7 @@ ALLOWED_HOME_REGIONS = {
     "middle_east",
     "global",
 }
+ALLOWED_EMAIL_DENSITY_MODES = {"desk", "full"}
 
 
 def _normalize_profile(profile_name: str) -> str:
@@ -112,6 +113,15 @@ def _normalize_time(value: Any) -> str:
     return f"{hh:02d}:{mm:02d}"
 
 
+def _normalize_email_density_mode(value: Any) -> str:
+    mode = str(value).strip().lower()
+    if mode not in ALLOWED_EMAIL_DENSITY_MODES:
+        raise ValueError(
+            f"Unsupported email density mode '{mode}'. Allowed: {', '.join(sorted(ALLOWED_EMAIL_DENSITY_MODES))}"
+        )
+    return mode
+
+
 def _normalize_channels(value: Any) -> list[str]:
     if isinstance(value, str):
         candidates = [item.strip().lower() for item in value.split(",") if item.strip()]
@@ -165,6 +175,7 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "delivery.llm_shadow_mode": _normalize_bool,
     "delivery.quiet_hours_start": _normalize_time,
     "delivery.quiet_hours_end": _normalize_time,
+    "delivery.email_density_mode": _normalize_email_density_mode,
     "sections.morning.market_setup": _normalize_bool,
     "sections.morning.macro_context": _normalize_bool,
     "sections.morning.global_news": _normalize_bool,

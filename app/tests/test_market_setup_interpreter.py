@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from app.briefing.market_setup_interpreter import interpret_market_setup
 from app.schemas.briefings import MarketSetup
-from app.schemas.events import MacroDataPoint, QuoteData
+from app.schemas.events import MacroDataPoint, MarketBreadth, QuoteData
 
 
 def _quote(symbol: str, name: str, change_pct: float) -> QuoteData:
@@ -81,3 +81,26 @@ def test_interpreter_risk_off_with_energy_pressure():
     result = interpret_market_setup(setup, macro)
     assert "risk-off" in result.narrative.lower()
     assert "commodity_pressure" in result.tags
+
+
+def test_interpreter_mentions_weak_sector_breadth_when_indices_are_split():
+    setup = MarketSetup(
+        index_quotes=[
+            _quote("^GSPC", "S&P 500 (SPX)", 0.4),
+            _quote("^IXIC", "Nasdaq Composite (COMP)", 0.8),
+            _quote("^STOXX50E", "EURO STOXX 50", -0.8),
+            _quote("^N225", "Nikkei 225", 0.7),
+            _quote("^VIX", "VIX", 3.2),
+        ],
+        macro_quotes=[_quote("CL=F", "WTI Crude Oil (CL1:COM)", 0.2)],
+        market_breadth=[
+            MarketBreadth(symbol="XLK", display_name="Technology", change_percent=-0.4),
+            MarketBreadth(symbol="XLF", display_name="Financials", change_percent=-0.2),
+            MarketBreadth(symbol="XLE", display_name="Energy", change_percent=0.1),
+            MarketBreadth(symbol="XLV", display_name="Health Care", change_percent=-0.3),
+            MarketBreadth(symbol="XLI", display_name="Industrials", change_percent=-0.5),
+            MarketBreadth(symbol="XLP", display_name="Consumer Staples", change_percent=-0.1),
+        ],
+    )
+    result = interpret_market_setup(setup, [])
+    assert "Sector breadth is weak" in result.narrative

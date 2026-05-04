@@ -48,6 +48,7 @@ def _sample_profile() -> UserProfile:
     return UserProfile(
         name="default_user",
         timezone="Europe/Madrid",
+        delivery={"email_density_mode": "full"},
         portfolio_sector_weights={"technology": 0.45, "healthcare": 0.25},
         portfolio_holdings=[
             PortfolioHolding(profile_name="default_user", symbol="NVDA", weight_pct=30.0, bucket="core"),
@@ -57,6 +58,12 @@ def _sample_profile() -> UserProfile:
             PortfolioHolding(profile_name="default_user", symbol="GOOGL", weight_pct=8.0, bucket="satellite"),
         ],
     )
+
+
+def _sample_profile_desk() -> UserProfile:
+    profile = _sample_profile()
+    profile.delivery["email_density_mode"] = "desk"
+    return profile
 
 
 def _sample_briefing() -> MorningBriefing:
@@ -148,6 +155,37 @@ def test_morning_chart_bundle_unavailable_when_history_missing():
     assert chart_map["global_relative_performance"]["reason_if_hidden"]
     assert chart_map["volatility_regime_card"]["available"] is False
     assert chart_map["volatility_regime_card"]["reason_if_hidden"]
+
+
+def test_chart_density_mode_desk_selects_three_to_five_cards():
+    bundle, selected = build_morning_chart_bundle(
+        briefing=_sample_briefing(),
+        profile=_sample_profile_desk(),
+        market_data_service=_StubMarketData(with_history=True),
+    )
+    assert bundle["meta"]["email_density_mode"] == "desk"
+    assert 3 <= len(selected) <= 5
+    selected_keys = {row["chart_key"] for row in selected}
+    assert "pnl_attribution_waterfall" in selected_keys
+    assert "portfolio_concentration_risk_card" in selected_keys
+
+
+def test_chart_stack_energy_geo_prefers_geo_modules():
+    briefing = _sample_briefing()
+    # Force oil-shock context.
+    briefing.market_setup.macro_quotes[1].change_percent = 4.2
+    briefing.market_setup.index_quotes.append(
+        QuoteData(symbol="^VIX", display_name="VIX", current_price=21.0, change=1.2, change_percent=6.0)
+    )
+    bundle, selected = build_morning_chart_bundle(
+        briefing=briefing,
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+    )
+    assert bundle["meta"]["chart_stack_key"] == "energy_geo"
+    selected_keys = {row["chart_key"] for row in selected}
+    assert "geo_confirmation_ladder" in selected_keys
+    assert "oil_transmission_card" in selected_keys
 
 
 def test_global_chart_series_are_limited_for_email_readability():
@@ -308,7 +346,8 @@ def test_chart_renderer_event_annotation_uses_explicit_non_overlapping_summary(m
         profile=_sample_profile(),
         market_data_service=_StubMarketData(with_history=True),
     )
-    spec = next(item for item in selected_chart_specs(bundle) if item.get("chart_key") == "event_linked_annotated_trend")
+    chart_map = {row["chart_key"]: row for row in (bundle.get("charts") or [])}
+    spec = chart_map["event_linked_annotated_trend"]
     captured: dict = {}
 
     def _capture(self, fig, *, key: str, title: str, caption: str, filename: str):
@@ -332,6 +371,7 @@ def test_chart_renderer_event_annotation_uses_explicit_non_overlapping_summary(m
     text_block = "\n".join(captured["texts"])
     assert "Event:" in text_block
     assert "Full-period move:" in text_block
+    assert "Event: event" not in text_block
 
 
 def test_briefing_morning_charts_route_renders_preview(monkeypatch, validation_test_settings):

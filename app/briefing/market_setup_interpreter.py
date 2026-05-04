@@ -38,7 +38,7 @@ def interpret_market_setup(
     confidence = _confidence_label(total=total, signals=[risk_score, rates_score, commodity_score, region_score])
 
     tone = _tone_phrase(total)
-    breadth = _breadth_phrase(index_quotes=index_quotes, region_score=region_score)
+    breadth = _breadth_phrase(setup=setup, index_quotes=index_quotes, region_score=region_score)
     divergence = _regional_divergence_phrase(index_quotes)
     vol = _volatility_phrase(index_quotes)
     rates = _rates_phrase(setup=setup, macro_points=macro_points)
@@ -158,16 +158,38 @@ def _tone_phrase(total: int) -> str:
     return "Market tone is mixed with no single dominant impulse."
 
 
-def _breadth_phrase(*, index_quotes, region_score: int) -> str:
+def _breadth_phrase(*, setup: MarketSetup, index_quotes, region_score: int) -> str:
     if not index_quotes:
         return "Breadth signals are limited due to sparse index coverage."
     positive = sum(1 for q in index_quotes if float(q.change_percent or 0.0) > 0.0)
     total = len(index_quotes)
+    sector_rows = list(setup.market_breadth or [])
+    sector_up = sum(1 for row in sector_rows if float(row.change_percent or 0.0) > 0.0) if sector_rows else None
+    sector_total = len(sector_rows) if sector_rows else None
+
+    sector_note = ""
+    if sector_total and sector_up is not None:
+        if sector_up <= 3:
+            sector_note = (
+                f" Sector breadth is weak ({sector_up}/{sector_total} positive), so headline index resilience is not broad."
+            )
+        elif sector_up >= max(8, int(sector_total * 0.7)):
+            sector_note = f" Sector breadth is supportive ({sector_up}/{sector_total} positive)."
+
     if region_score > 0:
-        return f"Equity breadth is constructive ({positive}/{total} tracked benchmarks up) with cross-region confirmation."
+        return (
+            f"Equity breadth is constructive ({positive}/{total} tracked benchmarks up) with cross-region confirmation."
+            + sector_note
+        )
     if region_score < 0:
-        return f"Equity breadth is weak ({positive}/{total} tracked benchmarks up) with cross-region pressure."
-    return f"Equity breadth is balanced ({positive}/{total} tracked benchmarks up) without strong regional confirmation."
+        return (
+            f"Equity breadth is weak ({positive}/{total} tracked benchmarks up) with cross-region pressure."
+            + sector_note
+        )
+    return (
+        f"Equity breadth is balanced ({positive}/{total} tracked benchmarks up) without strong regional confirmation."
+        + sector_note
+    )
 
 
 def _regional_divergence_phrase(index_quotes) -> str:
@@ -358,7 +380,21 @@ def _dominant_tape_driver(
         direction = "higher" if ten_y_change > 0 else "lower"
         return f"Rates repricing is the lead driver (US 10Y {direction} {ten_y_change:+.3f})."
 
-    return "No single dominant driver identified."
+    vix_quote = _find_quote(setup.index_quotes or [], ("VIX",))
+    vix_move = float(vix_quote.change_percent or 0.0) if vix_quote is not None else 0.0
+    us_avg = _region_avg(setup.index_quotes or [], ("S&P", "NASDAQ", "DOW", "RUSSELL"))
+    eu_avg = _region_avg(setup.index_quotes or [], ("STOXX", "FTSE", "DAX", "CAC", "IBEX"))
+    asia_avg = _region_avg(setup.index_quotes or [], ("NIKKEI", "HANG SENG"))
+    has_split = (
+        us_avg is not None and eu_avg is not None and asia_avg is not None
+        and max(us_avg, eu_avg, asia_avg) - min(us_avg, eu_avg, asia_avg) >= 0.8
+    )
+    if has_split and (vix_move >= 1.5 or (oil_move is not None and abs(oil_move) >= 0.8)):
+        return (
+            "Regional divergence and risk-factor pressure are leading the tape; "
+            "no single equity catalyst dominates."
+        )
+    return "No single equity catalyst dominates; the tape is balanced across macro factors."
 
 
 def _confidence_label(*, total: int, signals: list[int]) -> str:

@@ -155,7 +155,9 @@ class TelegramFormatter:
         )
         provider_health = (briefing.data_freshness or {}).get("Provider Health", "").strip()
         if provider_health:
-            sections.append(f"<i>Provider health: {provider_health}</i>")
+            note = self._provider_health_note(provider_health)
+            if note:
+                sections.append(f"<i>{note}</i>")
 
         full_text = "\n\n".join(sections)
         return self._split_message(full_text)
@@ -449,13 +451,18 @@ class TelegramFormatter:
         themes: list[NormalisedEvent],
         session_mode: str,
     ) -> str:
-        if not themes:
-            return ""
         section = (
             SECTION_HEADERS["weekend_themes"]
             if session_mode in {"saturday", "sunday"}
             else SECTION_HEADERS["themes"]
         )
+        if not themes:
+            return "\n".join(
+                [
+                    f"<b>{section}</b>",
+                    "No high-confidence portfolio/watchlist themes passed relevance and source-quality filters this cycle.",
+                ]
+            )
         lines = [f"<b>{section}</b>"]
         for i, evt in enumerate(themes[:MAX_THEMES], 1):
             lines.append(f"{i}. <b>{evt.title}</b>")
@@ -470,6 +477,32 @@ class TelegramFormatter:
             if meta:
                 lines.append(f"   <i>{' | '.join(meta)}</i>")
         return "\n".join(lines)
+
+    @staticmethod
+    def _provider_health_note(provider_health: str) -> str:
+        """Collapse raw provider counters into a user-friendly one-line note."""
+        chunks = [chunk.strip() for chunk in provider_health.split(",") if chunk.strip()]
+        if not chunks:
+            return ""
+        parsed: dict[str, int] = {}
+        for chunk in chunks:
+            if ":" not in chunk:
+                continue
+            name, value = chunk.split(":", 1)
+            try:
+                parsed[name.strip().lower()] = int(value.strip())
+            except ValueError:
+                continue
+        degraded: list[str] = []
+        if parsed.get("gdelt", 1) == 0:
+            degraded.append("GDELT unavailable")
+        if parsed.get("fmp", 1) == 0:
+            degraded.append("FMP unavailable")
+        core_ok = parsed.get("finnhub", 0) > 0 or parsed.get("newsapi", 0) > 0
+        if degraded:
+            suffix = "core providers available" if core_ok else "core providers degraded"
+            return f"Provider notes: {'; '.join(degraded)}; {suffix}."
+        return ""
 
     def _format_sector_scan(
         self,

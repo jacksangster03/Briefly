@@ -119,6 +119,15 @@ class Settings(BaseSettings):
     mediastack_news_limit: int = 25
     marketaux_news_limit: int = 50
 
+    # -- Phase 6/7 chart modules ---------------------------------------------
+    feature_yield_curve_card: bool = True
+    feature_vix_risk_card: bool = True
+    feature_geo_confirmation_ladder: bool = True
+    feature_regional_divergence_score: bool = True
+    feature_oil_transmission_card: bool = True
+    feature_dynamic_chart_stack: bool = True
+    feature_email_density_mode: bool = True
+
     # -- Convenience helpers --------------------------------------------------
     @property
     def finnhub_configured(self) -> bool:

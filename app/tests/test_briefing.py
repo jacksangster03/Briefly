@@ -156,10 +156,10 @@ class TestTelegramFormatter:
             regime_shift={"risk_regime": "mixed->risk_on"},
         )
         email = EmailFormatter("Europe/Madrid").format_morning_briefing(briefing)
-        assert "Dominant driver:" in email.html_body
+        assert "Desk read:" in email.html_body
         assert "Setup read:" in email.html_body
-        assert "Geo risk meter:" in email.html_body
-        assert "Regime shift:" in email.html_body
+        assert "Geo lens:" in email.html_body
+        assert "WHAT CHANGED" in email.html_body
         assert "single dominant impulse" in email.html_body
 
     def test_portfolio_impact_includes_geo_meter_and_regime_shift(self):
@@ -957,3 +957,15 @@ class TestPhase63BriefingSections:
         assert briefing.portfolio_action_posture
         assert briefing.regime_context
         assert briefing.positioning_alignment
+
+
+class TestDominantDriverHarmonization:
+    def test_harmonize_rewrites_no_single_when_regime_has_macro_cluster(self):
+        briefing = MorningBriefing(
+            dominant_tape_driver="No single dominant driver identified.",
+            market_setup_signal_tags=["cross_region_divergence", "rates_headwind"],
+            session_quality_label="Cautious with rates headwind and breadth divergence",
+        )
+        driver = MorningBriefingGenerator._harmonize_dominant_driver(briefing)
+        assert "Regional divergence and risk-factor pressure" in driver
+        assert "no single equity catalyst dominates" in driver.lower()
