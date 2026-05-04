@@ -509,3 +509,190 @@ class UserFeedback(Base):
     notes = Column(Text, nullable=True)
     regime_tags = Column(JSON, default=list)   # snapshot of regime at time of feedback
     created_at = Column(DateTime, default=_utcnow, index=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7A: Fixed Income Analytics
+# ---------------------------------------------------------------------------
+
+class BondHoldingOverride(Base):
+    """User-supplied per-holding bond parameters (duration, YTM, credit quality)."""
+
+    __tablename__ = "bond_holding_overrides"
+    __table_args__ = (
+        UniqueConstraint("profile_name", "symbol", name="uq_bond_override_profile_symbol"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    modified_duration_yrs = Column(Float, nullable=True)
+    ytm_override_pct = Column(Float, nullable=True)
+    coupon_pct = Column(Float, nullable=True)
+    maturity_date = Column(Date, nullable=True)
+    credit_quality = Column(String(10), nullable=True)  # govt | ig | hy | em
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+class BondPortfolioSnapshot(Base):
+    """Append-only computed bond analytics result per profile."""
+
+    __tablename__ = "bond_portfolio_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    computed_at = Column(DateTime, nullable=False)
+    bond_holding_count = Column(Integer, nullable=False, default=0)
+    total_bond_weight_pct = Column(Float, nullable=True)
+    portfolio_duration_yrs = Column(Float, nullable=True)
+    portfolio_ytm_pct = Column(Float, nullable=True)
+    rate_sensitivity_pct = Column(Float, nullable=True)   # P&L for +100bps parallel shift
+    quality_distribution_json = Column(Text, nullable=True)    # {"govt": 0.4, "ig": 0.45, ...}
+    maturity_distribution_json = Column(Text, nullable=True)   # {"<1yr": 0.1, "1-3yr": 0.2, ...}
+    holdings_detail_json = Column(Text, nullable=True)         # per-holding breakdown
+    data_source_notes = Column(Text, nullable=True)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7B: PDF Reports
+# ---------------------------------------------------------------------------
+
+class GeneratedReport(Base):
+    """Metadata for generated portfolio PDF reports."""
+
+    __tablename__ = "generated_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    report_type = Column(String(40), nullable=False, default="portfolio_summary")
+    title = Column(String(200), nullable=False, default="Portfolio Report")
+    filename = Column(Text, nullable=False)   # relative path under data/reports/
+    sections_included_json = Column(Text, nullable=True)
+    generated_at = Column(DateTime, nullable=False)
+    file_size_bytes = Column(Integer, nullable=True)
+    active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7C: ESG / SRI Scoring
+# ---------------------------------------------------------------------------
+
+class ESGScore(Base):
+    """Cached ESG scores per holding per profile."""
+
+    __tablename__ = "esg_scores"
+    __table_args__ = (
+        UniqueConstraint("profile_name", "symbol", "as_of_date", name="uq_esg_profile_symbol_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    as_of_date = Column(Date, nullable=False)
+    overall_score = Column(Float, nullable=True)   # 0-100 or None
+    e_score = Column(Float, nullable=True)
+    s_score = Column(Float, nullable=True)
+    g_score = Column(Float, nullable=True)
+    exclusion_flags_json = Column(JSON, default=list)   # ["tobacco", "weapons"]
+    controversy_level = Column(Integer, nullable=True)  # 0-5
+    provider = Column(String(30), nullable=False, default="yfinance")
+    confidence = Column(String(10), nullable=False, default="low")  # high | low | none
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class PortfolioESGSnapshot(Base):
+    """Aggregate portfolio ESG result per profile, append-only."""
+
+    __tablename__ = "portfolio_esg_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    computed_at = Column(DateTime, nullable=False)
+    weighted_overall = Column(Float, nullable=True)
+    weighted_e = Column(Float, nullable=True)
+    weighted_s = Column(Float, nullable=True)
+    weighted_g = Column(Float, nullable=True)
+    coverage_pct = Column(Float, nullable=True)
+    exclusion_count = Column(Integer, nullable=True, default=0)
+    sri_alignment_label = Column(String(30), nullable=True)
+    assessment_json = Column(Text, nullable=True)   # per-holding breakdown
+    esg_config_json = Column(Text, nullable=True)   # snapshot of config used
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class ESGConfig(Base):
+    """Per-profile ESG screening preferences."""
+
+    __tablename__ = "esg_configs"
+    __table_args__ = (
+        UniqueConstraint("profile_name", name="uq_esg_config_profile"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    enabled_screens_json = Column(JSON, default=list)   # ["tobacco", "weapons", "coal"]
+    minimum_overall_score = Column(Float, nullable=True)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7D: Multi-Currency Support
+# ---------------------------------------------------------------------------
+
+class FXRate(Base):
+    """Cached daily FX rates."""
+
+    __tablename__ = "fx_rates"
+    __table_args__ = (
+        UniqueConstraint("from_currency", "to_currency", "as_of_date", name="uq_fx_rate_pair_date"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    from_currency = Column(String(10), nullable=False, index=True)
+    to_currency = Column(String(10), nullable=False, index=True)
+    rate = Column(Float, nullable=False)
+    as_of_date = Column(Date, nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
+
+
+class CurrencyExposure(Base):
+    """Per-holding currency exposure for a profile."""
+
+    __tablename__ = "currency_exposures"
+    __table_args__ = (
+        UniqueConstraint("profile_name", "symbol", name="uq_currency_exposure_profile_symbol"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    foreign_currency = Column(String(10), nullable=True)
+    weight_pct_home_currency = Column(Float, nullable=True)
+    fx_contribution_pct = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+
+
+class FXConfig(Base):
+    """Per-profile FX analytics configuration."""
+
+    __tablename__ = "fx_configs"
+    __table_args__ = (
+        UniqueConstraint("profile_name", name="uq_fx_config_profile"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    home_currency = Column(String(10), nullable=False, default="USD")
+    hedge_policy = Column(String(20), nullable=False, default="unhedged")  # unhedged | partial | full
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)

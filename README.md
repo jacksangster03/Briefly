@@ -209,6 +209,46 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
   recession, soft landing, inflation re-acceleration, rates up/down, oil shock, USD spike, AI capex boom
 - Persisted simulation runs and saved presets in SQLite for repeatable comparisons
 
+**Fixed Income Analytics (Phase 7A)**
+- Bond analytics for all holdings with `fixed_income` bucket or known bond ETF symbols (BND, AGG, TLT, LQD, HYG, and 20+ more)
+- Weighted modified duration, portfolio YTM, credit quality distribution (govt / IG / HY / EM), maturity ladder, and rate sensitivity (estimated P&L for +100 bps parallel shift)
+- Reference data for 26 known bond ETFs with manual per-holding override capability via `BondHoldingOverride` table
+- Quality fallbacks by credit bucket when ETF-specific data is unavailable
+- Append-only `BondPortfolioSnapshot` log for trend tracking
+- Dedicated route: `/ui/portfolio/bonds`
+- Full HTMX override form: symbol, maturity date, coupon, YTM override, credit quality; active overrides displayed with delete actions
+
+**PDF Portfolio Reports (Phase 7B)**
+- On-demand A4 PDF generation using fpdf2 (pure Python, no system dependencies)
+- User-selectable sections: Cover, Holdings, Risk, Attribution, Bonds, Scenarios, CMA
+- Cover page with profile, date, benchmark, and period; section pages with KPI rows and data tables
+- Reports persisted in `data/reports/{profile}/` with `GeneratedReport` DB record (title, sections, file size, timestamp)
+- Soft-delete with file removal; download via streaming `FileResponse`
+- Dedicated route: `/ui/portfolio/reports`
+- HTMX generate form with section checkboxes and title input; recent reports list with download links
+
+**ESG / SRI Scoring (Phase 7C)**
+- Weighted portfolio ESG score (Overall, Environment, Social, Governance) via yfinance `.sustainability`
+- Sector-based fallback scores for 10 GICS sectors when yfinance returns no data
+- Hardcoded SRI exclusion screens: tobacco, weapons, thermal coal, gambling, adult content, fossil fuels
+- Per-holding exclusion flag detection by symbol and sector; flagged rows highlighted in the UI
+- SRI alignment labels: Strong / Partial / Weak / Insufficient Data
+- Coverage percentage: share of portfolio weight with actual ESG data
+- ESG scores cached daily in `ESGScore` table with upsert-on-refresh
+- Append-only `PortfolioESGSnapshot` log; per-profile `ESGConfig` for active screen selection
+- Dedicated route: `/ui/portfolio/esg`
+- HTMX screening config form with per-screen checkboxes; Refresh button triggers force-refresh with live yfinance pull
+
+**Multi-Currency Portfolio Support (Phase 7D)**
+- Automatic listing-currency inference from ticker suffix (`.L` = GBP, `.PA`/`.DE` = EUR, `.TO` = CAD, `.T` = JPY, etc.)
+- Per-currency exposure breakdown with home/foreign classification
+- FX rates fetched from yfinance and cached daily in `FXRate` table; stale fallback to DB if live fetch fails
+- Hedge recommendations under partial or full hedge policy: per-currency exposure, recommended hedge percentage, and suggested instrument
+- Per-profile `FXConfig` (home currency + hedge policy); `CurrencyExposure` rows updated on each refresh
+- Supported home currencies: USD, EUR, GBP, CHF, CAD, AUD, JPY, HKD, CNY
+- Dedicated route: `/ui/portfolio/fx`
+- HTMX config form with home currency and hedge policy dropdowns; Refresh FX Rates button triggers force-refresh
+
 **Easy Setup Onboarding (Phase 5.9)**
 - New novice-first portfolio onboarding route: `/ui/portfolio/easy-setup?profile=...`
 - Three-step guided flow:
@@ -492,6 +532,26 @@ GET    /api/v1/profile/{profile}/simulation/runs
 GET    /api/v1/profile/{profile}/simulation/runs/{run_id}
 GET    /api/v1/profile/{profile}/simulation/presets
 POST   /api/v1/profile/{profile}/simulation/presets
+
+GET    /api/v1/profile/{profile}/bonds
+POST   /api/v1/profile/{profile}/bonds/refresh
+PUT    /api/v1/profile/{profile}/bonds/overrides/{symbol}
+DELETE /api/v1/profile/{profile}/bonds/overrides/{symbol}
+GET    /api/v1/profile/{profile}/bonds/history
+
+POST   /api/v1/profile/{profile}/reports/generate
+GET    /api/v1/profile/{profile}/reports
+GET    /api/v1/profile/{profile}/reports/{id}/download
+DELETE /api/v1/profile/{profile}/reports/{id}
+
+GET    /api/v1/profile/{profile}/esg
+POST   /api/v1/profile/{profile}/esg/refresh
+PUT    /api/v1/profile/{profile}/esg/config
+
+GET    /api/v1/profile/{profile}/fx
+POST   /api/v1/profile/{profile}/fx/refresh
+PUT    /api/v1/profile/{profile}/fx/config
+GET    /api/v1/profile/{profile}/fx/rates
 ```
 
 ### Preferences reference
@@ -637,6 +697,10 @@ Workspace route map
     /ui/portfolio/attribution
     /ui/portfolio/benchmark
     /ui/portfolio/history
+    /ui/portfolio/bonds
+    /ui/portfolio/reports
+    /ui/portfolio/esg
+    /ui/portfolio/fx
   Audit:
     /ui/audit
     /ui/audit/history
@@ -668,6 +732,10 @@ Portfolio workbench layers
   -> Rebalancing Engine (Phase 5.4)
   -> Attribution (Phase 5.5)
   -> Simulation Lab (Phase 5.8)
+  -> Fixed Income Analytics (Phase 7A)
+  -> PDF Reports (Phase 7B)
+  -> ESG / SRI Scoring (Phase 7C)
+  -> Multi-Currency / FX (Phase 7D)
 
 Portfolio analyzer
   build_portfolio_analysis()
@@ -682,6 +750,10 @@ Persistence (SQLite)
   RiskMetricsSnapshot | CMAEntry | CMACorrelation
   RebalancingConfig | RebalanceProposal | AttributionSnapshot
   SimulationRun | SimulationResult | SimulationPreset
+  BondHoldingOverride | BondPortfolioSnapshot
+  GeneratedReport
+  ESGScore | PortfolioESGSnapshot | ESGConfig
+  FXRate | CurrencyExposure | FXConfig
 ```
 
 ---
@@ -709,6 +781,10 @@ python -m pytest app/tests/test_phase57_sweeps.py -q
 python -m pytest app/tests/test_phase57_fuzz.py -q
 python -m pytest app/tests/test_phase58_simulation_service.py -q
 python -m pytest app/tests/test_phase58_simulation_api.py -q
+python -m pytest app/tests/test_bonds.py -q
+python -m pytest app/tests/test_reports.py -q
+python -m pytest app/tests/test_esg.py -q
+python -m pytest app/tests/test_fx.py -q
 python -m pytest app/tests/test_portfolio_phase3.py -q
 python -m pytest app/tests/test_market_data.py -q
 python -m pytest app/tests/test_circuit_breaker.py -q
@@ -729,6 +805,10 @@ Test coverage includes:
 - Attribution: Brinson-Hood-Beebower allocation effect, selection/interaction effect (zero in v1), waterfall, persistence
 - Validation harness: canonical presets, golden checks, parameter sweeps, and randomized invariant testing
 - Simulation lab: multi-method forward/risk engine, macro override controls, persisted runs/presets, and interactive charts
+- Fixed income analytics: bond ETF reference data, weighted duration/YTM/quality, rate sensitivity, manual overrides, snapshot history
+- PDF report generation: fpdf2 renderer, section assembly, DB persistence, download and soft-delete
+- ESG/SRI scoring: yfinance sustainability fetch, sector fallback, exclusion taxonomy, coverage tracking, alignment labels, config persistence
+- Multi-currency FX: ticker-suffix currency inference, yfinance FX rate caching, exposure breakdown, hedge recommendations
 - LLM email render guardrails, shadow mode, and fallback behaviour
 - Provider circuit breaker and quote fallback
 
@@ -876,6 +956,10 @@ python -m app.cli simulation runs --profile default_user
 | 6.1 | Complete | Briefing clarity + delivery trust: deterministic setup-read paragraph, humanized setup symbol labels, deduped relevance notes, and explicit channel delivery outcomes in logs + Audit |
 | 6.2 | Complete | Briefing signal upgrade: richer setup-read regime analysis, grouped + relevance-tagged earnings calendar, watchlist summary line, and stronger theme relevance prioritization |
 | 6.3 | Complete | Regional narrative + portfolio impact: new regional lens and portfolio-impact sections in briefs, regime context/alignment framing, and briefing-home impact preview |
+| 7A | Complete | Fixed Income Analytics: bond duration, YTM, credit quality, rate sensitivity, manual overrides |
+| 7B | Complete | PDF Portfolio Reports: fpdf2 renderer, user-selectable sections, DB-tracked report history, download |
+| 7C | Complete | ESG/SRI Scoring: yfinance sustainability, exclusion screens, alignment labels, per-profile config |
+| 7D | Complete | Multi-Currency: ticker-suffix currency inference, FX rate cache, exposure breakdown, hedge recommendations |
 | 5.7B | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---

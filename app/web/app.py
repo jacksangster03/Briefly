@@ -82,6 +82,11 @@ _ALL_SECTIONS = [
     "section-briefing-morning-charts",
     "section-audit",
     "section-audit-home",
+    # Phase 7
+    "section-bonds",
+    "section-reports",
+    "section-esg",
+    "section-fx",
 ]
 
 _PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
@@ -226,6 +231,31 @@ _PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
         "workspace": "audit",
         "workspace_page": "logs",
         "visible_sections": ["section-audit"],
+    },
+    # Phase 7
+    "portfolio_bonds": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "bonds",
+        "visible_sections": ["section-bonds"],
+    },
+    "portfolio_reports": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "reports",
+        "visible_sections": ["section-reports"],
+    },
+    "portfolio_esg": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "esg",
+        "visible_sections": ["section-esg"],
+    },
+    "portfolio_fx": {
+        "global_nav": "portfolio",
+        "workspace": "portfolio",
+        "workspace_page": "fx",
+        "visible_sections": ["section-fx"],
     },
 }
 
@@ -1423,6 +1453,403 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         from app.attribution.service import load_attribution_history
         normalized_profile = _normalize_profile(profile)
         return {"history": load_attribution_history(normalized_profile, limit=limit)}
+
+    # ── Phase 7A: Fixed Income Analytics ─────────────────────────────────────
+
+    @app.get("/ui/portfolio/{profile}/bonds", response_class=HTMLResponse, include_in_schema=False)
+    def ui_bonds(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings(request), normalized_profile)
+        return _render_settings_root(
+            request,
+            profile=normalized_profile,
+            message="",
+            message_kind="",
+            state=state,
+            page_key="portfolio_bonds",
+        )
+
+    @app.get("/api/v1/profile/{profile}/bonds")
+    def api_get_bonds(profile: str):
+        from app.bonds.service import compute_bond_analytics, load_bond_overrides
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings_from_app(app), normalized_profile)
+        holdings = state.get("holdings", [])
+        from app.schemas.portfolio import PortfolioHolding as _PH
+        holding_objs = [
+            _PH(symbol=h["symbol"], weight_pct=h.get("weight_pct"), bucket=h.get("bucket"))
+            for h in holdings
+            if isinstance(h, dict)
+        ] if holdings and isinstance(holdings[0], dict) else state.get("profile_holdings", [])
+        analytics = compute_bond_analytics(normalized_profile, holdings=state.get("_raw_holdings", holding_objs))
+        overrides = load_bond_overrides(normalized_profile)
+        return {"profile": normalized_profile, "bonds_analytics": analytics, "overrides": overrides}
+
+    @app.post("/api/v1/profile/{profile}/bonds/refresh")
+    def api_refresh_bonds(profile: str):
+        from app.bonds.service import compute_bond_analytics
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings_from_app(app), normalized_profile)
+        analytics = state.get("analysis", {}).get("bonds_analytics", {})
+        return {"profile": normalized_profile, "refreshed": True, "bonds_analytics": analytics}
+
+    @app.put("/api/v1/profile/{profile}/bonds/overrides/{symbol}")
+    def api_save_bond_override(profile: str, symbol: str, payload: dict):
+        from app.bonds.service import save_bond_override
+        normalized_profile = _normalize_profile(profile)
+        result = save_bond_override(normalized_profile, symbol, payload)
+        return {"saved": True, "override": result}
+
+    @app.delete("/api/v1/profile/{profile}/bonds/overrides/{symbol}")
+    def api_delete_bond_override(profile: str, symbol: str):
+        from app.bonds.service import delete_bond_override
+        normalized_profile = _normalize_profile(profile)
+        delete_bond_override(normalized_profile, symbol)
+        return {"deleted": True, "symbol": symbol.upper()}
+
+    @app.get("/api/v1/profile/{profile}/bonds/history")
+    def api_bonds_history(profile: str, limit: int = Query(default=10, le=50)):
+        from app.bonds.service import load_bond_snapshot_history
+        normalized_profile = _normalize_profile(profile)
+        return {"history": load_bond_snapshot_history(normalized_profile, limit=limit)}
+
+    @app.post(
+        "/ui/profile/{profile}/save/bond-override",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_bond_override(request: Request, profile: str):
+        from app.bonds.service import save_bond_override, delete_bond_override
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_bonds")
+        try:
+            symbol = str(form.get("bond_symbol", "")).strip().upper()
+            if not symbol:
+                raise ValueError("Symbol is required")
+            action = str(form.get("action", "save")).strip()
+            if action == "delete":
+                delete_bond_override(normalized_profile, symbol)
+                msg = f"Override for {symbol} removed."
+            else:
+                payload = {
+                    "modified_duration_yrs": float(form.get("modified_duration_yrs")) if form.get("modified_duration_yrs") else None,
+                    "ytm_override_pct": float(form.get("ytm_override_pct")) if form.get("ytm_override_pct") else None,
+                    "coupon_pct": float(form.get("coupon_pct")) if form.get("coupon_pct") else None,
+                    "credit_quality": str(form.get("credit_quality", "")).strip() or None,
+                }
+                save_bond_override(normalized_profile, symbol, payload)
+                msg = f"Override for {symbol} saved."
+            state = build_profile_state(_settings(request), normalized_profile)
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=msg,
+                message_kind="success",
+                state=state,
+                page_key=page_key,
+            )
+        except (ValueError, TypeError) as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Bond override save failed: {exc}",
+                message_kind="error",
+                status_code=400,
+                page_key=page_key,
+            )
+
+    # ── Phase 7B: PDF Reports ─────────────────────────────────────────────────
+
+    @app.get("/ui/portfolio/{profile}/reports", response_class=HTMLResponse, include_in_schema=False)
+    def ui_reports(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings(request), normalized_profile)
+        from app.reports.service import list_reports
+        state["_reports_list"] = list_reports(normalized_profile, limit=10)
+        return _render_settings_root(
+            request,
+            profile=normalized_profile,
+            message="",
+            message_kind="",
+            state=state,
+            page_key="portfolio_reports",
+        )
+
+    @app.post("/api/v1/profile/{profile}/reports/generate")
+    def api_generate_report(profile: str, payload: dict = None):
+        from app.reports.service import generate_report
+        normalized_profile = _normalize_profile(profile)
+        payload = payload or {}
+        title = str(payload.get("title") or "Portfolio Report")
+        sections = payload.get("sections") or None
+        state = build_profile_state(_settings_from_app(app), normalized_profile)
+        result = generate_report(
+            profile_name=normalized_profile,
+            state=state,
+            sections=sections,
+            title=title,
+        )
+        return result
+
+    @app.get("/api/v1/profile/{profile}/reports")
+    def api_list_reports(profile: str, limit: int = Query(default=10, le=50)):
+        from app.reports.service import list_reports
+        normalized_profile = _normalize_profile(profile)
+        return {"reports": list_reports(normalized_profile, limit=limit)}
+
+    @app.get("/api/v1/profile/{profile}/reports/{report_id}/download")
+    def api_download_report(profile: str, report_id: int):
+        from app.reports.service import get_report_filepath
+        from fastapi.responses import FileResponse
+        normalized_profile = _normalize_profile(profile)
+        filepath = get_report_filepath(report_id)
+        if not filepath:
+            raise HTTPException(status_code=404, detail="Report not found or file missing")
+        return FileResponse(
+            path=str(filepath),
+            media_type="application/pdf",
+            filename=filepath.name,
+        )
+
+    @app.delete("/api/v1/profile/{profile}/reports/{report_id}")
+    def api_delete_report(profile: str, report_id: int):
+        from app.reports.service import delete_report
+        normalized_profile = _normalize_profile(profile)
+        deleted = delete_report(report_id, normalized_profile)
+        return {"deleted": deleted, "report_id": report_id}
+
+    @app.post(
+        "/ui/profile/{profile}/generate/report",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_generate_report(request: Request, profile: str):
+        from app.reports.service import generate_report, list_reports
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_reports")
+        try:
+            title = str(form.get("report_title") or "Portfolio Report").strip()
+            raw_sections = form.getlist("report_sections")
+            sections = list(raw_sections) if raw_sections else None
+            state = build_profile_state(_settings(request), normalized_profile)
+            result = generate_report(
+                profile_name=normalized_profile,
+                state=state,
+                sections=sections,
+                title=title,
+            )
+            if result.get("available"):
+                msg = f"Report '{title}' generated ({result.get('file_size_bytes', 0) // 1024} KB). Download via the API."
+                kind = "success"
+            else:
+                msg = result.get("error", "Report generation failed.")
+                kind = "error"
+            state["_reports_list"] = list_reports(normalized_profile, limit=10)
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=msg,
+                message_kind=kind,
+                state=state,
+                page_key=page_key,
+            )
+        except Exception as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Report generation failed: {exc}",
+                message_kind="error",
+                status_code=500,
+                page_key=page_key,
+            )
+
+    # ── Phase 7C: ESG / SRI ───────────────────────────────────────────────────
+
+    @app.get(
+        "/ui/portfolio/{profile}/esg",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_portfolio_esg(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings(request), normalized_profile)
+        return _render_settings_root(
+            request,
+            profile=normalized_profile,
+            state=state,
+            page_key="portfolio_esg",
+        )
+
+    @app.get("/api/v1/profile/{profile}/esg")
+    def api_get_esg(profile: str):
+        from app.esg.service import compute_portfolio_esg, load_esg_config
+        from app.portfolio.service import load_active_holdings
+        normalized_profile = _normalize_profile(profile)
+        holdings = load_active_holdings(normalized_profile)
+        result = compute_portfolio_esg(normalized_profile, holdings, persist=False)
+        return {
+            "profile": normalized_profile,
+            "esg": result,
+            "esg_config": load_esg_config(normalized_profile),
+        }
+
+    @app.post("/api/v1/profile/{profile}/esg/refresh")
+    def api_refresh_esg(profile: str):
+        from app.esg.service import compute_portfolio_esg
+        from app.portfolio.service import load_active_holdings
+        normalized_profile = _normalize_profile(profile)
+        holdings = load_active_holdings(normalized_profile)
+        result = compute_portfolio_esg(
+            normalized_profile, holdings, persist=True, force_refresh=True
+        )
+        return {"profile": normalized_profile, "esg": result}
+
+    @app.put("/api/v1/profile/{profile}/esg/config")
+    async def api_save_esg_config(request: Request, profile: str):
+        from app.esg.service import save_esg_config
+        normalized_profile = _normalize_profile(profile)
+        payload = await request.json()
+        result = save_esg_config(normalized_profile, payload)
+        return result
+
+    @app.post(
+        "/ui/profile/{profile}/save/esg-config",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_esg_config(request: Request, profile: str):
+        from app.esg.service import save_esg_config
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_esg")
+        try:
+            active_screens = list(form.getlist("active_screens"))
+            save_esg_config(normalized_profile, {"active_screens": active_screens})
+            state = build_profile_state(_settings(request), normalized_profile)
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message="ESG screening preferences saved.",
+                message_kind="success",
+                state=state,
+                page_key=page_key,
+            )
+        except Exception as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Failed to save ESG config: {exc}",
+                message_kind="error",
+                status_code=500,
+                page_key=page_key,
+            )
+
+    # ── Phase 7D: Multi-Currency / FX ────────────────────────────────────────
+
+    @app.get(
+        "/ui/portfolio/{profile}/fx",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_portfolio_fx(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings(request), normalized_profile)
+        return _render_settings_root(
+            request,
+            profile=normalized_profile,
+            state=state,
+            page_key="portfolio_fx",
+        )
+
+    @app.get("/api/v1/profile/{profile}/fx")
+    def api_get_fx(profile: str):
+        from app.fx.service import compute_fx_exposure, load_fx_config
+        from app.portfolio.service import load_active_holdings
+        normalized_profile = _normalize_profile(profile)
+        holdings = load_active_holdings(normalized_profile)
+        result = compute_fx_exposure(normalized_profile, holdings)
+        return {
+            "profile": normalized_profile,
+            "fx": result,
+            "fx_config": load_fx_config(normalized_profile),
+        }
+
+    @app.post("/api/v1/profile/{profile}/fx/refresh")
+    def api_refresh_fx(profile: str):
+        from app.fx.service import compute_fx_exposure
+        from app.portfolio.service import load_active_holdings
+        normalized_profile = _normalize_profile(profile)
+        holdings = load_active_holdings(normalized_profile)
+        result = compute_fx_exposure(normalized_profile, holdings, force_refresh=True)
+        return {"profile": normalized_profile, "fx": result}
+
+    @app.put("/api/v1/profile/{profile}/fx/config")
+    async def api_save_fx_config(request: Request, profile: str):
+        from app.fx.service import save_fx_config
+        normalized_profile = _normalize_profile(profile)
+        payload = await request.json()
+        return save_fx_config(normalized_profile, payload)
+
+    @app.get("/api/v1/profile/{profile}/fx/rates")
+    def api_get_fx_rates(profile: str):
+        from app.db.models import FXRate
+        normalized_profile = _normalize_profile(profile)
+        with __import__("app.db.session", fromlist=["get_session"]).get_session() as session:
+            rows = (
+                session.query(FXRate)
+                .order_by(FXRate.as_of_date.desc())
+                .limit(50)
+                .all()
+            )
+        return {
+            "rates": [
+                {
+                    "from": r.from_currency,
+                    "to": r.to_currency,
+                    "rate": r.rate,
+                    "date": str(r.as_of_date),
+                }
+                for r in rows
+            ]
+        }
+
+    @app.post(
+        "/ui/profile/{profile}/save/fx-config",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_fx_config(request: Request, profile: str):
+        from app.fx.service import save_fx_config
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        page_key = _page_key_from_form(form, default="portfolio_fx")
+        try:
+            home_currency = str(form.get("home_currency") or "USD").strip().upper()
+            hedge_policy = str(form.get("hedge_policy") or "unhedged").strip()
+            save_fx_config(normalized_profile, {
+                "home_currency": home_currency,
+                "hedge_policy": hedge_policy,
+            })
+            state = build_profile_state(_settings(request), normalized_profile)
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"FX config saved. Home currency: {home_currency}.",
+                message_kind="success",
+                state=state,
+                page_key=page_key,
+            )
+        except Exception as exc:
+            return _render_settings_root(
+                request,
+                profile=normalized_profile,
+                message=f"Failed to save FX config: {exc}",
+                message_kind="error",
+                status_code=500,
+                page_key=page_key,
+            )
 
     @app.get("/api/v1/profile/{profile}/briefing/morning/charts")
     def api_morning_charts(profile: str):

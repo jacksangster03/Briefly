@@ -36,6 +36,13 @@
 {% set cma_correlations = state.cma_correlations %}
 {% set rebalancing_config = state.rebalancing_config %}
 {% set attribution = analysis.attribution %}
+{% set bonds_analytics = analysis.bonds_analytics if analysis.bonds_analytics is defined else {} %}
+{% set bond_overrides = analysis.bond_overrides if analysis.bond_overrides is defined else {} %}
+{% set reports_list = state._reports_list if state._reports_list is defined else [] %}
+{% set esg_analytics = analysis.esg_analytics if analysis.esg_analytics is defined else {} %}
+{% set esg_config = analysis.esg_config if analysis.esg_config is defined else {} %}
+{% set fx_exposure = analysis.fx_exposure if analysis.fx_exposure is defined else {} %}
+{% set fx_config = analysis.fx_config if analysis.fx_config is defined else {} %}
 {% set profile = state.profile %}
 {% set delivery_summary = metadata.delivery_summary %}
 {% set override_summaries = metadata.override_summaries %}
@@ -3497,6 +3504,537 @@
   </section>
   {% endif %}
   <!-- ===== /ATTRIBUTION ===== -->
+
+  <!-- ===== FIXED INCOME ===== -->
+  {% if "section-bonds" in visible_sections %}
+  <section class="card" id="section-bonds" data-module-section="section-bonds">
+    <h2>Fixed Income Analytics {{ help_tip("modified_duration") }}</h2>
+    <p class="muted">Portfolio-level bond analytics for holdings tagged as fixed income or recognised bond ETFs. Computes weighted duration, YTM, rate sensitivity, and credit quality distribution.</p>
+
+    {% if not bonds_analytics or not bonds_analytics.available %}
+      <div class="status" style="margin-top: 12px;">
+        <strong>Fixed income analytics unavailable.</strong>
+        {{ bonds_analytics.error if bonds_analytics else "Add holdings with bucket 'fixed_income' or known bond ETFs (BND, AGG, TLT, LQD, HYG, etc.)." }}
+      </div>
+    {% else %}
+
+    <div class="executive-strip" style="margin-top: 14px;">
+      <strong>Bond Sleeve Summary</strong>
+      <p>{{ bonds_analytics.summary }}</p>
+      <div class="hero-chip-row">
+        <span class="hero-chip">{{ bonds_analytics.bond_holding_count }} position(s)</span>
+        <span class="hero-chip">{{ bonds_analytics.total_bond_weight_pct }}% of portfolio</span>
+        <span class="hero-chip">Computed {{ bonds_analytics.computed_at[:10] if bonds_analytics.computed_at else "" }}</span>
+      </div>
+    </div>
+
+    <div class="kpi-grid" style="margin-top: 14px;">
+      <div class="kpi">
+        <div class="kpi-label">Modified Duration {{ help_tip("modified_duration") }}</div>
+        <div class="kpi-value">{{ bonds_analytics.portfolio_duration_display }} yrs</div>
+        <div class="kpi-note">Weighted average</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Portfolio YTM {{ help_tip("ytm") }}</div>
+        <div class="kpi-value">{{ bonds_analytics.portfolio_ytm_display }}</div>
+        <div class="kpi-note">Weighted average</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Rate Sensitivity {{ help_tip("rate_sensitivity") }}</div>
+        <div class="kpi-value" style="color: var(--error);">{{ bonds_analytics.rate_sensitivity_display }}</div>
+        <div class="kpi-note">Est. P&amp;L for +100bps</div>
+      </div>
+    </div>
+
+    {% if bonds_analytics.quality_distribution %}
+    <div style="margin-top: 18px;">
+      <h3 style="font-size: 0.9rem; margin-bottom: 8px;">Credit Quality {{ help_tip("credit_quality") }}</h3>
+      <div class="kpi-grid">
+        {% for quality, pct in bonds_analytics.quality_distribution.items() %}
+        <div class="kpi">
+          <div class="kpi-label">{{ {"govt": "Government", "ig": "Inv. Grade", "hy": "High Yield", "em": "EM"}.get(quality, quality | title) }}</div>
+          <div class="kpi-value">{{ pct }}%</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if bonds_analytics.maturity_distribution %}
+    <div style="margin-top: 18px;">
+      <h3 style="font-size: 0.9rem; margin-bottom: 8px;">Maturity Ladder</h3>
+      <table class="data-table" style="width: 100%;">
+        <thead><tr><th>Tenor</th><th>Weight</th></tr></thead>
+        <tbody>
+          {% for tenor, pct in bonds_analytics.maturity_distribution.items() %}
+          <tr><td>{{ tenor }}</td><td>{{ pct }}%</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if bonds_analytics.holdings_detail %}
+    <div style="margin-top: 18px;">
+      <h3 style="font-size: 0.9rem; margin-bottom: 8px;">Holdings Detail</h3>
+      <table class="data-table" style="width: 100%;">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Weight</th>
+            <th>Duration</th>
+            <th>YTM</th>
+            <th>Quality</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in bonds_analytics.holdings_detail %}
+          <tr>
+            <td><strong>{{ h.symbol }}</strong></td>
+            <td>{{ h.weight_pct }}%</td>
+            <td>{{ h.duration_yrs }} yrs</td>
+            <td>{{ h.ytm_pct }}%</td>
+            <td>{{ h.credit_quality_label }}</td>
+            <td class="muted" style="font-size: 0.78rem;">{{ h.duration_source }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% endif %}
+
+    <!-- Per-holding override form -->
+    <div style="margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px;">
+      <h3 style="font-size: 0.9rem; margin-bottom: 8px;">Manual Override</h3>
+      <p class="muted" style="font-size: 0.82rem;">Override duration, YTM, or credit quality for a specific holding. Leave fields blank to use reference data.</p>
+      <form
+        hx-post="/ui/profile/{{ state.profile }}/save/bond-override"
+        hx-target="#settings-root"
+        hx-swap="outerHTML"
+        method="post"
+        class="tracked-form"
+      >
+        <input type="hidden" name="ui_page" value="portfolio_bonds">
+        <div class="inline-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px;">
+          <div class="field">
+            <label for="bond_symbol">Symbol</label>
+            <input id="bond_symbol" type="text" name="bond_symbol" placeholder="e.g. BND" style="text-transform: uppercase;">
+          </div>
+          <div class="field">
+            <label for="modified_duration_yrs">Duration (yrs)</label>
+            <input id="modified_duration_yrs" type="number" name="modified_duration_yrs" step="0.1" min="0" max="30" placeholder="e.g. 6.5">
+          </div>
+          <div class="field">
+            <label for="ytm_override_pct">YTM (%)</label>
+            <input id="ytm_override_pct" type="number" name="ytm_override_pct" step="0.01" min="0" max="30" placeholder="e.g. 4.8">
+          </div>
+          <div class="field">
+            <label for="credit_quality">Credit Quality</label>
+            <select id="credit_quality" name="credit_quality">
+              <option value="">Auto-detect</option>
+              <option value="govt">Government</option>
+              <option value="ig">Investment Grade</option>
+              <option value="hy">High Yield</option>
+              <option value="em">Emerging Markets</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions" style="margin-top: 8px; display: flex; gap: 8px;">
+          <button type="submit" name="action" value="save">Save Override</button>
+          <button type="submit" name="action" value="delete" class="btn-secondary">Remove Override</button>
+        </div>
+      </form>
+    </div>
+
+    {% if bond_overrides %}
+    <div style="margin-top: 16px;">
+      <h3 style="font-size: 0.9rem; margin-bottom: 6px;">Active Overrides</h3>
+      <table class="data-table" style="width: 100%;">
+        <thead><tr><th>Symbol</th><th>Duration</th><th>YTM</th><th>Quality</th></tr></thead>
+        <tbody>
+          {% for sym, ov in bond_overrides.items() %}
+          <tr>
+            <td><strong>{{ sym }}</strong></td>
+            <td>{{ ov.modified_duration_yrs if ov.modified_duration_yrs is not none else "—" }}</td>
+            <td>{{ ov.ytm_override_pct if ov.ytm_override_pct is not none else "—" }}</td>
+            <td>{{ ov.credit_quality if ov.credit_quality else "auto" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+  </section>
+  {% endif %}
+  <!-- ===== /FIXED INCOME ===== -->
+
+  <!-- ===== PDF REPORTS ===== -->
+  {% if "section-reports" in visible_sections %}
+  <section class="card" id="section-reports" data-module-section="section-reports">
+    <h2>Portfolio Reports</h2>
+    <p class="muted">Generate a PDF report combining holdings, risk analytics, attribution, bond analytics, and scenarios. Reports are saved locally and available for download.</p>
+
+    <form
+      hx-post="/ui/profile/{{ state.profile }}/generate/report"
+      hx-target="#settings-root"
+      hx-swap="outerHTML"
+      method="post"
+      class="tracked-form"
+    >
+      <input type="hidden" name="ui_page" value="portfolio_reports">
+
+      <div class="field" style="max-width: 360px;">
+        <label for="report_title">Report Title</label>
+        <input id="report_title" type="text" name="report_title" value="Portfolio Report" placeholder="e.g. Q2 2026 Review">
+      </div>
+
+      <div class="field" style="margin-top: 10px;">
+        <label>Sections to Include</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px;">
+          {% for section_key, section_label in [("cover", "Cover Page"), ("holdings", "Holdings"), ("risk", "Risk Analytics"), ("attribution", "Attribution"), ("bonds", "Fixed Income"), ("scenarios", "Stress Scenarios"), ("cma", "CMA")] %}
+          <label style="display: flex; align-items: center; gap: 4px; font-size: 0.85rem; cursor: pointer;">
+            <input type="checkbox" name="report_sections" value="{{ section_key }}"
+              {% if section_key in ["cover", "holdings", "risk", "attribution", "bonds"] %}checked{% endif %}>
+            {{ section_label }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="actions" style="margin-top: 12px;">
+        <button type="submit">Generate PDF</button>
+      </div>
+    </form>
+
+    {% if reports_list %}
+    <div style="margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px;">
+      <h3 style="font-size: 0.9rem; margin-bottom: 8px;">Recent Reports</h3>
+      <table class="data-table" style="width: 100%;">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Sections</th>
+            <th>Generated</th>
+            <th>Size</th>
+            <th>Download</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in reports_list %}
+          <tr>
+            <td>{{ r.title }}</td>
+            <td class="muted" style="font-size: 0.78rem;">{{ r.sections | join(", ") }}</td>
+            <td class="muted">{{ r.generated_at }}</td>
+            <td class="muted">{{ (r.file_size_bytes // 1024) }}KB</td>
+            <td>
+              {% if r.exists %}
+              <a href="/api/v1/profile/{{ state.profile }}/reports/{{ r.report_id }}/download" target="_blank" style="color: var(--accent);">PDF</a>
+              {% else %}
+              <span class="muted">missing</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+  </section>
+  {% endif %}
+  <!-- ===== /PDF REPORTS ===== -->
+
+  <!-- ===== ESG / SRI SCORING ===== -->
+  {% if "section-esg" in visible_sections %}
+  {% set esg = analysis.esg_analytics if analysis.esg_analytics is defined else {} %}
+  {% set esg_cfg = analysis.esg_config if analysis.esg_config is defined else {} %}
+  <section class="card" id="section-esg" data-module-section="section-esg">
+    <h2>ESG / SRI Scoring</h2>
+
+    {% if esg.available %}
+    <!-- SRI Alignment Badge -->
+    <div style="margin-bottom:1rem;">
+      <span style="font-size:0.85rem;color:var(--text-muted);">SRI Alignment:</span>
+      {% set lbl = esg.sri_alignment_label %}
+      {% if lbl == "Strong" %}
+        <span style="background:#16a34a;color:#fff;padding:2px 10px;border-radius:4px;font-size:0.85rem;font-weight:600;">Strong</span>
+      {% elif lbl == "Partial" %}
+        <span style="background:#d97706;color:#fff;padding:2px 10px;border-radius:4px;font-size:0.85rem;font-weight:600;">Partial</span>
+      {% elif lbl == "Weak" %}
+        <span style="background:#dc2626;color:#fff;padding:2px 10px;border-radius:4px;font-size:0.85rem;font-weight:600;">Weak</span>
+      {% else %}
+        <span style="background:#6b7280;color:#fff;padding:2px 10px;border-radius:4px;font-size:0.85rem;font-weight:600;">{{ lbl }}</span>
+      {% endif %}
+      <span style="font-size:0.8rem;color:var(--text-muted);margin-left:0.75rem;">
+        Coverage: {{ esg.coverage_pct }}% of portfolio weight
+      </span>
+      {% if esg.exclusion_count > 0 %}
+        <span style="font-size:0.8rem;color:#dc2626;margin-left:0.75rem;">
+          {{ esg.exclusion_count }} holding(s) flagged by active screens
+        </span>
+      {% endif %}
+    </div>
+
+    <!-- E/S/G Score Grid -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.75rem;margin-bottom:1.25rem;">
+      {% for label, val in [("Overall", esg.weighted_overall), ("Environment", esg.weighted_e), ("Social", esg.weighted_s), ("Governance", esg.weighted_g)] %}
+      <div style="background:var(--card-bg-alt,#0d1b2e);border-radius:6px;padding:0.75rem;text-align:center;">
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.25rem;">{{ label }}</div>
+        {% if val is not none %}
+          {% if val >= 60 %}
+            <div style="font-size:1.4rem;font-weight:700;color:#4ade80;">{{ "%.1f"|format(val) }}</div>
+          {% elif val >= 45 %}
+            <div style="font-size:1.4rem;font-weight:700;color:#fbbf24;">{{ "%.1f"|format(val) }}</div>
+          {% else %}
+            <div style="font-size:1.4rem;font-weight:700;color:#f87171;">{{ "%.1f"|format(val) }}</div>
+          {% endif %}
+        {% else %}
+          <div style="font-size:1.4rem;font-weight:700;color:var(--text-muted);">-</div>
+        {% endif %}
+        <div style="font-size:0.7rem;color:var(--text-muted);">/100</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Holdings ESG Detail -->
+    {% if esg.holdings_detail %}
+    <h4 style="margin:1rem 0 0.5rem;">Holdings Detail</h4>
+    <div class="table-responsive">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Weight</th>
+            <th>Overall</th>
+            <th>E</th>
+            <th>S</th>
+            <th>G</th>
+            <th>Screens Triggered</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in esg.holdings_detail %}
+          <tr {% if h.exclusion_flags %}style="background:rgba(220,38,38,0.08);"{% endif %}>
+            <td><strong>{{ h.symbol }}</strong></td>
+            <td>{{ "%.1f"|format(h.weight_pct) }}%</td>
+            <td>{% if h.overall is not none %}{{ "%.1f"|format(h.overall) }}{% else %}-{% endif %}</td>
+            <td>{% if h.e_score is not none %}{{ "%.1f"|format(h.e_score) }}{% else %}-{% endif %}</td>
+            <td>{% if h.s_score is not none %}{{ "%.1f"|format(h.s_score) }}{% else %}-{% endif %}</td>
+            <td>{% if h.g_score is not none %}{{ "%.1f"|format(h.g_score) }}{% else %}-{% endif %}</td>
+            <td>
+              {% if h.exclusion_flags %}
+                {% for f in h.exclusion_flags %}
+                  <span style="background:#dc2626;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.75rem;margin-right:3px;">{{ f }}</span>
+                {% endfor %}
+              {% else %}
+                <span style="color:var(--text-muted);font-size:0.8rem;">None</span>
+              {% endif %}
+            </td>
+            <td style="font-size:0.75rem;color:var(--text-muted);">{{ h.provider }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <p style="color:var(--text-muted);font-size:0.9rem;">{{ esg.error | default("ESG data unavailable.") }}</p>
+    {% endif %}
+
+    <!-- Screening Config -->
+    <h4 style="margin:1.5rem 0 0.75rem;">Screening Preferences</h4>
+    <form
+      hx-post="/ui/profile/{{ profile }}/save/esg-config"
+      hx-target="#settings-root"
+      hx-swap="outerHTML"
+      hx-include="[name='profile']"
+      style="display:flex;flex-direction:column;gap:0.5rem;"
+    >
+      <input type="hidden" name="page_key" value="portfolio_esg">
+      <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem;">
+        Select the exclusion screens to apply. Holdings flagged by any active screen are highlighted.
+      </p>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-bottom:0.75rem;">
+        {% set all_screens = esg_cfg.all_screens if esg_cfg.all_screens is defined else [] %}
+        {% set active_screens = esg_cfg.active_screens if esg_cfg.active_screens is defined else [] %}
+        {% for screen in all_screens %}
+        <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer;">
+          <input type="checkbox" name="active_screens" value="{{ screen }}"
+            {% if screen in active_screens %}checked{% endif %}>
+          {{ screen | replace("_", " ") | title }}
+        </label>
+        {% endfor %}
+      </div>
+      <button type="submit" class="btn btn-primary" style="align-self:flex-start;">Save Preferences</button>
+    </form>
+
+    <div style="margin-top:1rem;">
+      <button
+        hx-post="/api/v1/profile/{{ profile }}/esg/refresh"
+        hx-target="#settings-root"
+        hx-swap="none"
+        class="btn btn-secondary"
+        style="font-size:0.8rem;"
+      >Refresh ESG Data</button>
+    </div>
+  </section>
+  {% endif %}
+  <!-- ===== /ESG / SRI SCORING ===== -->
+
+  <!-- ===== CURRENCY EXPOSURE ===== -->
+  {% if "section-fx" in visible_sections %}
+  {% set fx = analysis.fx_exposure if analysis.fx_exposure is defined else {} %}
+  {% set fx_cfg = analysis.fx_config if analysis.fx_config is defined else {} %}
+  <section class="card" id="section-fx" data-module-section="section-fx">
+    <h2>Currency Exposure</h2>
+
+    {% if fx.available %}
+    <!-- Summary -->
+    <div style="margin-bottom:1rem;font-size:0.9rem;color:var(--text-muted);">
+      Home currency: <strong style="color:var(--text-primary);">{{ fx.home_currency }}</strong>
+      &nbsp;|&nbsp;
+      Foreign exposure: <strong style="color:{% if fx.foreign_weight_pct > 30 %}#fbbf24{% else %}var(--text-primary){% endif %};">{{ fx.foreign_weight_pct }}%</strong>
+      &nbsp;|&nbsp;
+      Hedge policy: <strong style="color:var(--text-primary);">{{ fx.hedge_policy | replace("_", " ") | title }}</strong>
+    </div>
+
+    <!-- Currency breakdown table -->
+    {% if fx.currency_exposure %}
+    <h4 style="margin:0.75rem 0 0.5rem;">Currency Breakdown</h4>
+    <div class="table-responsive">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Currency</th>
+            <th>Portfolio Weight</th>
+            <th>Type</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in fx.currency_exposure %}
+          <tr>
+            <td><strong>{{ entry.currency }}</strong></td>
+            <td>{{ "%.1f"|format(entry.weight_pct) }}%</td>
+            <td>
+              {% if entry.is_foreign %}
+                <span style="color:#fbbf24;font-size:0.8rem;">Foreign</span>
+              {% else %}
+                <span style="color:#4ade80;font-size:0.8rem;">Home</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- Holdings detail -->
+    {% if fx.holdings_detail %}
+    <h4 style="margin:1rem 0 0.5rem;">Holdings Detail</h4>
+    <div class="table-responsive">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Weight</th>
+            <th>Listed Currency</th>
+            <th>FX Rate (to {{ fx.home_currency }})</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in fx.holdings_detail %}
+          <tr {% if h.is_foreign %}style="background:rgba(251,191,36,0.05);"{% endif %}>
+            <td><strong>{{ h.symbol }}</strong></td>
+            <td>{{ "%.1f"|format(h.weight_pct) }}%</td>
+            <td>{{ h.currency }}</td>
+            <td>{% if h.is_foreign %}{{ h.rate_to_home }}{% else %}-{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- Hedge recommendations -->
+    {% if fx.hedge_recommendations %}
+    <h4 style="margin:1rem 0 0.5rem;">Hedge Recommendations</h4>
+    <div class="table-responsive">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Currency</th>
+            <th>Exposure</th>
+            <th>Suggested Hedge</th>
+            <th>Instrument</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rec in fx.hedge_recommendations %}
+          <tr>
+            <td><strong>{{ rec.currency }}</strong></td>
+            <td>{{ "%.1f"|format(rec.exposure_pct) }}%</td>
+            <td>{{ "%.1f"|format(rec.recommended_hedge_pct) }}%</td>
+            <td style="font-size:0.8rem;color:var(--text-muted);">{{ rec.instrument }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <p style="color:var(--text-muted);font-size:0.9rem;">{{ fx.error | default("FX data unavailable.") }}</p>
+    {% endif %}
+
+    <!-- FX Config Form -->
+    <h4 style="margin:1.5rem 0 0.75rem;">FX Configuration</h4>
+    <form
+      hx-post="/ui/profile/{{ profile }}/save/fx-config"
+      hx-target="#settings-root"
+      hx-swap="outerHTML"
+      hx-include="[name='profile']"
+      style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:end;"
+    >
+      <input type="hidden" name="page_key" value="portfolio_fx">
+      <div>
+        <label style="font-size:0.85rem;color:var(--text-muted);display:block;margin-bottom:0.25rem;">Home Currency</label>
+        <select name="home_currency" class="form-select">
+          {% set supported = fx_cfg.supported_currencies if fx_cfg.supported_currencies is defined else ["USD","EUR","GBP","CHF","CAD","AUD","JPY"] %}
+          {% set current_home = fx_cfg.home_currency if fx_cfg.home_currency is defined else "USD" %}
+          {% for ccy in supported %}
+          <option value="{{ ccy }}" {% if ccy == current_home %}selected{% endif %}>{{ ccy }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.85rem;color:var(--text-muted);display:block;margin-bottom:0.25rem;">Hedge Policy</label>
+        <select name="hedge_policy" class="form-select">
+          {% set current_policy = fx_cfg.hedge_policy if fx_cfg.hedge_policy is defined else "unhedged" %}
+          {% for policy in ["unhedged", "partial", "full"] %}
+          <option value="{{ policy }}" {% if policy == current_policy %}selected{% endif %}>{{ policy | title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="grid-column:1/-1;">
+        <button type="submit" class="btn btn-primary">Save FX Config</button>
+        <button type="button"
+          hx-post="/api/v1/profile/{{ profile }}/fx/refresh"
+          hx-swap="none"
+          class="btn btn-secondary"
+          style="margin-left:0.5rem;"
+        >Refresh FX Rates</button>
+      </div>
+    </form>
+  </section>
+  {% endif %}
+  <!-- ===== /CURRENCY EXPOSURE ===== -->
 
   {% if "section-benchmark" in visible_sections %}
   <section class="card" id="section-benchmark" data-module-section="section-benchmark">

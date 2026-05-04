@@ -60,6 +60,9 @@ from app.universe.sector_universe import load_sector_universe
 from app.universe.ticker_metadata import TICKER_DISPLAY_NAMES, format_company_ticker
 from app.validation.presets import list_preset_summaries
 from app.simulation.service import load_simulation_context
+from app.bonds.service import compute_bond_analytics as _compute_bond_analytics, load_bond_overrides
+from app.esg.service import compute_portfolio_esg as _compute_portfolio_esg, load_esg_config
+from app.fx.service import compute_fx_exposure as _compute_fx_exposure, load_fx_config
 
 
 POLICY_INVESTOR_TYPES = [
@@ -216,6 +219,31 @@ UI_GLOSSARY: dict[str, dict[str, str]] = {
         "short_definition": "Average active return separately in months where the benchmark was up (bull) versus down (bear).",
         "why_it_matters": "Distinguishes a portfolio that adds value when markets rally from one that defends in drawdowns. Asymmetric capture is a key IPS reporting concept.",
     },
+    "modified_duration": {
+        "term": "Modified Duration",
+        "short_definition": "Approximate percentage price change for a 1% move in interest rates.",
+        "why_it_matters": "Core measure of interest rate sensitivity. A duration of 6 means ~6% price loss for every +1% rate rise.",
+    },
+    "ytm": {
+        "term": "Yield to Maturity (YTM)",
+        "short_definition": "Expected annualised return if a bond is held to maturity, assuming all coupons are reinvested.",
+        "why_it_matters": "The most complete single-number yield measure. Higher YTM = higher income but usually higher credit or rate risk.",
+    },
+    "dv01": {
+        "term": "DV01 (Dollar Value of 01)",
+        "short_definition": "Portfolio price change in dollars for a 1 basis point (0.01%) move in rates.",
+        "why_it_matters": "Translates duration into a concrete P&L figure for a specific portfolio size.",
+    },
+    "credit_quality": {
+        "term": "Credit Quality",
+        "short_definition": "Issuer creditworthiness grouping: Government, Investment Grade (IG), High Yield (HY), or Emerging Markets (EM).",
+        "why_it_matters": "Drives default risk, spread volatility, and regulatory capital treatment. HY bonds carry meaningfully more credit risk than IG.",
+    },
+    "rate_sensitivity": {
+        "term": "Rate Sensitivity",
+        "short_definition": "Estimated portfolio P&L for a parallel +100bps shift in the yield curve.",
+        "why_it_matters": "Quick stress-test for rising rate environments. A -6% figure means a 1% rate rise costs ~6% of the bond sleeve value.",
+    },
 }
 
 REGIONAL_INTELLIGENCE_BUCKETS: list[dict[str, Any]] = [
@@ -340,6 +368,41 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
         cma_entries=cma_entries,
     )
     analysis["ui_cma_asset_options"] = _cma_asset_options()
+
+    # Phase 7A: bond analytics
+    try:
+        analysis["bonds_analytics"] = _compute_bond_analytics(
+            profile_name=normalized_profile,
+            holdings=profile.portfolio_holdings,
+        )
+        analysis["bond_overrides"] = load_bond_overrides(normalized_profile)
+    except Exception:
+        analysis["bonds_analytics"] = {"available": False, "error": "Bond analytics unavailable."}
+        analysis["bond_overrides"] = {}
+
+    # Phase 7C: ESG analytics
+    try:
+        analysis["esg_analytics"] = _compute_portfolio_esg(
+            profile_name=normalized_profile,
+            holdings=profile.portfolio_holdings,
+            persist=False,
+        )
+        analysis["esg_config"] = load_esg_config(normalized_profile)
+    except Exception:
+        analysis["esg_analytics"] = {"available": False, "error": "ESG analytics unavailable."}
+        analysis["esg_config"] = {}
+
+    # Phase 7D: FX exposure
+    try:
+        analysis["fx_exposure"] = _compute_fx_exposure(
+            profile_name=normalized_profile,
+            holdings=profile.portfolio_holdings,
+        )
+        analysis["fx_config"] = load_fx_config(normalized_profile)
+    except Exception:
+        analysis["fx_exposure"] = {"available": False, "error": "FX analytics unavailable."}
+        analysis["fx_config"] = {}
+
     analysis["ui_home"] = _build_ui_home_summary(
         profile=profile,
         metadata=metadata,
