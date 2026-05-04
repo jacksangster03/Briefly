@@ -15,6 +15,7 @@ logger = logging.getLogger("garch_var")
 
 _MIN_OBSERVATIONS = 60
 _CONFIDENCE_LEVEL = 0.95  # 1-day 95% VaR
+_ARCH_IMPORT_ERROR_LOGGED = False
 
 
 def _pct_returns(prices: list[float]) -> list[float]:
@@ -33,7 +34,8 @@ def estimate_var(prices: list[float], confidence: float = _CONFIDENCE_LEVEL) -> 
           "observations":  int,
         }
     """
-    returns = _pct_returns(prices)
+    raw_returns = _pct_returns(prices)
+    returns = [r for r in raw_returns if np.isfinite(r)]
     n = len(returns)
     result: dict[str, Any] = {"garch_vol_pct": None, "var_1d_pct": None, "observations": n}
 
@@ -41,6 +43,7 @@ def estimate_var(prices: list[float], confidence: float = _CONFIDENCE_LEVEL) -> 
         logger.debug("Too few observations (%d) for GARCH — need %d", n, _MIN_OBSERVATIONS)
         return result
 
+    global _ARCH_IMPORT_ERROR_LOGGED
     try:
         from arch import arch_model  # type: ignore
 
@@ -60,6 +63,12 @@ def estimate_var(prices: list[float], confidence: float = _CONFIDENCE_LEVEL) -> 
         result["garch_vol_pct"] = round(annualised, 2)
         result["var_1d_pct"] = round(var_pct, 2)
         logger.debug("GARCH fit: ann_vol=%.2f%% VaR(%.0f%%)=%.2f%%", annualised, confidence * 100, var_pct)
+    except ModuleNotFoundError as exc:
+        # Avoid noisy repeated warnings on each symbol when optional dependency
+        # is intentionally not installed.
+        if not _ARCH_IMPORT_ERROR_LOGGED:
+            logger.info("GARCH disabled: optional dependency missing (%s)", exc)
+            _ARCH_IMPORT_ERROR_LOGGED = True
     except Exception as exc:
         logger.warning("GARCH estimation failed: %s", exc)
 

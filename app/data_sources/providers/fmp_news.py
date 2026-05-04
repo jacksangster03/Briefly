@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from urllib.parse import urlparse
 
 from app.data_sources.base import BaseProvider, ProviderError
 from app.logger import get_logger
@@ -23,17 +24,30 @@ class FMPNewsProvider(BaseProvider):
         return bool(self.api_key and self.base_url)
 
     def get_market_news(self, *, limit: int = 50, page: int = 0) -> list[NormalisedEvent]:
-        """Fetch general/latest financial headlines from FMP."""
-        try:
-            data = self._get(
-                self.base_url,
-                params={
-                    "apikey": self.api_key,
-                    "limit": max(1, min(limit, 250)),
-                    "page": max(0, page),
-                },
-            )
-        except ProviderError:
+        """Fetch general/latest financial headlines from FMP.
+
+        FMP has multiple live news endpoints across plan tiers. We try the
+        configured base URL first, then transparently fall back to known
+        alternatives to reduce key/plan friction.
+        """
+        params = {
+            "apikey": self.api_key,
+            "limit": max(1, min(limit, 250)),
+            "page": max(0, page),
+        }
+        endpoints = self._candidate_endpoints()
+        data = None
+        for idx, endpoint in enumerate(endpoints):
+            try:
+                data = self._get(endpoint, params=params)
+                if idx > 0:
+                    logger.info("FMP news fallback endpoint succeeded: %s", endpoint)
+                break
+            except ProviderError:
+                logger.warning("FMP news endpoint failed: %s", endpoint)
+                data = None
+                continue
+        if data is None:
             logger.warning("Failed to fetch FMP news")
             return []
 
@@ -69,6 +83,29 @@ class FMPNewsProvider(BaseProvider):
 
         logger.info("Fetched %d news items from FMP", len(events))
         return events
+
+    def _candidate_endpoints(self) -> list[str]:
+        """Return configured URL plus common FMP news fallback endpoints."""
+        configured = (self.base_url or "").strip().rstrip("/")
+        candidates: list[str] = []
+        if configured:
+            candidates.append(configured)
+
+        parsed = urlparse(configured) if configured else None
+        if parsed and parsed.scheme and parsed.netloc:
+            root = f"{parsed.scheme}://{parsed.netloc}"
+        else:
+            root = "https://financialmodelingprep.com"
+
+        fallbacks = [
+            f"{root}/api/v3/stock_news",
+            f"{root}/stable/news/general-latest",
+        ]
+        for endpoint in fallbacks:
+            normalized = endpoint.rstrip("/")
+            if normalized not in candidates:
+                candidates.append(normalized)
+        return candidates
 
     @staticmethod
     def _parse_timestamp(value: str) -> datetime | None:

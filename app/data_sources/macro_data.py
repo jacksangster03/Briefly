@@ -17,8 +17,10 @@ MORNING_SERIES = ["DGS2", "DGS10", "DGS30", "T10Y2Y", "DTWEXBGS"]
 # Full yield curve: 2Y, 5Y, 10Y, 30Y
 YIELD_CURVE_SERIES = ["DGS2", "DGS5", "DGS10", "DGS30"]
 
-# Commodity strip for the macro impulse grid
-COMMODITY_SERIES = ["DCOILWTICO", "DCOILBRENTEU", "GOLDAMGBD228NLBM", "DHHNGSP"]
+# Commodity strip for the macro impulse grid.
+# Gold is sourced from market quotes (GC=F) in market setup; FRED gold IDs
+# have been intermittently retired/migrated and can hard-fail with 400.
+COMMODITY_SERIES = ["DCOILWTICO", "DCOILBRENTEU", "DHHNGSP"]
 
 # Extended macro context
 EXTENDED_SERIES = ["UNRATE", "CPIAUCSL", "FEDFUNDS"]

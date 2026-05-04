@@ -8,7 +8,9 @@ from app.schemas.events import MacroDataPoint
 
 logger = get_logger("ecb")
 
-_DFR_FLOW = "FM/B.U2.EUR.RT0.BB.1000.CUSA.A"
+# ECB Deposit Facility Rate (daily, level). Previous key (RT0...CUSA.A)
+# now returns 400 on the new data API for many clients.
+_DFR_FLOW = "FM/D.U2.EUR.4F.KR.DFR.LEV"
 _EURUSD_FLOW = "EXR/D.USD.EUR.SP00.A"
 _HICP_FLOW = "ICP/M.U2.N.000000.4.ANR"
 

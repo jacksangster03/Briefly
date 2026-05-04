@@ -10,6 +10,11 @@ from app.settings import Settings
 
 logger = get_logger("market_data")
 
+# Finnhub /quote is strongest on listed equity symbols.
+# Skip Yahoo-specific and macro-style symbols there to avoid false
+# "endpoint unhealthy" signals and rely on fallbacks for those.
+_FINNHUB_QUOTE_BLACKLIST_PREFIXES = ("DGS", "T10Y", "DTWEX", "ECB_", "EUROSTAT_")
+
 
 class MarketDataService:
     """Aggregates market data with a three-tier fallback chain.
@@ -51,8 +56,13 @@ class MarketDataService:
         results: dict[str, QuoteData] = {}
 
         if self.finnhub and self.finnhub.is_configured():
-            for quote in self.finnhub.get_quotes(symbols):
-                results[quote.symbol] = quote
+            finnhub_symbols = [sym for sym in symbols if self._is_finnhub_quote_symbol(sym)]
+            if finnhub_symbols:
+                for quote in self.finnhub.get_quotes(finnhub_symbols):
+                    results[quote.symbol] = quote
+            skipped = len(symbols) - len(finnhub_symbols)
+            if skipped > 0:
+                logger.info("Skipping Finnhub for %d non-equity/index-formatted symbols", skipped)
 
         missing = [s for s in symbols if s not in results]
         if missing and self.alpaca and self.alpaca.is_configured():
@@ -90,3 +100,15 @@ class MarketDataService:
             return self.yfinance.get_price_history(symbol, period=period, interval=interval)
 
         return []
+
+    @staticmethod
+    def _is_finnhub_quote_symbol(symbol: str) -> bool:
+        sym = (symbol or "").strip().upper()
+        if not sym:
+            return False
+        if sym.startswith(_FINNHUB_QUOTE_BLACKLIST_PREFIXES):
+            return False
+        # Yahoo-style index/futures/commodities symbols.
+        if "^" in sym or "=" in sym or ":" in sym:
+            return False
+        return True

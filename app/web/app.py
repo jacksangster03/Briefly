@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
@@ -51,6 +52,7 @@ from app.onboarding.easy_setup import EasySetupInputs, apply_plan, build_plan, d
 logger = get_logger("web")
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 _INVESTOR_TYPE_VALUES = {"individual", "family_office", "advisor", "institutional", "model_portfolio", "other"}
@@ -272,6 +274,8 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings or get_settings()
     init_db()
+    STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     @app.get("/", include_in_schema=False)
     def root_redirect() -> RedirectResponse:

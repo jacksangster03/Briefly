@@ -829,21 +829,20 @@ def _earnings_relevance_spec(briefing: MorningBriefing) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _yield_curve_spec(yield_curve_points: list[MacroDataPoint], market_data_service: Any) -> dict[str, Any]:
-    """Yield curve shape: today vs 1-week-ago snapshot for 2Y/5Y/10Y/30Y."""
+    """Yield curve shape from deterministic macro series only (no yfinance fallback)."""
     TENOR_ORDER = {"DGS2": 2, "DGS5": 5, "DGS10": 10, "DGS30": 30}
     today_rows: list[dict[str, Any]] = []
     for point in yield_curve_points:
         tenor = TENOR_ORDER.get(point.series_id)
         if tenor is None or point.value is None:
             continue
-        history = market_data_service.get_price_history(point.series_id, period="1mo", interval="1d") or []
-        week_ago_val = float(history[-6].close) if len(history) >= 6 else None
+        prev_val = float(point.previous_value) if point.previous_value is not None else None
         today_rows.append({
             "series_id": point.series_id,
             "tenor": tenor,
             "today": round(float(point.value), 4),
-            "week_ago": round(week_ago_val, 4) if week_ago_val is not None else None,
-            "change_bps": round((float(point.value) - week_ago_val) * 100.0, 1) if week_ago_val is not None else None,
+            "week_ago": round(prev_val, 4) if prev_val is not None else None,
+            "change_bps": round((float(point.value) - prev_val) * 100.0, 1) if prev_val is not None else None,
         })
     today_rows.sort(key=lambda r: r["tenor"])
     available = len(today_rows) >= 2
@@ -855,7 +854,7 @@ def _yield_curve_spec(yield_curve_points: list[MacroDataPoint], market_data_serv
         "available": available,
         "reason_if_hidden": None if available else "Yield curve data unavailable.",
         "title": "Yield Curve Shape",
-        "caption": f"{'Inverted' if inversion else 'Normal'} curve — 4-tenor snapshot vs 1 week ago.",
+        "caption": f"{'Inverted' if inversion else 'Normal'} curve — 4-tenor snapshot vs previous fix.",
         "series": today_rows,
         "annotations": [{"label": "inversion", "value": inversion}],
         "meta": {"shape": shape},

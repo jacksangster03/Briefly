@@ -22,12 +22,18 @@ DEFAULT_SERIES = {
     "DTWEXBGS": "Trade-Weighted USD Index",
     "DCOILWTICO": "WTI Crude Oil (USD/bbl)",
     "DCOILBRENTEU": "Brent Crude Oil (USD/bbl)",
-    "GOLDAMGBD228NLBM": "Gold (USD/troy oz)",
+    "GOLDPMGBD228NLBM": "Gold (USD/troy oz)",
     "DHHNGSP": "Henry Hub Natural Gas (USD/MMBtu)",
     "UNRATE": "US Unemployment Rate",
     "CPIAUCSL": "US CPI (All Urban)",
     "FEDFUNDS": "Fed Funds Rate",
     "GDPC1": "US Real GDP",
+}
+
+# Some legacy FRED IDs are intermittently retired/migrated.
+# Try these alternates transparently before failing hard.
+SERIES_FALLBACKS: dict[str, list[str]] = {
+    "GOLDAMGBD228NLBM": ["GOLDPMGBD228NLBM"],
 }
 
 
@@ -51,6 +57,19 @@ class FREDProvider(BaseProvider):
 
     def get_latest_observation(self, series_id: str) -> MacroDataPoint | None:
         """Fetch the most recent observation for a FRED series."""
+        attempted = [series_id] + SERIES_FALLBACKS.get(series_id, [])
+        for sid in attempted:
+            point = self._get_latest_observation_once(series_id=sid)
+            if point is not None:
+                # Preserve requested semantic ID/name for downstream consumers.
+                point.series_id = series_id
+                point.name = DEFAULT_SERIES.get(series_id, DEFAULT_SERIES.get(sid, series_id))
+                return point
+        logger.warning("Failed to fetch FRED series %s", series_id)
+        return None
+
+    def _get_latest_observation_once(self, series_id: str) -> MacroDataPoint | None:
+        """Single-attempt fetch for one concrete FRED series ID."""
         try:
             data = self._get(
                 f"{BASE_URL}/series/observations",
@@ -61,7 +80,6 @@ class FREDProvider(BaseProvider):
                 }),
             )
         except ProviderError:
-            logger.warning("Failed to fetch FRED series %s", series_id)
             return None
 
         observations = data.get("observations", [])

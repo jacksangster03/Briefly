@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Briefly Home</title>
+  <link rel="stylesheet" href="/static/css/ui-shell.css">
   <style>
     :root {
       --bg: #0b0d12;
@@ -22,13 +23,10 @@
     body {
       margin: 0;
       color: var(--ink);
-      background:
-        radial-gradient(900px 500px at 8% -5%, rgba(245, 159, 0, 0.16), transparent 58%),
-        radial-gradient(1000px 600px at 92% -10%, rgba(46, 131, 255, 0.12), transparent 58%),
-        linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg) 100%);
+      background: var(--bg);
       font-family: "IBM Plex Sans", "Segoe UI", "Avenir Next", "Helvetica Neue", sans-serif;
       line-height: 1.4;
-      padding: 22px 14px 40px;
+      padding: 0;
     }
     .shell {
       max-width: 1140px;
@@ -229,6 +227,7 @@
 </head>
 <body>
   {% set home = state.analysis.ui_home %}
+  <div class="briefly-shell briefly-shell--home">
   <div class="shell">
     <p class="eyebrow">Briefly</p>
     <h1>{{ home.title }}</h1>
@@ -307,6 +306,7 @@
         <div class="value insight-good">Policy {{ state.analysis.policy_fit.status|replace("_", " ")|title }} · Rebalance {{ state.analysis.rebalance_proposal.status_label }}</div>
       </div>
     </div>
+  </div>
   </div>
 </body>
 </html>
