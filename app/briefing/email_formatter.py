@@ -101,14 +101,14 @@ class EmailFormatter:
         all_tags_text = " · ".join(str(t).replace("_", " ").upper() for t in regime_tags) or "MIXED"
 
         parts = [
-            f"<html><body style=\"margin:0;padding:0;background:{_CANVAS_BG};font-family:{_EMAIL_FONT_STACK};color:#E8ECEF;\">",
-            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:{_CANVAS_BG};\">",
-            "<tr><td align=\"center\" style=\"padding:8px 4px;\">",
-            f"<table role=\"presentation\" width=\"680\" cellspacing=\"0\" cellpadding=\"0\" style=\"width:680px;max-width:680px;background:{_CANVAS_BG};border:1px solid #1F3447;\">",
+            f"<html><body bgcolor=\"{_CANVAS_BG}\" style=\"margin:0;padding:0;background:{_CANVAS_BG};background-color:{_CANVAS_BG};font-family:{_EMAIL_FONT_STACK};color:#E8ECEF;\">",
+            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
+            f"<tr><td align=\"center\" bgcolor=\"{_CANVAS_BG}\" style=\"padding:8px 4px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
+            f"<table role=\"presentation\" width=\"680\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"width:680px;max-width:680px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};border:1px solid #1F3447;\">",
             # Regime colour bar (3px top accent)
             f"<tr><td style=\"height:3px;line-height:3px;font-size:0;background:{regime_accent};\">&nbsp;</td></tr>",
             # Header row
-            f"<tr><td style=\"padding:13px 16px 11px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};\">",
+            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:13px 16px 11px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
             "<td valign=\"bottom\" style=\"width:62%;\">",
             f"<div style=\"font-size:20px;line-height:1.08;font-weight:800;color:#E8ECEF;letter-spacing:-0.01em;\">{html.escape(title)}</div>",
@@ -128,7 +128,7 @@ class EmailFormatter:
             "</tr></table>",
             "</td></tr>",
             # Meta row
-            f"<tr><td style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};\">",
+            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
             "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\"><tr>",
             f"<td style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">GENERATED</strong> {html.escape(generated_local)}</td>",
             f"<td align=\"center\" style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">PROFILE</strong> {html.escape(profile_name)}</td>",
@@ -136,28 +136,28 @@ class EmailFormatter:
             "</tr></table>",
             "</td></tr>",
             # Source freshness row
-            f"<tr><td style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};\">",
+            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:7px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
             f"<div style=\"font-size:10.5px;line-height:1.35;color:#7A8FA0;\"><strong style=\"color:#E8ECEF;\">SOURCE</strong> {html.escape(freshness)}</div>",
             "</td></tr>",
             # Jump-link nav row
-            f"<tr><td style=\"padding:6px 16px 6px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};\">",
+            f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:6px 16px 6px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">",
             self._nav_row(),
             "</td></tr>",
         ]
 
         if desk_read:
             parts.append(
-                "<tr><td style=\"padding:9px 16px;border-bottom:1px solid #1F3447;background:#071629;"
+                f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:9px 16px;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};"
                 "font-size:12.5px;line-height:1.38;color:#E8ECEF;\">"
                 f"{desk_read}</td></tr>"
             )
 
         if briefing.chart_assets:
-            parts.append(f"<tr><td style=\"padding:10px 16px 0 16px;background:{_CANVAS_BG};\">")
+            parts.append(f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:10px 16px 0 16px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">")
             parts.append(self._chart_modules(briefing))
             parts.append("</td></tr>")
 
-        parts.append(f"<tr><td style=\"padding:0 16px 16px 16px;background:{_CANVAS_BG};\">")
+        parts.append(f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:0 16px 16px 16px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">")
         parts.append(self._brief_modules(full_html))
         parts.append("</td></tr>")
 
@@ -176,7 +176,7 @@ class EmailFormatter:
     def _chart_modules(self, briefing: MorningBriefing) -> str:
         roles = {row.get("chart_key"): row.get("role") for row in (briefing.morning_chart_selection or [])}
         modules = [
-            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border-collapse:collapse;background:{_CANVAS_BG};\">"
+            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"border-collapse:collapse;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
         ]
         for idx, asset in enumerate(briefing.chart_assets):
             role = str(roles.get(asset.key) or ("hero" if idx == 0 else "support"))
@@ -189,7 +189,7 @@ class EmailFormatter:
             takeaway_line = self._chart_takeaway_line(asset.caption)
             explain_line = self._chart_explainer_paragraph(asset.key, asset.caption)
             modules.append(
-                f"<tr><td style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};\">"
+                f"<tr><td bgcolor=\"{_CANVAS_BG}\" style=\"padding:{pad_top} 0 {pad_bottom} 0;border-bottom:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
             )
             modules.append(
                 f"<div style=\"font-size:{title_size};line-height:1.15;font-weight:800;color:#E8ECEF;letter-spacing:-0.01em;padding:0 0 4px 0;\">{html.escape(asset.title)}</div>"
@@ -233,16 +233,16 @@ class EmailFormatter:
             if len(lines) > 1:
                 body = self._format_section_body(lines[1:], section_title)
                 return (
-                    f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;background:{_CANVAS_BG};\">"
-                    f"<tr><td{anchor_id} style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;background:{_CANVAS_BG};\">"
+                    f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"margin-top:10px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
+                    f"<tr><td{anchor_id} bgcolor=\"{_CANVAS_BG}\" style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
                     f"<div style=\"font-size:15px;line-height:1.18;font-weight:800;letter-spacing:-0.01em;color:#E8ECEF;margin:0 0 6px 0;\">{html.escape(header_text)}</div>"
                     f"{body}"
                     "</td></tr></table>"
                 )
         body = self._format_section_body(lines, section_title)
         return (
-            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"margin-top:10px;background:{_CANVAS_BG};\">"
-            f"<tr><td{anchor_id} style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;background:{_CANVAS_BG};\">"
+            f"<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" bgcolor=\"{_CANVAS_BG}\" style=\"margin-top:10px;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
+            f"<tr><td{anchor_id} bgcolor=\"{_CANVAS_BG}\" style=\"padding:11px 0 9px 0;font-size:13px;color:#E8ECEF;line-height:1.38;border-top:1px solid #1F3447;background:{_CANVAS_BG};background-color:{_CANVAS_BG};\">"
             f"{body}"
             "</td></tr></table>"
         )
@@ -378,18 +378,26 @@ class EmailFormatter:
         if " | " in plain and ":" not in plain:
             return self._colorize_watchlist_strip(raw, context)
 
+        # Only colorize data after the first colon to avoid touching instrument labels (e.g., "10Y-2Y").
+        head, sep, tail = raw.partition(":")
+        if not sep:
+            return raw
+        if "<span style=\"color:#" in tail:
+            return raw
+
         # Colorize paired move segments: +1.23 (+0.45%) and stop to avoid nested span wrapping.
-        if _PAIR_MOVE_RE.search(plain):
-            return _PAIR_MOVE_RE.sub(
+        if _PAIR_MOVE_RE.search(tail):
+            colored_tail = _PAIR_MOVE_RE.sub(
                 lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)),
-                raw,
+                tail,
             )
+            return f"{head}{sep}{colored_tail}"
 
         # Then colorize remaining parenthetical changes: (-0.0200)
-        out = _PAREN_MOVE_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), raw)
+        out = _PAREN_MOVE_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), tail)
         # Finally colorize standalone % tokens in compact strips.
         out = _MOVE_TOKEN_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), out)
-        return out
+        return f"{head}{sep}{out}"
 
     @staticmethod
     def _wrap_color(token: str, color: str) -> str:
