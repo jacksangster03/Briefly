@@ -77,6 +77,110 @@ def brief(ctx):
     run_session_brief(ctx.obj["settings"])
 
 
+@cli.command("day-replay")
+@click.option(
+    "--date",
+    "replay_date",
+    default="today",
+    show_default=True,
+    help="Replay date: today | yesterday | YYYY-MM-DD.",
+)
+@click.option(
+    "--until",
+    type=click.Choice(["now", "close", "full-day"], case_sensitive=False),
+    default="now",
+    show_default=True,
+    help="Replay horizon cutoff.",
+)
+@click.option(
+    "--profile",
+    "profile_name",
+    default=None,
+    help="Optional profile override for replay context.",
+)
+@click.option(
+    "--send-test",
+    default="",
+    help="Comma-separated test delivery channels: telegram,email.",
+)
+@click.option(
+    "--force-all",
+    is_flag=True,
+    default=False,
+    help="Generate all checkpoints even if not yet eligible.",
+)
+@click.option(
+    "--respect-materiality/--ignore-materiality",
+    default=True,
+    help="Apply session materiality gating during replay.",
+)
+@click.option(
+    "--include-breaking",
+    is_flag=True,
+    default=False,
+    help="Allow replay sends for sessions that cross breaking thresholds.",
+)
+@click.option(
+    "--persist-replay-snapshots",
+    is_flag=True,
+    default=False,
+    help="Persist replay snapshots in isolated replay namespace.",
+)
+@click.option(
+    "--healthcare-enabled",
+    is_flag=True,
+    default=False,
+    help="Force-enable healthcare vertical for replay QA.",
+)
+@click.option(
+    "--vertical",
+    default="",
+    help="Optional vertical override (example: healthcare).",
+)
+@click.option(
+    "--max-sessions",
+    type=int,
+    default=8,
+    show_default=True,
+    help="Safety cap for number of replayed sessions.",
+)
+@click.pass_context
+def day_replay(
+    ctx,
+    replay_date: str,
+    until: str,
+    profile_name: str | None,
+    send_test: str,
+    force_all: bool,
+    respect_materiality: bool,
+    include_breaking: bool,
+    persist_replay_snapshots: bool,
+    healthcare_enabled: bool,
+    vertical: str,
+    max_sessions: int,
+):
+    """Manual day/session replay tester (dry-run by default)."""
+    from app.briefing.day_replay import run_day_replay
+
+    run_day_replay(
+        ctx.obj["settings"],
+        replay_date=replay_date,
+        until=until,
+        profile_override=profile_name,
+        send_test=send_test,
+        force_all=force_all,
+        respect_materiality=respect_materiality,
+        include_breaking=include_breaking,
+        persist_replay_snapshots=persist_replay_snapshots,
+        healthcare_enabled=healthcare_enabled,
+        vertical=vertical,
+        max_sessions=max_sessions,
+        show_output=bool(ctx.obj["settings"].show_output),
+        email_only=ctx.obj["settings"].normalized_delivery_channel == "email",
+        telegram_only=ctx.obj["settings"].normalized_delivery_channel == "telegram",
+    )
+
+
 @cli.command()
 @click.pass_context
 def intraday(ctx):

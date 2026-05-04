@@ -18,14 +18,21 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 
 ### Market briefing
 
+- Session-based briefing system (Europe/Madrid): Morning, Europe Midday, US Pre-Open, US Intraday Risk Check, Into Close, Closing Wrap
+- `python -m app.cli brief` auto-routes to the correct current session
+- `python -m app.cli morning` outside morning window auto-routes by default; `--force-morning` keeps true morning format
 - Morning briefing with market setup, macro context, geopolitics, top themes, sector scan, watchlist, and portfolio focus sections
 - Expanded market setup panel: US, Europe, Asia, VIX, 10Y UST, WTI, gold levels with percentage moves
 - Deterministic **Setup read** paragraph after Market Setup to explain the session regime using breadth, volatility, rates, and commodity impulses
 - Intraday updates: only new, material developments above threshold, compact global risk block when relevant
+- Session-aware materiality gating (`suppress` / `hold` / `send` / `breaking`) with reasons and next-eligible-session logging
+- Snapshot memory for **What Changed** across compatible sessions
+- Required regime-tag chart coverage checks with selected/suppressed chart logging
 - Breaking alerts: deterministic classifier (breaking / high_priority / regular / ignore), storyline-key cooldown, one-shot follow-up state machine, flood control via rolling-hour cap
 - Weekend-aware formatting when cash equity markets are closed
 - Story deduplication and clustering across sections
 - Cross-type anti-repeat policy: events already sent in one channel are suppressed from later surfaces
+- Manual QA harness: `day-replay` command simulates session cadence for a day without touching live idempotency markers
 
 ### Delivery and rendering
 
@@ -35,6 +42,13 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 - Deterministic morning visuals engine with chart contract + promotion policy (LLM does not choose chart types/series/scales)
 - Email PNG cards generated from deterministic specs (Plotly web preview + Matplotlib email rendering)
 - HTML email with inline charts
+- Optional Healthcare / Biotech Intelligence vertical section (default off; adds high-signal pharma/biotech/regulatory/manufacturing catalysts when enabled)
+
+### Latest completed phases
+
+- **Phase 6/7:** session-aware decision layer, regime-to-chart-stack selection, desk/full density modes, and new cards (yield curve, VIX risk, geo confirmation, regional divergence, watchlist movers, setup confirmation, what changed)
+- **Phase 8:** routing/materiality/snapshot hardening, session-aware logs and metadata, required chart coverage enforcement, and provider-note cleanup
+- **Healthcare vertical (optional):** deterministic healthcare taxonomy/classifier/scorer/section-builder, Telegram+email rendering, breaking biotech label path, and configurable preferences in `configs/healthcare.yaml`
 
 ### Portfolio workbench (Phases 4.7–5.8)
 
@@ -338,9 +352,18 @@ TELEGRAM_CHAT_ID=
 ```bash
 # Briefing runs
 python -m app.cli morning
+python -m app.cli brief
 python -m app.cli intraday
+python -m app.cli midday
+python -m app.cli preopen
+python -m app.cli close
 python -m app.cli breaking
 python -m app.cli scheduler
+
+# Manual day/session replay QA
+python -m app.cli day-replay --date today --show-output
+python -m app.cli day-replay --date today --send-test telegram,email
+python -m app.cli day-replay --date today --show-output --healthcare-enabled
 
 # Web control center
 python -m app.cli web --host 127.0.0.1 --port 8080
@@ -376,6 +399,7 @@ python -m app.cli simulation runs --profile default_user
 ```bash
 python -m app.cli --dry-run morning
 python -m app.cli --dry-run --show-output morning
+python -m app.cli --dry-run --show-output brief
 python -m app.cli --dry-run --show-output --email-only morning
 python -m app.cli --dry-run --show-output --telegram-only morning
 ```
@@ -475,9 +499,14 @@ coverage.home_region / coverage.weights
 delivery.morning_channels / delivery.intraday_channels / delivery.breaking_channels
 delivery.morning_brief_time / delivery.hourly_updates / delivery.breaking_alerts
 delivery.llm_email_morning / delivery.llm_shadow_mode
+delivery.session_mode / delivery.always_send_sessions / delivery.suppress_low_materiality
+delivery.email_density_mode
 delivery.quiet_hours_start / delivery.quiet_hours_end
 sections.morning.market_setup / sections.morning.macro_context / sections.morning.top_themes
 sections.morning.portfolio_focus / sections.morning.sector_scan / sections.morning.watchlist
+healthcare.enabled / healthcare.max_items_morning / healthcare.max_items_intraday / healthcare.breaking_alerts
+healthcare.themes / healthcare.tickers / healthcare.assets
+healthcare.minimum_severity_morning / healthcare.minimum_severity_intraday / healthcare.minimum_severity_breaking
 risk.lookback_days / risk.risk_free_rate_pct
 ```
 
@@ -546,6 +575,7 @@ configs/schedules.yaml              — cadence schedule
 configs/sectors.yaml                — sector taxonomy
 configs/alert_rules.yaml            — breaking alert thresholds
 configs/holdings.example.yaml       — example holdings file
+configs/healthcare.example.yaml     — healthcare vertical defaults
 ```
 
 ### LLM email rollout checklist
@@ -616,7 +646,8 @@ Intelligence pipeline
   -> credibility -> personal relevance -> clustering -> scoring
 
 Briefing generation
-  morning | intraday | breaking
+  brief (session auto-route) | morning | midday | preopen | intraday | close | breaking
+  + manual day-replay/session tester
 
 Formatting and delivery
   TelegramFormatter
@@ -657,7 +688,7 @@ make test
 python -m pytest app/tests -q
 ```
 
-Current count: **306 tests, 0 failures.**
+Current suite: **see latest `pytest` output** (regularly updated; includes session redesign, chart-stack QA, and healthcare-intelligence coverage).
 
 Focused test runs:
 
