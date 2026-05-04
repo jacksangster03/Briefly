@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.schemas.delivery import ChartAsset
+from app.healthcare.schemas import HealthcareBriefingSection
 from app.schemas.events import (
     EarningsEvent,
     MacroDataPoint,
@@ -88,6 +89,7 @@ class MorningBriefing(BaseModel):
     section_confidence: dict[str, str] = Field(default_factory=dict)
     data_freshness: dict[str, str] = Field(default_factory=dict)
     what_changed_lines: list[str] = Field(default_factory=list)
+    healthcare_intelligence: HealthcareBriefingSection | None = None
     contract_warnings: list[str] = Field(default_factory=list)
     canonical_prices: dict[str, dict] = Field(default_factory=dict)
     morning_chart_bundle: dict = Field(default_factory=dict)

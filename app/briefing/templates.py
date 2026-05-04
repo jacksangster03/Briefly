@@ -18,6 +18,7 @@ SECTION_HEADERS = {
     "themes": "TOP THEMES",
     "weekend_themes": "WEEKEND DEVELOPMENTS",
     "portfolio_focus": "PORTFOLIO FOCUS",
+    "healthcare_intelligence": "HEALTHCARE / BIOTECH INTELLIGENCE",
     "sectors": "SECTOR SCAN",
     "earnings": "EARNINGS CALENDAR",
     "watchlist": "WATCHLIST",

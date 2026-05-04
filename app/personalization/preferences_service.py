@@ -29,6 +29,7 @@ ALLOWED_HOME_REGIONS = {
     "global",
 }
 ALLOWED_EMAIL_DENSITY_MODES = {"desk", "full"}
+ALLOWED_HEALTHCARE_SEVERITIES = {"low", "medium", "high", "critical"}
 
 
 def _normalize_profile(profile_name: str) -> str:
@@ -143,6 +144,36 @@ def _normalize_channels(value: Any) -> list[str]:
     return unique
 
 
+def _normalize_string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+        except Exception:
+            return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    raise ValueError("Value must be a comma-separated string or JSON array")
+
+
+def _normalize_healthcare_severity(value: Any) -> str:
+    severity = str(value).strip().lower()
+    if severity not in ALLOWED_HEALTHCARE_SEVERITIES:
+        raise ValueError(
+            f"Unsupported healthcare severity '{severity}'. "
+            f"Allowed: {', '.join(sorted(ALLOWED_HEALTHCARE_SEVERITIES))}"
+        )
+    return severity
+
+
+def _normalize_positive_int(value: Any) -> int:
+    val = int(value)
+    if val < 0:
+        raise ValueError("Value must be >= 0")
+    return val
+
+
 def _normalize_morning_section_key(key: str) -> str:
     section = key.replace("sections.morning.", "", 1)
     if section not in ALLOWED_MORNING_SECTIONS:
@@ -184,6 +215,16 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "sections.morning.sector_scan": _normalize_bool,
     "sections.morning.watchlist": _normalize_bool,
     "sections.global_news": _normalize_bool,
+    "healthcare.enabled": _normalize_bool,
+    "healthcare.max_items_morning": _normalize_positive_int,
+    "healthcare.max_items_intraday": _normalize_positive_int,
+    "healthcare.breaking_alerts": _normalize_bool,
+    "healthcare.themes": _normalize_string_list,
+    "healthcare.tickers": _normalize_tickers,
+    "healthcare.assets": _normalize_string_list,
+    "healthcare.minimum_severity_morning": _normalize_healthcare_severity,
+    "healthcare.minimum_severity_intraday": _normalize_healthcare_severity,
+    "healthcare.minimum_severity_breaking": _normalize_healthcare_severity,
 }
 
 

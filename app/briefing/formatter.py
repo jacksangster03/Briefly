@@ -33,6 +33,7 @@ from app.schemas.briefings import (
     MorningBriefing,
     session_mode_for,
 )
+from app.healthcare.schemas import HealthcareBriefingSection
 from app.schemas.events import (
     EarningsEvent,
     MacroDataPoint,
@@ -134,6 +135,10 @@ class TelegramFormatter:
         if portfolio_focus and (is_morning or session_key in {"us_pre_open", "closing_wrap"}):
             sections.append(portfolio_focus)
 
+        healthcare = self._format_healthcare_intelligence(briefing.healthcare_intelligence, session_key=session_key)
+        if healthcare:
+            sections.append(healthcare)
+
         if is_weekend:
             week_ahead = self._format_week_ahead(briefing)
             if week_ahead:
@@ -207,6 +212,43 @@ class TelegramFormatter:
         triggers.append("Nasdaq turning negative would indicate the growth cushion is fading.")
         return "\n".join([f"<b>WATCH INTO CLOSE</b>"] + [f"- {line}" for line in triggers[:4]])
 
+    def _format_healthcare_intelligence(
+        self,
+        section: HealthcareBriefingSection | None,
+        *,
+        session_key: str,
+    ) -> str:
+        if section is None or not section.enabled:
+            return ""
+        if not section.items:
+            if section.unavailable_reason:
+                return "\n".join([f"<b>{SECTION_HEADERS['healthcare_intelligence']}</b>", section.unavailable_reason])
+            return ""
+        max_items = 4 if session_key == "morning" else 3
+        lines = [f"<b>{SECTION_HEADERS['healthcare_intelligence']}</b>"]
+        if section.read:
+            lines.append(f"Read: {section.read}")
+        for idx, item in enumerate(section.items[:max_items], 1):
+            lines.append(f"{idx}. <b>{item.title}</b>")
+            if item.summary:
+                lines.append(f"   {truncate(item.summary, 180)}")
+            if item.market_relevance:
+                lines.append(f"   Why market-relevant: {truncate(item.market_relevance, 180)}")
+            if item.portfolio_lens:
+                lines.append(f"   Portfolio lens: {truncate(item.portfolio_lens, 180)}")
+            meta: list[str] = []
+            if item.company_display:
+                meta.append(item.company_display)
+            if item.asset_display:
+                meta.append(item.asset_display)
+            if item.source_line:
+                meta.append(item.source_line)
+            if item.published_at:
+                meta.append(item.published_at.astimezone(self.local_tz).strftime("%H:%M %Z"))
+            if meta:
+                lines.append(f"   <i>{' | '.join(meta)}</i>")
+        return "\n".join(lines)
+
     def format_intraday_update(self, update: IntradayUpdate) -> list[str]:
         """Format an hourly intraday update."""
         sections = []
@@ -267,12 +309,15 @@ class TelegramFormatter:
         if is_followup:
             tier_header = "UPDATE"
         else:
-            tier_header = {
-                "breaking": SECTION_HEADERS["breaking_title"],
-                "high_priority": "HIGH PRIORITY",
-                "regular": "MARKET ALERT",
-                "ignore": "MARKET ALERT",
-            }.get(classification.tier, SECTION_HEADERS["breaking_title"])
+            if classification.category == "healthcare_biotech":
+                tier_header = "BREAKING BIOTECH ALERT"
+            else:
+                tier_header = {
+                    "breaking": SECTION_HEADERS["breaking_title"],
+                    "high_priority": "HIGH PRIORITY",
+                    "regular": "MARKET ALERT",
+                    "ignore": "MARKET ALERT",
+                }.get(classification.tier, SECTION_HEADERS["breaking_title"])
 
         sections = [
             f"<b>{tier_header}</b>",

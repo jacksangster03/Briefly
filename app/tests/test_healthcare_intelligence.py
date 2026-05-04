@@ -1,0 +1,175 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from app.briefing.formatter import TelegramFormatter
+from app.healthcare.classifier import classify_healthcare_event
+from app.healthcare.scorer import score_healthcare_event
+from app.healthcare.section_builder import build_healthcare_section, filter_breaking_healthcare_events
+from app.healthcare.schemas import HealthcareBriefingSection
+from app.personalization.user_profile import UserProfile
+from app.schemas.briefings import MorningBriefing
+from app.schemas.events import NormalisedEvent
+
+
+def _profile(enabled: bool = True) -> UserProfile:
+    return UserProfile(
+        timezone="Europe/Madrid",
+        watchlist_primary=["LLY", "NVO"],
+        healthcare={
+            "enabled": enabled,
+            "max_items_morning": 4,
+            "max_items_intraday": 2,
+            "breaking_alerts": True,
+            "themes": ["GLP-1", "peptides", "obesity", "API manufacturing", "CDMO", "FDA", "EMA", "clinical trials"],
+            "tickers": ["LLY", "NVO", "TMO"],
+            "assets": ["tirzepatide", "semaglutide", "wegovy", "mounjaro"],
+            "minimum_severity_morning": "medium",
+            "minimum_severity_intraday": "high",
+            "minimum_severity_breaking": "critical",
+        },
+    )
+
+
+def _evt(title: str, summary: str, *, event_type: str = "news", tickers: list[str] | None = None, source: str = "newsapi") -> NormalisedEvent:
+    return NormalisedEvent(
+        title=title,
+        summary=summary,
+        event_type=event_type,
+        tickers=tickers or [],
+        source=source,
+        published_at=datetime.now(timezone.utc),
+        url="https://example.com",
+        raw_data={"source_name": "Reuters"},
+    )
+
+
+def test_healthcare_disabled_no_section():
+    section = build_healthcare_section(profile=_profile(enabled=False), session_key="morning", events=[_evt("FDA approves drug", "FDA approved...")])
+    assert section is None
+
+
+def test_healthcare_enabled_adds_section_when_signal_exists():
+    section = build_healthcare_section(
+        profile=_profile(enabled=True),
+        session_key="morning",
+        events=[_evt("FDA approves Eli Lilly obesity therapy", "The FDA approved tirzepatide for obesity.", tickers=["LLY"])],
+    )
+    assert section is not None
+    assert section.enabled is True
+    assert section.items
+
+
+def test_classifier_fda_approval_is_critical():
+    event = _evt("FDA approval for GLP-1 therapy", "The FDA approved a new obesity treatment.", tickers=["LLY"])
+    classified = classify_healthcare_event(event, healthcare_prefs=_profile().healthcare_preferences)
+    assert classified is not None
+    assert classified.event_type == "fda_approval"
+    assert classified.severity == "critical"
+
+
+def test_classifier_phase3_is_high():
+    event = _evt("Phase 3 trial data met primary endpoint", "Phase 3 obesity trial met endpoints.", tickers=["NVO"])
+    classified = classify_healthcare_event(event, healthcare_prefs=_profile().healthcare_preferences)
+    assert classified is not None
+    assert classified.event_type == "clinical_data"
+    assert classified.severity in {"high", "critical"}
+
+
+def test_glp1_tags_detected():
+    event = _evt("GLP-1 demand rises", "Semaglutide and tirzepatide demand remains strong.", tickers=["LLY", "NVO"])
+    classified = classify_healthcare_event(event, healthcare_prefs=_profile().healthcare_preferences)
+    assert classified is not None
+    tags = set(classified.modality + classified.therapy_areas)
+    assert "GLP-1" in tags or "obesity" in tags
+
+
+def test_low_signal_generic_health_article_suppressed():
+    event = _evt(
+        "Top 5 healthcare stocks to buy now",
+        "Fantastic news for shareholders and room to run.",
+        source="newsapi",
+    )
+    event.raw_data = {"source_name": "Unknown Blog"}
+    classified = classify_healthcare_event(event, healthcare_prefs=_profile().healthcare_preferences)
+    assert classified is None
+
+
+def test_portfolio_watchlist_ticker_gets_relevance_boost():
+    prefs = _profile().healthcare_preferences
+    profile = _profile()
+    watch_evt = classify_healthcare_event(
+        _evt("FDA updates Eli Lilly label", "FDA label update for obesity therapy.", tickers=["LLY"]),
+        healthcare_prefs=prefs,
+    )
+    other_evt = classify_healthcare_event(
+        _evt("FDA updates competitor label", "FDA label update for obesity therapy.", tickers=["XYZ"]),
+        healthcare_prefs=prefs,
+    )
+    assert watch_evt is not None and other_evt is not None
+    watch_scored = score_healthcare_event(watch_evt, profile=profile, healthcare_prefs=prefs)
+    other_scored = score_healthcare_event(other_evt, profile=profile, healthcare_prefs=prefs)
+    assert watch_scored.relevance_score > other_scored.relevance_score
+
+
+def test_section_omitted_when_no_relevant_items():
+    section = build_healthcare_section(
+        profile=_profile(),
+        session_key="morning",
+        events=[_evt("General market update", "No healthcare details", source="finnhub")],
+    )
+    assert section is None
+
+
+def test_intraday_only_high_or_critical():
+    section = build_healthcare_section(
+        profile=_profile(),
+        session_key="us_intraday_risk",
+        events=[
+            _evt("FDA approves therapy", "FDA approved GLP-1 drug.", tickers=["LLY"]),
+            _evt("Company IR update", "Investor relations update without catalyst.", event_type="company_news", tickers=["LLY"]),
+        ],
+    )
+    assert section is not None
+    assert section.items
+    assert all(item.severity in {"high", "critical"} for item in section.items)
+
+
+def test_breaking_biotech_filter_only_critical():
+    events = [
+        _evt("FDA approves obesity drug", "FDA approved GLP-1 drug.", tickers=["LLY"]),
+        _evt("Healthcare commentary", "General biotech sector commentary.", source="newsapi"),
+    ]
+    items = filter_breaking_healthcare_events(profile=_profile(), events=events)
+    assert items
+    assert all(item.severity == "critical" for item in items)
+
+
+def test_renderer_includes_healthcare_section_lines():
+    formatter = TelegramFormatter("Europe/Madrid")
+    briefing = MorningBriefing()
+    briefing.session_key = "morning"
+    briefing.session_title = "Morning Briefing"
+    briefing.healthcare_intelligence = HealthcareBriefingSection(
+        enabled=True,
+        read="High-signal healthcare items are focused on GLP-1 and manufacturing catalysts.",
+        items=[
+            {
+                "title": "Eli Lilly raises obesity guidance",
+                "summary": "LLY raised guidance as GLP-1 demand remains strong.",
+                "event_type": "earnings_guidance",
+                "severity": "high",
+                "company_display": "LLY",
+                "asset_display": "tirzepatide",
+                "theme_tags": ["GLP-1", "obesity"],
+                "market_relevance": "Obesity therapeutics remain a major pharma growth pool.",
+                "portfolio_lens": "Relevant to watchlist exposure.",
+                "source_line": "Reuters",
+            }
+        ],
+        confidence="MEDIUM",
+    )
+    rendered = "\n".join(formatter.format_morning_briefing(briefing))
+    assert "HEALTHCARE / BIOTECH INTELLIGENCE" in rendered
+    assert "Why market-relevant" in rendered
+    assert "Portfolio lens" in rendered

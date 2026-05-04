@@ -187,7 +187,7 @@ def section_confidence(briefing: MorningBriefing, *, timezone_name: str) -> dict
     geo_conf = "HIGH" if briefing.geo_risk_level and briefing.geo_risk_summary else "MEDIUM" if briefing.geo_risk_level else "LOW"
     regime_base = (briefing.market_setup_analysis_confidence or "low").strip().lower()
     regime_conf = "HIGH" if regime_base in {"high", "med-high", "medium-high"} else "MEDIUM" if regime_base in {"medium", "med"} else "LOW"
-    return {
+    section = {
         "Regime": regime_conf,
         "Market prices": market_conf,
         "News": news_conf,
@@ -195,6 +195,9 @@ def section_confidence(briefing: MorningBriefing, *, timezone_name: str) -> dict
         "Portfolio": portfolio_conf,
         "Geo risk": geo_conf,
     }
+    if briefing.healthcare_intelligence and briefing.healthcare_intelligence.enabled:
+        section["Healthcare"] = briefing.healthcare_intelligence.confidence or "MEDIUM"
+    return section
 
 
 def freshness_block(briefing: MorningBriefing, *, timezone_name: str) -> dict[str, str]:

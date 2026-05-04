@@ -1,0 +1,50 @@
+# Optional Healthcare / Biotech vertical intelligence configuration.
+# Copy to configs/healthcare.yaml to enable and customize.
+
+healthcare:
+  enabled: false
+  max_items_morning: 4
+  max_items_intraday: 3
+  breaking_alerts: false
+  themes:
+    - peptides
+    - GLP-1
+    - obesity
+    - metabolic disease
+    - diabetes
+    - oncology
+    - rare disease
+    - immunology
+    - API manufacturing
+    - CDMO
+    - fill-finish
+    - sterile manufacturing
+    - clinical trials
+    - FDA
+    - EMA
+  tickers:
+    - LLY
+    - NVO
+    - AZN
+    - RHHBY
+    - REGN
+    - AMGN
+    - VRTX
+    - MRNA
+    - BMRN
+    - TMO
+    - DHR
+    - WST
+    - LONN.SW
+  assets:
+    - tirzepatide
+    - semaglutide
+    - retatrutide
+    - orforglipron
+    - wegovy
+    - ozempic
+    - mounjaro
+    - zepbound
+  minimum_severity_morning: medium
+  minimum_severity_intraday: high
+  minimum_severity_breaking: critical

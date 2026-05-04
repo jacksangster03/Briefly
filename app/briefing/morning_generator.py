@@ -27,6 +27,7 @@ from app.briefing.trust_contract import (
 )
 from app.briefing.regional_lens import build_regional_lens
 from app.briefing.theme_builder import build_top_themes
+from app.healthcare.section_builder import build_healthcare_section
 from app.logger import get_logger
 from app.db.session import get_session
 from app.personalization.delivery_rules import load_alert_rules
@@ -473,6 +474,16 @@ class MorningBriefingGenerator:
         briefing.watchlist_events = self._filter_watchlist_events(eligible)
         briefing.watchlist_quotes = self._fetch_watchlist_quotes()
         briefing.portfolio_quotes = self._fetch_portfolio_quotes()
+        healthcare_candidates = self._healthcare_candidate_events(
+            eligible=eligible,
+            briefing=briefing,
+        )
+        briefing.healthcare_intelligence = build_healthcare_section(
+            profile=self.profile,
+            session_key=briefing.session_key,
+            events=healthcare_candidates,
+            verbose_when_empty=False,
+        )
         self._apply_session_profile(briefing)
         active_setup = self._active_market_setup_view(briefing)
         setup_interpretation = interpret_market_setup(
@@ -644,6 +655,8 @@ class MorningBriefingGenerator:
             briefing.macro_context = []
             briefing.commodity_strip = list(briefing.commodity_strip[:2])
             self._trim_market_snapshot_quotes(briefing, max_index=6, max_macro=4)
+            if briefing.healthcare_intelligence and briefing.healthcare_intelligence.items:
+                briefing.healthcare_intelligence.items = list(briefing.healthcare_intelligence.items[:3])
             return
 
         if key == "closing_wrap":
@@ -655,6 +668,28 @@ class MorningBriefingGenerator:
             briefing.commodity_strip = list(briefing.commodity_strip[:3])
             self._trim_market_snapshot_quotes(briefing, max_index=8, max_macro=5)
             return
+
+    @staticmethod
+    def _healthcare_candidate_events(
+        *,
+        eligible: list[NormalisedEvent],
+        briefing: MorningBriefing,
+    ) -> list[NormalisedEvent]:
+        seen: set[str] = set()
+        merged: list[NormalisedEvent] = []
+        for event in (
+            list(eligible)
+            + list(briefing.global_news)
+            + list(briefing.top_themes)
+            + list(briefing.portfolio_focus)
+            + list(briefing.watchlist_events)
+        ):
+            key = event.cluster_id or event.content_hash or event.event_id
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(event)
+        return merged
 
     @staticmethod
     def _trim_market_snapshot_quotes(briefing: MorningBriefing, *, max_index: int, max_macro: int) -> None:

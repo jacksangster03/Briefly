@@ -45,6 +45,7 @@ from app.db.models import BreakingStoryState
 from app.db.models import SentMessage
 from app.db.session import get_session, init_db
 from app.logger import get_logger
+from app.healthcare.section_builder import filter_breaking_healthcare_events
 from app.messaging.email import EmailMessenger
 from app.messaging.telegram import TelegramMessenger
 from app.personalization.user_profile import UserProfile, load_user_profile
@@ -928,6 +929,26 @@ def run_breaking_check(settings: Settings | None = None) -> None:
         if not fresh_alerts:
             logger.debug("No fresh breaking alerts after recent-delivery suppression")
             return
+
+        if profile.healthcare_enabled and bool(profile.healthcare_preferences.get("breaking_alerts", False)):
+            hc_by_event_id = {
+                evt.title: evt for evt in filter_breaking_healthcare_events(
+                    profile=profile,
+                    events=[alert.event for alert in fresh_alerts],
+                )
+            }
+            for alert in fresh_alerts:
+                hc_evt = hc_by_event_id.get(alert.event.title)
+                if hc_evt is None:
+                    continue
+                alert.classification.tier = "breaking"
+                alert.classification.category = "healthcare_biotech"
+                alert.classification.impact_score = max(alert.classification.impact_score, 6)
+                alert.classification.confidence_score = max(alert.classification.confidence_score, 5)
+                alert.reason = (
+                    f"Healthcare catalyst ({hc_evt.event_type}, {hc_evt.severity}): {hc_evt.market_relevance} "
+                    f"{hc_evt.portfolio_lens}".strip()
+                )
 
         tier_filtered_alerts: list[BreakingAlert] = []
         for alert in fresh_alerts:

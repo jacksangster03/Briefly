@@ -37,6 +37,7 @@ class UserProfile:
         delivery_channels: dict[str, list[str]] | None = None,
         morning_section_flags: dict[str, bool] | None = None,
         preference_overrides: dict[str, Any] | None = None,
+        healthcare: dict[str, Any] | None = None,
     ):
         self.name = name
         self.timezone = timezone
@@ -56,6 +57,7 @@ class UserProfile:
         self.delivery_channels = delivery_channels or {}
         self.morning_section_flags = morning_section_flags or {}
         self.preference_overrides = preference_overrides or {}
+        self.healthcare = healthcare or {}
 
     @property
     def all_watchlist_tickers(self) -> list[str]:
@@ -180,6 +182,14 @@ class UserProfile:
         """Check whether a morning section is enabled by preference."""
         return self.morning_section_flags.get(section_key, True)
 
+    @property
+    def healthcare_preferences(self) -> dict[str, Any]:
+        return dict(self.healthcare or {})
+
+    @property
+    def healthcare_enabled(self) -> bool:
+        return bool(self.healthcare.get("enabled", False))
+
 
 def load_user_profile(settings: Settings) -> UserProfile:
     """Load user profile from YAML config files.
@@ -213,6 +223,7 @@ def load_user_profile(settings: Settings) -> UserProfile:
         sector_weights=data.get("sector_weights", {}),
         delivery=data.get("delivery", {}),
         style=data.get("style", {}),
+        healthcare=_load_healthcare_preferences(configs_dir),
     )
 
     # Merge watchlist
@@ -239,6 +250,80 @@ def load_user_profile(settings: Settings) -> UserProfile:
         len(profile.portfolio_holdings),
     )
     return profile
+
+
+def _load_healthcare_preferences(configs_dir: Path) -> dict[str, Any]:
+    defaults: dict[str, Any] = {
+        "enabled": False,
+        "max_items_morning": 4,
+        "max_items_intraday": 3,
+        "breaking_alerts": False,
+        "themes": [
+            "peptides",
+            "GLP-1",
+            "obesity",
+            "metabolic disease",
+            "diabetes",
+            "oncology",
+            "rare disease",
+            "immunology",
+            "API manufacturing",
+            "CDMO",
+            "fill-finish",
+            "sterile manufacturing",
+            "clinical trials",
+            "FDA",
+            "EMA",
+        ],
+        "tickers": [
+            "LLY",
+            "NVO",
+            "AZN",
+            "RHHBY",
+            "REGN",
+            "AMGN",
+            "VRTX",
+            "MRNA",
+            "BMRN",
+            "TMO",
+            "DHR",
+            "WST",
+            "LONN.SW",
+        ],
+        "assets": [
+            "tirzepatide",
+            "semaglutide",
+            "retatrutide",
+            "orforglipron",
+            "wegovy",
+            "ozempic",
+            "mounjaro",
+            "zepbound",
+        ],
+        "minimum_severity_morning": "medium",
+        "minimum_severity_intraday": "high",
+        "minimum_severity_breaking": "critical",
+    }
+    cfg_path = configs_dir / "healthcare.yaml"
+    if not cfg_path.exists():
+        cfg_path = configs_dir / "healthcare.example.yaml"
+    if not cfg_path.exists():
+        return defaults
+    try:
+        with open(cfg_path) as handle:
+            data = yaml.safe_load(handle) or {}
+    except Exception:
+        logger.warning("Failed to load healthcare config from %s", cfg_path, exc_info=True)
+        return defaults
+    section = data.get("healthcare", {}) if isinstance(data, dict) else {}
+    if not isinstance(section, dict):
+        return defaults
+    merged = dict(defaults)
+    merged.update(section)
+    merged["themes"] = [str(item).strip() for item in (merged.get("themes") or []) if str(item).strip()]
+    merged["tickers"] = [str(item).strip().upper() for item in (merged.get("tickers") or []) if str(item).strip()]
+    merged["assets"] = [str(item).strip() for item in (merged.get("assets") or []) if str(item).strip()]
+    return merged
 
 
 def _load_profile_overrides(profile: UserProfile) -> None:
@@ -315,6 +400,10 @@ def _load_profile_overrides(profile: UserProfile) -> None:
         if key.startswith("sections.morning."):
             section = key.replace("sections.morning.", "", 1)
             profile.morning_section_flags[section] = bool(value)
+            continue
+        if key.startswith("healthcare."):
+            pref_key = key.replace("healthcare.", "", 1)
+            profile.healthcare[pref_key] = value
 
 
 def _load_portfolio_context(profile: UserProfile, configs_dir: Path) -> None:
