@@ -68,6 +68,18 @@ Notes:
 - `day-replay` is manual only (never scheduler-driven).
 - Replay sends are test-labeled and do **not** update live sent-message idempotency markers.
 
+### Catch-up vs backfill
+
+| Scenario | Command | Banner |
+|---|---|---|
+| Sessions missed earlier today | `catch-up` (no `--date` or `--date today`) | None |
+| Sessions missed yesterday, run before midnight | `catch-up --date yesterday` | HISTORICAL BACKFILL - NOT LIVE |
+| Sessions missed from any past date | `backfill --date YYYY-MM-DD` | HISTORICAL BACKFILL - NOT LIVE |
+
+`catch-up` without a past date sends today's missed sessions cleanly, with no label. Targeting a past date (via `catch-up --date yesterday` or the explicit `backfill` alias) automatically prepends a prominent banner to every Telegram message and email so recipients can see the content was generated after the fact using the latest available provider data, not the original session-time snapshot.
+
+Idempotency uses the original session date so you can safely re-run without double-sending. Future dates are rejected with an error.
+
 ### Portfolio workbench (Phases 4.7–5.8)
 
 The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full portfolio workbench:
@@ -432,10 +444,18 @@ python -m app.cli session-send --session into_close --send telegram,email
 python -m app.cli session-send --session closing_wrap --send telegram,email
 python -m app.cli session-send --session morning --force          # resend even if already sent
 
-# Catch-up: send all missed sessions for today
+# Catch-up: send all missed sessions for today (no backfill label)
 python -m app.cli catch-up --send telegram,email
 python -m app.cli catch-up --active-mode --ignore-materiality --send telegram,email
 python -m app.cli catch-up --force-all --send telegram,email
+
+# Catch-up for a past date: sends all sessions with a HISTORICAL BACKFILL banner
+python -m app.cli catch-up --date yesterday --send telegram,email
+python -m app.cli catch-up --date 2026-05-05 --active-mode --ignore-materiality --send telegram,email
+
+# Backfill (alias): always requires --date, always applies the backfill banner
+python -m app.cli backfill --date yesterday --send telegram,email
+python -m app.cli backfill --date 2026-05-05 --active-mode --ignore-materiality
 
 # Scheduler diagnostics
 python -m app.cli schedule-status
@@ -1013,6 +1033,7 @@ python -m app.cli simulation runs --profile default_user
 | 7C | Complete | ESG/SRI Scoring: yfinance sustainability, exclusion screens, alignment labels, per-profile config |
 | 7D | Complete | Multi-Currency: ticker-suffix currency inference, FX rate cache, exposure breakdown, hedge recommendations |
 | 8.7 | Complete | Session delivery hardening: per-session idempotency, `session-send`, `catch-up`, `schedule-status` commands, `session_mode`/`suppress_low_materiality` preference keys, 10 new idempotency and catch-up tests |
+| 8.8 | Complete | Historical backfill labelling: `backfill` command alias, `HISTORICAL BACKFILL - NOT LIVE` banners on all channels, `[BACKFILL]` email subject prefix, future-date rejection, idempotency keyed to original session date, 20 new backfill unit tests |
 | 5.7B | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---

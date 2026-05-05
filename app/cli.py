@@ -898,7 +898,11 @@ def catch_up(ctx, target_date: str, channels: str, force_all: bool, ignore_mater
       python -m app.cli catch-up --active-mode --ignore-materiality
       python -m app.cli catch-up --force-all --send telegram
     """
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
     from app.main import run_catch_up
+    from app.settings import get_settings as _get_settings
 
     settings = ctx.obj["settings"]
     if channels:
@@ -910,16 +914,161 @@ def catch_up(ctx, target_date: str, channels: str, force_all: bool, ignore_mater
         elif channel_list:
             settings.delivery_channel = "all"
 
-    summary = run_catch_up(
-        settings,
-        target_date_str=target_date,
-        force_all=force_all,
-        ignore_materiality=ignore_materiality,
-        active_mode=active_mode,
-        command_source="cli:catch-up",
-    )
+    # Detect past dates early so we can warn before any sends happen.
+    _tz_name = settings.timezone or "Europe/Madrid"
+    _local_now = datetime.now(timezone.utc).astimezone(ZoneInfo(_tz_name))
+    _s = (target_date or "today").strip().lower()
+    if _s not in ("today",):
+        _is_past = True
+        if _s == "yesterday":
+            from datetime import timedelta
+            _target_d = (_local_now - timedelta(days=1)).date()
+        else:
+            from datetime import date as _date
+            try:
+                _target_d = _date.fromisoformat(_s)
+                _is_past = _target_d < _local_now.date()
+            except ValueError:
+                _is_past = False
+                _target_d = _local_now.date()
+        if _is_past and _target_d < _local_now.date():
+            click.echo(
+                "\nNOTE: targeting a past date. Messages will carry a HISTORICAL BACKFILL - NOT LIVE"
+                " banner so recipients can see they were generated after the fact using"
+                " the latest available provider data, not the original session-time snapshot.\n"
+            )
+
+    try:
+        summary = run_catch_up(
+            settings,
+            target_date_str=target_date,
+            force_all=force_all,
+            ignore_materiality=ignore_materiality,
+            active_mode=active_mode,
+            command_source="cli:catch-up",
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     click.echo("\nCatch-up summary")
+    click.echo(f"  {'Session':<22} {'Action':<14} {'Reason'}")
+    click.echo(f"  {'-'*22} {'-'*14} {'-'*30}")
+    for row in summary:
+        click.echo(f"  {row['session']:<22} {row['action']:<14} {row.get('reason', '')}")
+    sent_count = sum(1 for r in summary if r["action"] == "sent")
+    skipped_count = sum(1 for r in summary if r["action"] in {"skipped", "already_sent"})
+    click.echo(f"\n  Sent: {sent_count}   Skipped/already sent: {skipped_count}")
+
+
+@cli.command("backfill")
+@click.option(
+    "--date",
+    "target_date",
+    required=True,
+    help="Past date to backfill: yesterday | YYYY-MM-DD. Future dates are rejected.",
+)
+@click.option(
+    "--send",
+    "channels",
+    default="",
+    help="Comma-separated channels: telegram,email. Overrides global --email-only/--telegram-only.",
+)
+@click.option(
+    "--force-all",
+    is_flag=True,
+    default=False,
+    help="Resend even sessions already recorded as sent for the target date.",
+)
+@click.option(
+    "--ignore-materiality",
+    is_flag=True,
+    default=False,
+    help="Skip materiality gating; send all eligible sessions regardless of score.",
+)
+@click.option(
+    "--active-mode",
+    is_flag=True,
+    default=False,
+    help="Treat all six sessions as allowed regardless of profile session_mode.",
+)
+@click.option(
+    "--allow-today",
+    is_flag=True,
+    default=False,
+    help="Allow backfilling today's date (for testing). Messages are still labelled as backfill.",
+)
+@click.pass_context
+def backfill(ctx, target_date: str, channels: str, force_all: bool, ignore_materiality: bool, active_mode: bool, allow_today: bool):
+    """Backfill sessions for a past date, clearly labelling every message as historical.
+
+    Every Telegram message and email will carry a prominent HISTORICAL BACKFILL - NOT LIVE
+    banner so recipients can see the content was generated after the fact using the latest
+    available provider data, not the original session-time snapshot.
+
+    Use catch-up for today's missed sessions (no banner). Use backfill for any prior date.
+
+    Examples:
+      python -m app.cli backfill --date yesterday --send telegram,email
+      python -m app.cli backfill --date 2026-05-05 --active-mode --ignore-materiality
+    """
+    from datetime import datetime, date as _date, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    from app.main import run_catch_up
+
+    settings = ctx.obj["settings"]
+
+    _tz_name = settings.timezone or "Europe/Madrid"
+    _local_now = datetime.now(timezone.utc).astimezone(ZoneInfo(_tz_name))
+    _today = _local_now.date()
+
+    _s = (target_date or "").strip().lower()
+    if _s == "yesterday":
+        resolved_date = (_local_now - timedelta(days=1)).date()
+    else:
+        try:
+            resolved_date = _date.fromisoformat(_s)
+        except ValueError as exc:
+            raise click.ClickException(f"Invalid date: {target_date!r}. Use yesterday or YYYY-MM-DD.") from exc
+
+    if resolved_date > _today:
+        raise click.ClickException(
+            f"Future date {resolved_date.isoformat()} is not allowed. "
+            "Backfill only works for past dates."
+        )
+    if resolved_date == _today and not allow_today:
+        raise click.ClickException(
+            f"Date {resolved_date.isoformat()} is today. Use catch-up for today's missed sessions, "
+            "or pass --allow-today if you intentionally want a backfill-labelled send."
+        )
+
+    if channels:
+        channel_list = [c.strip().lower() for c in channels.split(",") if c.strip()]
+        if "email" in channel_list and "telegram" not in channel_list:
+            settings.delivery_channel = "email"
+        elif "telegram" in channel_list and "email" not in channel_list:
+            settings.delivery_channel = "telegram"
+        elif channel_list:
+            settings.delivery_channel = "all"
+
+    click.echo(
+        f"\nBackfilling {resolved_date.isoformat()}. Every message will carry a "
+        "HISTORICAL BACKFILL - NOT LIVE banner.\n"
+    )
+
+    try:
+        summary = run_catch_up(
+            settings,
+            target_date_str=resolved_date.isoformat(),
+            force_all=force_all,
+            ignore_materiality=ignore_materiality,
+            active_mode=active_mode,
+            command_source="cli:backfill",
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo("\nBackfill summary")
     click.echo(f"  {'Session':<22} {'Action':<14} {'Reason'}")
     click.echo(f"  {'-'*22} {'-'*14} {'-'*30}")
     for row in summary:

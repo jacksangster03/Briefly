@@ -9,6 +9,7 @@ Each function here represents a complete workflow:
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date, time, timedelta
 import re
 from datetime import datetime, timezone
@@ -31,6 +32,7 @@ from app.briefing.session_delivery import (
     claim_session_send,
     finalize_session_send_claim,
 )
+from app.schemas.delivery import EmailRenderResult
 from app.briefing.session_materiality import compute_materiality
 from app.briefing.session_routing import SESSION_WINDOWS, next_session_window, resolve_session_window, session_window_for_key
 from app.briefing.session_snapshot import load_previous_snapshot, persist_snapshot, snapshot_metrics
@@ -81,6 +83,69 @@ def _resolve_llm_delivery_overrides(profile: UserProfile) -> tuple[bool | None, 
     enabled = enabled_raw if isinstance(enabled_raw, bool) else None
     shadow = shadow_raw if isinstance(shadow_raw, bool) else None
     return enabled, shadow
+
+
+@dataclass(frozen=True)
+class BackfillContext:
+    """Carries metadata for historical backfill sends (catch-up for past dates).
+
+    When catch-up targets a date before today, every generated message is
+    labelled so recipients can see it was produced after the fact using the
+    latest available provider data, not the original session-time snapshot.
+    """
+    session_date: date
+    generated_at_local: datetime
+    timezone_name: str
+
+
+def _apply_backfill_telegram_banner(messages: list[str], ctx: BackfillContext) -> list[str]:
+    """Prepend a prominent backfill notice to the first Telegram message."""
+    gen_str = ctx.generated_at_local.strftime("%Y-%m-%d %H:%M")
+    session_str = ctx.session_date.strftime("%a %d %b %Y")
+    banner = (
+        "<b>HISTORICAL BACKFILL - NOT LIVE</b>\n"
+        f"Original session date: {session_str}\n"
+        f"Generated: {gen_str} {ctx.timezone_name}\n"
+        "Data: latest available provider data (not original session-time snapshot)\n\n"
+        "This report approximates the missed session. It is not a real-time "
+        "reconstruction of the original session window.\n"
+        "================================\n\n"
+    )
+    if messages:
+        return [banner + messages[0]] + messages[1:]
+    return [banner]
+
+
+def _apply_backfill_email_banner(email_content: EmailRenderResult, ctx: BackfillContext) -> EmailRenderResult:
+    """Prepend a backfill warning block and update the subject line."""
+    gen_str = ctx.generated_at_local.strftime("%Y-%m-%d %H:%M")
+    session_str = ctx.session_date.strftime("%a %d %b %Y")
+    plain_banner = (
+        "HISTORICAL BACKFILL - NOT LIVE\n"
+        f"Original session date: {session_str}\n"
+        f"Generated: {gen_str} {ctx.timezone_name}\n"
+        "Data: latest available provider data, not the original live session snapshot.\n\n"
+        "This report approximates the missed session. It should not be treated as a "
+        "real-time reconstruction of the original session window.\n"
+        f"{'=' * 64}\n\n"
+    )
+    html_banner = (
+        '<div style="background:#fff3cd;border-left:4px solid #ffc107;'
+        'padding:12px 16px;margin-bottom:16px;font-family:Arial,sans-serif;font-size:13px;">'
+        "<strong>HISTORICAL BACKFILL - NOT LIVE</strong><br>"
+        f"Original session date: {session_str}<br>"
+        f"Generated: {gen_str} {ctx.timezone_name}<br>"
+        "Data basis: latest available provider data, not the original live session snapshot.<br><br>"
+        "<em>This report approximates the missed session. It should not be treated as a "
+        "real-time reconstruction of the original session window.</em>"
+        "</div>"
+    )
+    return EmailRenderResult(
+        subject=f"[BACKFILL] {email_content.subject}",
+        plain_text=plain_banner + email_content.plain_text,
+        html_body=html_banner + email_content.html_body,
+        inline_assets=email_content.inline_assets,
+    )
 
 
 def _allowed_sessions_for_mode(mode: str) -> set[str]:
@@ -626,6 +691,7 @@ def run_morning_briefing(
     command_source: str = "cli",
     force_send: bool = False,
     override_suppress_materiality: bool = False,
+    backfill_context: BackfillContext | None = None,
 ) -> None:
     """Generate and deliver the morning briefing."""
     settings = settings or get_settings()
@@ -759,6 +825,9 @@ def run_morning_briefing(
         shadow_mode_override=llm_shadow_override,
     )
     active_email_content = llm_decision.active_email
+    if backfill_context is not None:
+        messages = _apply_backfill_telegram_banner(messages, backfill_context)
+        active_email_content = _apply_backfill_email_banner(active_email_content, backfill_context)
     if settings.show_output and llm_decision.shadow_preview:
         _print_email_output(
             llm_decision.shadow_preview.subject,
@@ -785,10 +854,11 @@ def run_morning_briefing(
         _send_telegram_chart_preview(messenger, briefing.chart_assets, settings)
     canonical_session_key = briefing.session_key or session_key
     delivery_msg_type = canonical_session_message_key(canonical_session_key)
+    idempotency_date = backfill_context.session_date if backfill_context is not None else local_now.date()
     session_delivery_context = SessionDeliveryContext(
         profile_name=profile.name,
         session_key=canonical_session_key,
-        local_date=local_now.date(),
+        local_date=idempotency_date,
         command_source=command_source,
         force_send=force_send,
     )
@@ -954,14 +1024,20 @@ def _channel_send_states_today(
 
 
 def _parse_catch_up_date(date_str: str, *, local_now: "datetime") -> date:
-    """Parse today|yesterday|YYYY-MM-DD into a date in the profile timezone."""
+    """Parse today|yesterday|YYYY-MM-DD into a date. Raises ValueError for future dates."""
     s = (date_str or "today").strip().lower()
     if s == "today":
         return local_now.date()
     if s == "yesterday":
         return (local_now - timedelta(days=1)).date()
     from datetime import date as _date
-    return _date.fromisoformat(s)
+    parsed = _date.fromisoformat(s)
+    if parsed > local_now.date():
+        raise ValueError(
+            f"Cannot target a future date ({parsed.isoformat()}). "
+            "Catch-up and backfill only work for today or past dates."
+        )
+    return parsed
 
 
 def run_catch_up(
@@ -1051,7 +1127,14 @@ def run_catch_up(
                 })
                 continue
 
-        logger.info("Catch-up: sending | session=%s force_all=%s ignore_materiality=%s", session_key, force_all, ignore_materiality)
+        backfill_ctx: BackfillContext | None = None
+        if is_past_date:
+            backfill_ctx = BackfillContext(
+                session_date=target_date,
+                generated_at_local=local_now,
+                timezone_name=timezone_name,
+            )
+        logger.info("Catch-up: sending | session=%s force_all=%s ignore_materiality=%s backfill=%s", session_key, force_all, ignore_materiality, is_past_date)
         run_morning_briefing(
             settings,
             auto_route_session=False,
@@ -1060,6 +1143,7 @@ def run_catch_up(
             force_send=force_all,
             override_suppress_materiality=ignore_materiality,
             command_source=command_source,
+            backfill_context=backfill_ctx,
         )
         summary.append({
             "session": session_key,
