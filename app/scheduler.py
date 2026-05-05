@@ -5,16 +5,19 @@ Timezone-aware, market-session-aware, weekday-only by default.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytz
 import yaml
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
+from app.db.session import init_db
 from app.logger import get_logger
-from app.main import run_breaking_check, run_session_brief
+from app.main import run_breaking_check, run_catch_up, run_session_brief
+from app.personalization.user_profile import load_user_profile
 from app.settings import Settings, get_settings
 
 try:
@@ -98,6 +101,65 @@ def _load_schedule_config(settings: Settings) -> dict:
     return {}
 
 
+def _run_startup_catchup(settings: Settings) -> None:
+    """Send any sessions that elapsed today before the scheduler started.
+
+    If the machine was off or the scheduler was down during a session window,
+    the normal polling loop would never fire for it. This runs once at startup
+    to fill the gap using the existing catch-up and idempotency infrastructure,
+    so already-sent sessions are never double-delivered.
+
+    Skipped on weekends, dry-run, and when no session windows have elapsed yet.
+    Any failure is logged and the scheduler continues regardless.
+    """
+    if settings.dry_run:
+        logger.info("Startup catch-up: skipped (dry_run=True).")
+        return
+
+    try:
+        init_db()
+        profile = load_user_profile(settings)
+        tz = ZoneInfo(profile.timezone or settings.timezone)
+        local_now = datetime.now(timezone.utc).astimezone(tz)
+
+        if local_now.weekday() >= 5:
+            logger.info("Startup catch-up: skipped (weekend — %s).", local_now.strftime("%A"))
+            return
+
+        logger.info(
+            "Startup catch-up: checking for elapsed-but-unsent sessions on %s at %s...",
+            local_now.date().isoformat(),
+            local_now.strftime("%H:%M"),
+        )
+
+        summary = run_catch_up(
+            settings,
+            target_date_str="today",
+            force_all=False,
+            ignore_materiality=False,
+            active_mode=False,
+            command_source="scheduler",
+        )
+
+        sent = [r for r in summary if r["action"] == "sent"]
+        already = [r for r in summary if r["action"] == "already_sent"]
+        skipped = [r for r in summary if r["action"] == "skipped"]
+
+        if sent:
+            for r in sent:
+                logger.info("Startup catch-up sent missed session: %s", r["session"])
+        else:
+            logger.info("Startup catch-up: no missed sessions found.")
+
+        logger.info(
+            "Startup catch-up complete | sent=%d already_sent=%d skipped=%d",
+            len(sent), len(already), len(skipped),
+        )
+
+    except Exception:
+        logger.exception("Startup catch-up failed — scheduler will continue normally.")
+
+
 def start_scheduler() -> None:
     """Build and start the scheduler (blocking)."""
     settings = get_settings()
@@ -116,6 +178,9 @@ def start_scheduler() -> None:
             )
             lock_handle.close()
             return
+
+    _run_startup_catchup(settings)
+
     scheduler = build_scheduler(settings)
     logger.info("Starting scheduler (tz=%s, dry_run=%s)...", settings.timezone, settings.dry_run)
     try:
