@@ -1193,5 +1193,229 @@ def schedule_status(ctx, profile_name: str):
             click.echo(f"    {sk:<22} {ch:<10} {state_str}")
 
 
+@cli.group("snapshots")
+def snapshots_group():
+    """Read and manage live session archive snapshots (Phase 8.9 Lite)."""
+
+
+@snapshots_group.command("list")
+@click.option(
+    "--date",
+    "target_date",
+    default="today",
+    show_default=True,
+    help="Date to inspect: today | yesterday | YYYY-MM-DD.",
+)
+@click.option(
+    "--profile",
+    "profile_name",
+    default="default_user",
+    show_default=True,
+    help="Profile to inspect.",
+)
+@click.pass_context
+def snapshots_list(ctx, target_date: str, profile_name: str):
+    """List live session snapshots stored for a given date.
+
+    Only scheduler-generated sessions appear here. Backfills and dry runs
+    are not stored.
+
+    Examples:
+      python -m app.cli snapshots list --date today
+      python -m app.cli snapshots list --date yesterday
+      python -m app.cli snapshots list --date 2026-05-05
+    """
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    from app.briefing.session_snapshot_service import list_session_snapshots
+    from app.db.session import init_db
+
+    init_db()
+    settings = ctx.obj["settings"]
+    tz = ZoneInfo(settings.timezone or "Europe/Madrid")
+    local_now = datetime.now(timezone.utc).astimezone(tz)
+
+    s = (target_date or "today").strip().lower()
+    if s == "today":
+        d = local_now.date()
+    elif s == "yesterday":
+        d = (local_now - timedelta(days=1)).date()
+    else:
+        from datetime import date as _date
+        try:
+            d = _date.fromisoformat(s)
+        except ValueError as exc:
+            raise click.ClickException(f"Invalid date: {target_date!r}. Use today, yesterday, or YYYY-MM-DD.") from exc
+
+    rows = list_session_snapshots(profile_name, d)
+    if not rows:
+        click.echo(f"No snapshots stored for {d.isoformat()} (profile: {profile_name}).")
+        click.echo("Snapshots are only saved for live scheduler runs (not dry runs, backfills, or manual sends).")
+        return
+
+    click.echo(f"\nSession snapshots for {d.isoformat()} (profile: {profile_name})")
+    click.echo(f"  {'Session':<22} {'Generated':<18} {'Delivery':<10} {'Channels':<24} {'Events'}")
+    click.echo(f"  {'-'*22} {'-'*18} {'-'*10} {'-'*24} {'-'*6}")
+    for row in rows:
+        channels = ", ".join(
+            f"{ch}:{st}" for ch, st in (row.get("delivery_channels") or {}).items()
+        )
+        delivery = "OK" if row["delivery_success"] else "FAILED"
+        click.echo(
+            f"  {row['session_key']:<22} {row['generated_at_local']:<18} "
+            f"{delivery:<10} {channels:<24} {row['events_count']}"
+        )
+    click.echo(f"\n  {len(rows)} session(s) found.")
+
+
+@snapshots_group.command("show")
+@click.option(
+    "--date",
+    "target_date",
+    required=True,
+    help="Date: today | yesterday | YYYY-MM-DD.",
+)
+@click.option(
+    "--session",
+    "session_key",
+    required=True,
+    type=click.Choice(
+        ["morning", "europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"],
+        case_sensitive=False,
+    ),
+    help="Session key to show.",
+)
+@click.option(
+    "--format",
+    "output_format",
+    default="telegram",
+    show_default=True,
+    type=click.Choice(["telegram", "email-text", "email-html", "summary"], case_sensitive=False),
+    help="Output format.",
+)
+@click.option(
+    "--profile",
+    "profile_name",
+    default="default_user",
+    show_default=True,
+    help="Profile to inspect.",
+)
+@click.pass_context
+def snapshots_show(ctx, target_date: str, session_key: str, output_format: str, profile_name: str):
+    """Show the stored content of a live session snapshot.
+
+    Reads from SQLite only. No providers are called and nothing is regenerated.
+
+    Examples:
+      python -m app.cli snapshots show --date yesterday --session morning
+      python -m app.cli snapshots show --date yesterday --session us_pre_open --format email-text
+      python -m app.cli snapshots show --date 2026-05-05 --session closing_wrap --format summary
+    """
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    from app.briefing.session_snapshot_service import get_session_snapshot
+    from app.db.session import init_db
+
+    init_db()
+    settings = ctx.obj["settings"]
+    tz = ZoneInfo(settings.timezone or "Europe/Madrid")
+    local_now = datetime.now(timezone.utc).astimezone(tz)
+
+    s = (target_date or "today").strip().lower()
+    if s == "today":
+        d = local_now.date()
+    elif s == "yesterday":
+        d = (local_now - timedelta(days=1)).date()
+    else:
+        from datetime import date as _date
+        try:
+            d = _date.fromisoformat(s)
+        except ValueError as exc:
+            raise click.ClickException(f"Invalid date: {target_date!r}. Use today, yesterday, or YYYY-MM-DD.") from exc
+
+    snap = get_session_snapshot(profile_name, d, session_key)
+    if snap is None:
+        raise click.ClickException(
+            f"No snapshot found for {session_key} on {d.isoformat()} (profile: {profile_name}). "
+            "Only scheduler-generated live sessions are archived."
+        )
+
+    click.echo(f"\n{'='*60}")
+    click.echo(f"Snapshot: {snap['session_title']} — {snap['local_date']} {snap['generated_at_local']} {snap['timezone_name']}")
+    click.echo(f"Source: {snap['source_type']} | Delivery: {'OK' if snap['delivery_success'] else 'FAILED'}")
+    channels_str = ", ".join(f"{ch}:{st}" for ch, st in snap.get("delivery_channels", {}).items())
+    click.echo(f"Channels: {channels_str or '(none)'} | Events: {snap['events_count']}")
+    click.echo(f"{'='*60}\n")
+
+    if output_format == "telegram":
+        if snap["telegram_text"]:
+            click.echo(snap["telegram_text"])
+        else:
+            click.echo("(no Telegram content stored)")
+
+    elif output_format == "email-text":
+        if snap["email_subject"]:
+            click.echo(f"Subject: {snap['email_subject']}\n")
+            click.echo(snap["email_plain_text"] or "(no plain text stored)")
+        else:
+            click.echo("(no email content stored)")
+
+    elif output_format == "email-html":
+        if snap["email_html"]:
+            click.echo(snap["email_html"])
+        else:
+            click.echo("(no HTML email stored — check snapshots.store_email_html preference)")
+
+    elif output_format == "summary":
+        click.echo("Market summary:")
+        for q in snap.get("market_summary") or []:
+            sign = "+" if q.get("change_pct", 0) >= 0 else ""
+            click.echo(f"  {q.get('display_name', q.get('symbol')):<30} {sign}{q.get('change_pct', 0):.2f}%")
+        click.echo("\nMacro summary:")
+        for m in snap.get("macro_summary") or []:
+            click.echo(f"  {m.get('name', ''):<35} {m.get('value', '')}")
+        if snap.get("portfolio_summary"):
+            click.echo("\nPortfolio focus:")
+            for p in snap["portfolio_summary"]:
+                tickers = ", ".join(p.get("tickers") or [])
+                click.echo(f"  {p.get('title', '')[:80]}" + (f"  [{tickers}]" if tickers else ""))
+
+
+@snapshots_group.command("prune")
+@click.option(
+    "--retention-days",
+    type=int,
+    default=30,
+    show_default=True,
+    help="Delete snapshots older than this many days.",
+)
+@click.option(
+    "--profile",
+    "profile_name",
+    default="default_user",
+    show_default=True,
+    help="Profile to prune.",
+)
+@click.pass_context
+def snapshots_prune(ctx, retention_days: int, profile_name: str):
+    """Delete snapshots older than retention_days.
+
+    Pruning also runs automatically after each live scheduler session send,
+    so this command is mainly useful for manual cleanup or changing retention.
+
+    Examples:
+      python -m app.cli snapshots prune --retention-days 30
+      python -m app.cli snapshots prune --retention-days 14
+    """
+    from app.briefing.session_snapshot_service import prune_old_snapshots
+    from app.db.session import init_db
+
+    init_db()
+    count = prune_old_snapshots(profile_name, retention_days=retention_days)
+    click.echo(f"Pruned {count} snapshot(s) older than {retention_days} day(s) for profile '{profile_name}'.")
+
+
 if __name__ == "__main__":
     cli()

@@ -55,6 +55,41 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 - **Phase 8.6 QA polish:** deterministic watchlist move color scaling (magnitude-aware red/green intensity), stricter healthcare hard-anchor suppression (blocks generic AI/power overmatch), canonical commodity consistency lints across chart specs, improved all-negative P&L wording, and replay end-summary counters (generated/sent/suppressed/held/future + provider calls made/avoided + healthcare include/suppress counts)
 - **Healthcare vertical (optional):** deterministic healthcare taxonomy/classifier/scorer/section-builder, Telegram+email rendering, breaking biotech label path, and configurable preferences in `configs/healthcare.yaml`
 
+### Automatic live session snapshots
+
+Briefly stores a lightweight archive of every session briefing that the scheduler sends automatically. Each snapshot captures exactly what was generated and delivered: Telegram text, email subject and body, compact market/macro/portfolio summaries, chart selection, delivery status per channel, and timestamp.
+
+- Only live scheduler sessions are stored. Backfills, dry runs, day-replay, manual `session-send`, and forced resends are excluded.
+- One row per session per day in SQLite. No cloud backend, no external writes.
+- Default retention: 30 days. Old snapshots are deleted automatically after each scheduler run.
+- Snapshots are not historical reconstruction: they record what was generated at send time using the data available then.
+- The archive starts accumulating from the moment you enable the scheduler.
+
+```bash
+# List what was stored for a date
+python -m app.cli snapshots list --date yesterday
+python -m app.cli snapshots list --date 2026-05-05
+
+# Read the exact content of a stored session
+python -m app.cli snapshots show --date yesterday --session morning
+python -m app.cli snapshots show --date yesterday --session us_pre_open --format email-text
+python -m app.cli snapshots show --date yesterday --session closing_wrap --format summary
+
+# Available formats: telegram | email-text | email-html | summary
+# Manual prune
+python -m app.cli snapshots prune --retention-days 30
+python -m app.cli snapshots prune --retention-days 14
+```
+
+Snapshot preferences (override via `prefs-set`):
+
+```bash
+python -m app.cli prefs-set --key snapshots.enabled --value true
+python -m app.cli prefs-set --key snapshots.retention_days --value 30
+python -m app.cli prefs-set --key snapshots.store_email_html --value true
+python -m app.cli prefs-set --key snapshots.store_failed_attempts --value true
+```
+
 ### Day Replay quickstart (manual QA)
 
 - Dry run summary only:
@@ -459,6 +494,14 @@ python -m app.cli backfill --date 2026-05-05 --active-mode --ignore-materiality
 
 # Scheduler diagnostics
 python -m app.cli schedule-status
+
+# Live session snapshots (what was actually sent by the scheduler)
+python -m app.cli snapshots list --date yesterday
+python -m app.cli snapshots list --date 2026-05-05
+python -m app.cli snapshots show --date yesterday --session morning
+python -m app.cli snapshots show --date yesterday --session us_pre_open --format email-text
+python -m app.cli snapshots show --date yesterday --session closing_wrap --format summary
+python -m app.cli snapshots prune --retention-days 30
 
 # Manual day/session replay QA
 python -m app.cli day-replay --date today --show-output
@@ -1034,6 +1077,7 @@ python -m app.cli simulation runs --profile default_user
 | 7D | Complete | Multi-Currency: ticker-suffix currency inference, FX rate cache, exposure breakdown, hedge recommendations |
 | 8.7 | Complete | Session delivery hardening: per-session idempotency, `session-send`, `catch-up`, `schedule-status` commands, `session_mode`/`suppress_low_materiality` preference keys, 10 new idempotency and catch-up tests |
 | 8.8 | Complete | Historical backfill labelling: `backfill` command alias, `HISTORICAL BACKFILL - NOT LIVE` banners on all channels, `[BACKFILL]` email subject prefix, future-date rejection, idempotency keyed to original session date, 20 new backfill unit tests |
+| 8.9 Lite | Complete | Automatic live session snapshot archive: retention-controlled local SQLite storage for all six scheduler-generated sessions, `snapshots list/show/prune` CLI, non-blocking capture, secrets-clean, 45 new tests |
 | 5.7B | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---

@@ -271,6 +271,10 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "healthcare.minimum_severity_morning": _normalize_healthcare_severity,
     "healthcare.minimum_severity_intraday": _normalize_healthcare_severity,
     "healthcare.minimum_severity_breaking": _normalize_healthcare_severity,
+    "snapshots.enabled": _normalize_bool,
+    "snapshots.retention_days": _normalize_positive_int,
+    "snapshots.store_email_html": _normalize_bool,
+    "snapshots.store_failed_attempts": _normalize_bool,
 }
 
 

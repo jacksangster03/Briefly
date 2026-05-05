@@ -730,3 +730,48 @@ class FXConfig(Base):
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Phase 8.9 Lite: Live session archive snapshots
+# ---------------------------------------------------------------------------
+
+class SessionArchiveSnapshot(Base):
+    """Lightweight archive of live scheduler-generated session briefings.
+
+    One row per profile/date/session. Only source_type='live_scheduler' rows
+    are written by default. Backfills, dry runs, replays and manual sends are
+    excluded. Pruned automatically after retention_days.
+    """
+
+    __tablename__ = "session_archive_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_name", "local_date", "session_key",
+            name="uq_session_archive_profile_date_session",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    local_date = Column(Date, nullable=False, index=True)
+    session_key = Column(String(50), nullable=False, index=True)
+    session_title = Column(String(120), nullable=True)
+    generated_at_utc = Column(DateTime, nullable=True)
+    generated_at_local_str = Column(String(32), nullable=True)   # "2026-05-06 10:29"
+    timezone_name = Column(String(80), nullable=True)
+    source_type = Column(String(30), nullable=False, default="live_scheduler")
+    delivery_attempted = Column(Boolean, default=True)
+    delivery_success = Column(Boolean, default=False)
+    delivery_channels_json = Column(JSON, nullable=True)   # {"telegram": "sent", "email": "skipped"}
+    delivery_status_json = Column(JSON, nullable=True)     # {"telegram": "delivered", ...}
+    telegram_text = Column(Text, nullable=True)
+    email_subject = Column(String(300), nullable=True)
+    email_plain_text = Column(Text, nullable=True)
+    email_html = Column(Text, nullable=True)
+    market_summary_json = Column(JSON, nullable=True)      # compact index quote list
+    macro_summary_json = Column(JSON, nullable=True)       # compact macro series list
+    portfolio_summary_json = Column(JSON, nullable=True)   # compact portfolio focus list
+    chart_selection_json = Column(JSON, nullable=True)     # compact chart selection list
+    events_count = Column(Integer, nullable=True, default=0)
+    created_at = Column(DateTime, default=_utcnow, index=True)

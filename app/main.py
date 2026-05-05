@@ -950,6 +950,79 @@ def run_morning_briefing(
         briefing.events_sent,
     )
 
+    # --- Phase 8.9 Lite: live session archive snapshot ----------------------
+    try:
+        from app.briefing.session_snapshot_service import (
+            SnapshotCaptureRequest,
+            _compact_chart_selection,
+            _compact_macro_summary,
+            _compact_market_summary,
+            _compact_portfolio_summary,
+            create_session_snapshot,
+            prune_old_snapshots,
+            should_store_snapshot,
+            source_type_from_command_source,
+        )
+        from app.personalization.preferences_service import get_preferences
+
+        snap_prefs = get_preferences(profile.name)
+        snapshots_enabled = bool(snap_prefs.get("snapshots.enabled", True))
+        store_email_html = bool(snap_prefs.get("snapshots.store_email_html", True))
+        store_failed = bool(snap_prefs.get("snapshots.store_failed_attempts", True))
+        retention_days = int(snap_prefs.get("snapshots.retention_days", 30))
+
+        delivery_was_attempted = any(item.get("attempted") for item in delivery_plan)
+
+        if should_store_snapshot(
+            command_source=command_source,
+            dry_run=settings.dry_run,
+            is_backfill=backfill_context is not None,
+            session_key=canonical_session_key,
+            delivery_attempted=delivery_was_attempted,
+            snapshots_enabled=snapshots_enabled,
+        ) and (delivered_ok or store_failed):
+            snap_req = SnapshotCaptureRequest(
+                profile_name=profile.name,
+                session_key=canonical_session_key,
+                session_title=briefing.session_title or session_title,
+                local_date=local_now.date(),
+                generated_at_utc=datetime.now(timezone.utc),
+                timezone_name=profile.timezone or settings.timezone,
+                source_type=source_type_from_command_source(
+                    command_source,
+                    is_backfill=backfill_context is not None,
+                    is_dry_run=settings.dry_run,
+                ),
+                delivery_attempted=delivery_was_attempted,
+                delivery_success=delivered_ok,
+                delivery_channels=channel_status,
+                delivery_reasons=channel_reason,
+                telegram_messages=messages,
+                email_subject=active_email_content.subject,
+                email_plain_text=active_email_content.plain_text,
+                email_html=active_email_content.html_body if store_email_html else "",
+                market_summary=_compact_market_summary(briefing),
+                macro_summary=_compact_macro_summary(briefing),
+                portfolio_summary=_compact_portfolio_summary(briefing),
+                chart_selection=_compact_chart_selection(briefing),
+                events_count=briefing.events_sent,
+                store_email_html=store_email_html,
+            )
+            saved = create_session_snapshot(snap_req)
+            if saved:
+                logger.debug(
+                    "Session archive snapshot saved | session=%s date=%s",
+                    canonical_session_key, local_now.date(),
+                )
+                pruned = prune_old_snapshots(profile.name, retention_days=retention_days)
+                if pruned:
+                    logger.debug(
+                        "Pruned %d old session archive snapshot(s) (retention_days=%d)",
+                        pruned, retention_days,
+                    )
+    except Exception:
+        logger.debug("Session archive snapshot failed (non-blocking)", exc_info=True)
+
 
 def run_session_brief(
     settings: Settings | None = None,
