@@ -128,6 +128,18 @@ def test_cabaletta_offering_classified_as_biotech_financing():
     assert classified.event_type == "biotech_financing"
 
 
+def test_generic_ai_capacity_story_never_gets_api_manufacturing_lens():
+    profile = _profile()
+    prefs = profile.healthcare_preferences
+    event = _evt(
+        "AI data-center capacity expands amid power constraints",
+        "Infrastructure capacity and energy demand are increasing for model training.",
+        source="newsapi",
+    )
+    classified = classify_healthcare_event(event, healthcare_prefs=prefs)
+    assert classified is None
+
+
 def test_portfolio_watchlist_ticker_gets_relevance_boost():
     prefs = _profile().healthcare_preferences
     profile = _profile()

@@ -167,6 +167,30 @@ def test_lints_flag_rates_conflict_and_proxy_scaled_index_level():
     assert any("Rates direction conflict" in warning for warning in warnings)
 
 
+def test_lints_flag_chart_commodity_mismatch_against_canonical():
+    briefing = MorningBriefing(
+        canonical_prices={
+            "WTI": {"change_percent": 0.97},
+            "BRENT": {"change_percent": 1.81},
+            "GOLD": {"change_percent": -1.32},
+        },
+        morning_chart_bundle={
+            "charts": [
+                {
+                    "chart_key": "oil_transmission_card",
+                    "series": [
+                        {"name": "WTI", "value": 0.97, "available": True},
+                        {"name": "Brent", "value": 0.00, "available": True},
+                        {"name": "Gold", "value": -1.32, "available": True},
+                    ],
+                }
+            ]
+        },
+    )
+    warnings = run_pre_send_lints(briefing, timezone_name="Europe/Madrid")
+    assert any("BRENT oil_transmission" in warning for warning in warnings)
+
+
 def test_canonical_price_resolver_does_not_overwrite_spx_with_spy_proxy():
     briefing = MorningBriefing(
         market_setup=MarketSetup(

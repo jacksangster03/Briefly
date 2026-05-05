@@ -265,6 +265,13 @@ def _normalize_inputs(
     growth_defensive = _avg_change(index_quotes, GROWTH_KEYS) - _avg_change(index_quotes, DEFENSIVE_KEYS)
     dispersion = max(0.0, max(us, eu, asia) - min(us, eu, asia))
 
+    ten_y_level = _canon_float("US10Y", "value")
+    two_y_level = _canon_float("US2Y", "value")
+    curve_level = _canon_float("US10Y2Y", "value")
+    ten_y_change = _canon_float("US10Y", "change")
+    two_y_change = _canon_float("US2Y", "change")
+    curve_change = _canon_float("US10Y2Y", "change")
+
     return {
         "us_avg": us,
         "eu_avg": eu,
@@ -280,12 +287,12 @@ def _normalize_inputs(
         "oil_delta_pct": _canon_float("WTI", "change_percent") if _canon_float("WTI", "change_percent") is not None else (float(oil.change_percent) if oil else None),
         "brent_delta_pct": _canon_float("BRENT", "change_percent") if _canon_float("BRENT", "change_percent") is not None else (float(brent.change_percent) if brent else None),
         "gold_delta_pct": _canon_float("GOLD", "change_percent") if _canon_float("GOLD", "change_percent") is not None else (float(gold.change_percent) if gold else None),
-        "ten_y_level": float(ten_y.value) if ten_y else None,
-        "two_y_level": float(two_y.value) if two_y else None,
-        "spread_level": float(spread.value) if spread else None,
-        "ten_y_change": float(ten_y.change) if ten_y and ten_y.change is not None else None,
-        "two_y_change": float(two_y.change) if two_y and two_y.change is not None else None,
-        "curve_change": float(spread.change) if spread and spread.change is not None else None,
+        "ten_y_level": ten_y_level if ten_y_level is not None else (float(ten_y.value) if ten_y else None),
+        "two_y_level": two_y_level if two_y_level is not None else (float(two_y.value) if two_y else None),
+        "spread_level": curve_level if curve_level is not None else (float(spread.value) if spread else None),
+        "ten_y_change": ten_y_change if ten_y_change is not None else (float(ten_y.change) if ten_y and ten_y.change is not None else None),
+        "two_y_change": two_y_change if two_y_change is not None else (float(two_y.change) if two_y and two_y.change is not None else None),
+        "curve_change": curve_change if curve_change is not None else (float(spread.change) if spread and spread.change is not None else None),
     }
 
 
@@ -1450,12 +1457,13 @@ def _oil_transmission_card_spec(briefing: MorningBriefing, metrics: dict[str, An
         verdict = "mixed transmission"
 
     rows = [
-        {"name": "WTI", "value": round(oil_v, 3)},
-        {"name": "Brent", "value": round(brent_v, 3)},
-        {"name": "XLE", "value": round(xle_v, 3)},
-        {"name": "VIX", "value": round(vix_v, 3)},
-        {"name": "Gold", "value": round(gold_v, 3)},
+        {"name": "WTI", "value": None if oil is None else round(oil_v, 3), "available": oil is not None},
+        {"name": "Brent", "value": None if brent is None else round(brent_v, 3), "available": brent is not None},
+        {"name": "XLE", "value": None if xle is None else round(xle_v, 3), "available": xle is not None},
+        {"name": "VIX", "value": None if vix is None else round(vix_v, 3), "available": vix is not None},
+        {"name": "Gold", "value": None if gold is None else round(gold_v, 3), "available": gold is not None},
     ]
+    brent_caption = f"Brent {brent_v:+.2f}%" if brent is not None else "Brent unavailable"
     return {
         "chart_key": "oil_transmission_card",
         "variant": "macro_transmission",
@@ -1463,12 +1471,17 @@ def _oil_transmission_card_spec(briefing: MorningBriefing, metrics: dict[str, An
         "reason_if_hidden": None,
         "title": "Oil Transmission",
         "caption": (
-            f"WTI {oil_v:+.2f}% / Brent {brent_v:+.2f}% with XLE {xle_v:+.2f}%, "
+            f"WTI {oil_v:+.2f}% / {brent_caption} with XLE {xle_v:+.2f}%, "
             f"VIX {vix_v:+.2f}% and gold {gold_v:+.2f}%: {verdict}."
         ),
         "series": rows,
         "annotations": [{"label": "verdict", "value": verdict}],
-        "meta": {"verdict": verdict},
+        "meta": {
+            "verdict": verdict,
+            "wti_pct": oil,
+            "brent_pct": brent,
+            "gold_pct": gold,
+        },
         "email_dimensions": {"width": 900, "height": 460},
     }
 
@@ -1778,19 +1791,20 @@ def _pnl_waterfall_spec(holdings_quotes: list[QuoteData], profile: UserProfile) 
             if positive_count == 0:
                 lens_hint = (
                     f" Main drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%; "
-                    f"no positive offset among displayed sleeves ({positive_count}/{len(bars)} positive)."
+                    "no displayed sleeve offset the decline. "
+                    f"Contribution breadth: {positive_count}/{len(bars)} positive."
                 )
             else:
                 lens_hint = (
                     f" Main drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}%; "
                     f"largest positive offset: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}% "
-                    f"({positive_count}/{len(bars)} positive)."
+                    f"(contribution breadth: {positive_count}/{len(bars)} positive)."
                 )
         elif total_contrib > 0:
             lens_hint = (
                 f" Main contributor: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}%; "
                 f"largest drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}% "
-                f"({positive_count}/{len(bars)} positive)."
+                f"(contribution breadth: {positive_count}/{len(bars)} positive)."
             )
     return {
         "chart_key": "pnl_attribution_waterfall",
@@ -1982,10 +1996,25 @@ def _impulse_read_line(points: list[dict[str, Any]]) -> str:
         return f"{row['name']} {float(row.get('impulse') or 0.0):+.2f}{unit}"
 
     if strongest_pos and strongest_neg:
+        wti_row = next(
+            (
+                row for row in positives
+                if "WTI" in str(row.get("name") or "").upper()
+                and abs(float(row.get("impulse") or 0.0)) >= 2.0
+            ),
+            None,
+        )
+        if wti_row is not None and "10Y" in str(strongest_pos.get("name") or "").upper():
+            return (
+                "Rates and oil are the main upward pressure points: "
+                f"{_fmt(strongest_pos)} and {_fmt(wti_row)}. "
+                f"Gold is the largest downside move at {float(strongest_neg.get('impulse') or 0.0):+.2f}%. "
+                "Chart is normalised for comparison; labels show raw moves."
+            )
         return (
             f"Largest upward move: {_fmt(strongest_pos)}. "
             f"Largest downside move: {_fmt(strongest_neg)}. "
-            "Chart is normalised; labels show raw moves."
+            "Chart is normalised for comparison; labels show raw moves."
         )
     driver = max(points, key=lambda row: abs(float(row.get("impulse") or 0.0)))
     return f"On a normalised impulse basis, the largest move is {_fmt(driver)}; the rest of the strip is comparatively muted."

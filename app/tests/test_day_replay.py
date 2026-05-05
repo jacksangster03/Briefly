@@ -123,6 +123,8 @@ def test_day_replay_show_output_prints_preview(monkeypatch, capsys):
     captured = capsys.readouterr().out
     assert "[OUTPUT] day_replay:morning" in captured
     assert "REPLAY MODE: session slot simulated at" in captured
+    assert "Summary:" in captured
+    assert "provider_calls_avoided=" in captured
 
 
 def test_day_replay_send_test_labels_without_sentmessage_writes(monkeypatch, validation_isolated_db):

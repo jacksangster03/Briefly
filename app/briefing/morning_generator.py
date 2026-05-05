@@ -226,6 +226,13 @@ WATCHLIST_SOFT_PENALTY_PATTERNS = (
     "price target",
     "wall street",
     "outraged",
+    "smart buy",
+    "risky move",
+    "losing its edge",
+    "should you buy",
+    "what's behind",
+    "no-brainer",
+    "price prediction",
 )
 WATCHLIST_SOFT_PENALTY_REGEXES = [
     re.compile(r"\b(?:best|top|worst)\b.{0,35}\bstock\b"),
@@ -244,6 +251,13 @@ TRUST_HARD_BLOCK_PATTERNS = (
     "still paying",
     "salary",
     "your friends will find out and it will be embarrassing",
+    "smart buy",
+    "risky move",
+    "losing its edge",
+    "should you buy",
+    "what's behind",
+    "no-brainer",
+    "price prediction",
 )
 TRUST_SOFT_PENALTY_PATTERNS = (
     "dirt cheap",
@@ -653,7 +667,7 @@ class MorningBriefingGenerator:
             briefing.watchlist_events = list(briefing.watchlist_events[:4])
             briefing.sector_scan = []
             briefing.macro_context = []
-            briefing.commodity_strip = list(briefing.commodity_strip[:2])
+            briefing.commodity_strip = list(briefing.commodity_strip[:3])
             self._trim_market_snapshot_quotes(briefing, max_index=6, max_macro=4)
             if briefing.healthcare_intelligence and briefing.healthcare_intelligence.items:
                 briefing.healthcare_intelligence.items = list(briefing.healthcare_intelligence.items[:3])
@@ -1064,24 +1078,36 @@ class MorningBriefingGenerator:
                 vix_level = float(quote.current_price or 0.0)
                 break
 
-        oil_delta = 0.0
-        oil_level = 0.0
-        gold_delta = 0.0
+        canonical = dict(briefing.canonical_prices or {})
+
+        def _canon_float(key: str, field: str) -> float | None:
+            row = dict(canonical.get(key) or {})
+            val = row.get(field)
+            if val is None:
+                return None
+            try:
+                return float(val)
+            except Exception:
+                return None
+
+        oil_delta = _canon_float("WTI", "change_percent") or 0.0
+        oil_level = _canon_float("WTI", "value") or 0.0
+        gold_delta = _canon_float("GOLD", "change_percent") or 0.0
         usd_delta = 0.0
-        brent_delta = 0.0
-        brent_level = 0.0
+        brent_delta = _canon_float("BRENT", "change_percent") or 0.0
+        brent_level = _canon_float("BRENT", "value") or 0.0
         natgas_delta = 0.0
         for quote in briefing.market_setup.macro_quotes:
             text = f"{quote.display_name} {quote.symbol}".lower()
-            if "wti" in text or "crude" in text:
+            if ("wti" in text or "crude" in text) and oil_level <= 0:
                 oil_delta = float(quote.change_percent or 0.0)
                 oil_level = float(quote.current_price or 0.0)
-            elif "brent" in text:
+            elif "brent" in text and brent_level <= 0:
                 brent_delta = float(quote.change_percent or 0.0)
                 brent_level = float(quote.current_price or 0.0)
             elif "natural gas" in text or "ng1:com" in text or "ng=f" in text:
                 natgas_delta = float(quote.change_percent or 0.0)
-            elif "gold" in text:
+            elif "gold" in text and abs(gold_delta) < 1e-12:
                 gold_delta = float(quote.change_percent or 0.0)
             elif "usd" in text or "dollar" in text or "dxy" in text:
                 usd_delta = float(quote.change_percent or 0.0)
@@ -1168,8 +1194,13 @@ class MorningBriefingGenerator:
             )
             if recent_geo_context and energy_channel_active and (vix_rising or europe_avg <= -0.4):
                 level = "LOW-TO-MODERATE"
+                brent_note = (
+                    f"Brent {brent_delta:+.2f}%"
+                    if (brent_level > 0 or abs(brent_delta) > 1e-12)
+                    else "Brent unavailable"
+                )
                 summary = (
-                    f"Geo risk LOW-TO-MODERATE, market-contained: WTI {oil_delta:+.2f}% / Brent {brent_delta:+.2f}%"
+                    f"Geo risk LOW-TO-MODERATE, market-contained: WTI {oil_delta:+.2f}% / {brent_note}"
                     f"{' / NatGas ' + format(natgas_delta, '+.2f') + '%' if natgas_delta else ''}, "
                     f"VIX {vix_display}, gold {gold_delta:+.2f}%, with recent Middle East/Hormuz context still active."
                 )
@@ -1488,7 +1519,7 @@ class MorningBriefingGenerator:
             if article_type in {"preview", "opinion", "seo", "listicle"}:
                 if not (has_catalyst and has_relevant_ticker and trusted_source):
                     return False
-            if "hard catalyst update under review" in text_lower:
+            if "awaiting verified operating details" in text_lower:
                 return False
 
         if (

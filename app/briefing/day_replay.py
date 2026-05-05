@@ -66,6 +66,11 @@ class DayReplayResult:
     replay_namespace: str
     replay_data_mode: str = "latest_available"
     provider_cache_hits: int = 0
+    provider_cache_misses: int = 0
+    replay_summary_counts: dict[str, int] = field(default_factory=dict)
+    chart_counts_by_session: dict[str, int] = field(default_factory=dict)
+    healthcare_items_included: int = 0
+    healthcare_items_suppressed: int = 0
 
 
 _REPLAY_POINTS: tuple[tuple[str, time], ...] = (
@@ -429,6 +434,28 @@ def _print_replay_summary(result: DayReplayResult) -> None:
             print(base + extra)
         else:
             print(base + f" {row.future_reason}")
+    counts = result.replay_summary_counts or {}
+    print("Summary:")
+    print(
+        "  generated="
+        f"{counts.get('generated_only', 0)} "
+        f"test_sent={counts.get('test_sent', 0)} "
+        f"suppressed={counts.get('suppressed', 0)} "
+        f"held={counts.get('held', 0)} "
+        f"future={counts.get('future', 0)}"
+    )
+    print(
+        "  provider_calls="
+        f"{result.provider_cache_misses} "
+        f"provider_calls_avoided={result.provider_cache_hits}"
+    )
+    if result.chart_counts_by_session:
+        rendered = ", ".join(f"{k}:{v}" for k, v in result.chart_counts_by_session.items())
+        print(f"  chart_counts={rendered}")
+    print(
+        "  healthcare_items="
+        f"included:{result.healthcare_items_included} suppressed:{result.healthcare_items_suppressed}"
+    )
 
 
 def run_day_replay(
@@ -487,6 +514,10 @@ def run_day_replay(
     channels = _parse_channels(send_test, email_only=email_only, telegram_only=telegram_only)
     mode = "send-test" if channels else "dry-run"
     data_note = "latest available quotes/news unless stored intraday snapshots exist"
+    summary_counts: dict[str, int] = {"generated_only": 0, "test_sent": 0, "suppressed": 0, "held": 0, "future": 0}
+    chart_counts_by_session: dict[str, int] = {}
+    healthcare_included = 0
+    healthcare_suppressed = 0
 
     for row in plan:
         if not row.eligible:
@@ -555,6 +586,10 @@ def run_day_replay(
         row.telegram_chars = sum(len(msg) for msg in telegram_messages)
         row.email_chars = len(email_content.plain_text or "")
         row.warnings.append(_provider_note(briefing))
+        chart_counts_by_session[row.session_key] = len(row.selected_charts)
+        if briefing.healthcare_intelligence:
+            healthcare_included += len(briefing.healthcare_intelligence.items or [])
+            healthcare_suppressed += int(briefing.healthcare_intelligence.suppressed_count or 0)
 
         if should_send:
             row.send_action = "generated_only"
@@ -595,8 +630,10 @@ def run_day_replay(
                     channels=channels,
                 )
                 row.send_action = "test_sent" if row.sent_channels else "generated_only"
+            summary_counts[row.send_action] = summary_counts.get(row.send_action, 0) + 1
         else:
             row.send_action = "suppressed" if materiality.decision == "suppress" else "held"
+            summary_counts[row.send_action] = summary_counts.get(row.send_action, 0) + 1
             if show_output:
                 from app.main import _print_terminal_output
 
@@ -608,6 +645,10 @@ def run_day_replay(
                     f"day_replay:{row.session_key}",
                 )
 
+    for row in plan:
+        if not row.eligible:
+            summary_counts["future"] = summary_counts.get("future", 0) + 1
+
     result = DayReplayResult(
         replay_date=target_date,
         timezone_name=tz_name,
@@ -618,6 +659,11 @@ def run_day_replay(
         replay_namespace=replay_namespace,
         replay_data_mode="latest_available",
         provider_cache_hits=sum(int(stat.get("hits", 0)) for stat in cache_stats),
+        provider_cache_misses=sum(int(stat.get("misses", 0)) for stat in cache_stats),
+        replay_summary_counts=summary_counts,
+        chart_counts_by_session=chart_counts_by_session,
+        healthcare_items_included=healthcare_included,
+        healthcare_items_suppressed=healthcare_suppressed,
     )
     _print_replay_summary(result)
     logger.info(

@@ -132,6 +132,15 @@ class TestHeadlineHygiene:
         assert "fantastic news" not in out.lower()
         assert out.startswith("LLY:")
 
+    def test_neutralize_hard_catalyst_avoids_placeholder_text(self):
+        out = neutralize_headline(
+            "Should You Buy Biogen Before Earnings?",
+            event_type="earnings",
+            ticker="BIIB",
+        )
+        assert "hard catalyst update under review" not in out.lower()
+        assert "awaiting verified operating details" in out.lower()
+
     def test_section_fit_global_macro_geo(self):
         evt = NormalisedEvent(
             title="Fed signals slower pace of cuts as yields rise",

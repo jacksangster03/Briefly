@@ -44,7 +44,7 @@ _THEME_ALIASES = {
 _HEALTHCARE_TOKENS = (
     "fda",
     "ema",
-    "trial",
+    "clinical trial",
     "phase 3",
     "biotech",
     "pharma",
@@ -53,9 +53,8 @@ _HEALTHCARE_TOKENS = (
     "diabetes",
     "oncology",
     "cdmo",
-    "api",
+    "active pharmaceutical ingredient",
     "peptide",
-    "clinical",
 )
 
 _HEALTHCARE_SUBSECTOR_TERMS = (
@@ -66,11 +65,16 @@ _HEALTHCARE_SUBSECTOR_TERMS = (
     "hospital",
     "payer",
     "reimbursement",
-    "api",
+    "active pharmaceutical ingredient",
+    "api supply",
     "cdmo",
     "fill-finish",
     "sterile manufacturing",
     "drug shortage",
+    "pharma manufacturing",
+    "drug manufacturing",
+    "peptide synthesis",
+    "glp-1 supply",
 )
 
 _CLINICAL_ANCHOR_TERMS = (
@@ -92,6 +96,18 @@ _GENERIC_TECH_HEALTH_NOISE = (
     "radiologist",
     "radiology jobs",
     "replace radiologists",
+)
+
+_HEALTHCARE_ANCHOR_REGEXES = (
+    re.compile(r"\b(fda|ema|mhra|chmp|pdufa|crl)\b", re.I),
+    re.compile(r"\b(phase\s*(i{1,3}|1|2|3)|pivotal|topline|endpoint|trial halt)\b", re.I),
+    re.compile(r"\b(glp-?1|incretin|peptide|tirzepatide|semaglutide|wegovy|ozempic|mounjaro|zepbound)\b", re.I),
+    re.compile(r"\b(cdmo|fill-?finish|sterile manufacturing|active pharmaceutical ingredient|api supply)\b", re.I),
+    re.compile(r"\b(pharma|biotech|medtech|diagnostic|reimbursement|payer|hospital)\b", re.I),
+)
+_PHARMA_MANUFACTURING_CONTEXT = re.compile(
+    r"\b(pharma|drug|biotech|glp-?1|peptide|obesity|diabetes|therapeutic|medicine)\b",
+    re.I,
 )
 
 
@@ -118,25 +134,39 @@ def classify_healthcare_event(
         return None
 
     ticker_healthcare_hit = any(_is_healthcare_company_ticker(ticker) for ticker in event.tickers)
+    company_name_anchor = any(
+        _company_name_appears_in_text(ticker, text_lower)
+        for ticker in event.tickers
+    )
     regulator_anchor = any(rx.search(text) for rx in _REGULATOR_PATTERNS.values())
     clinical_anchor = any(term in text_lower for term in _CLINICAL_ANCHOR_TERMS)
     subsector_anchor = any(term in text_lower for term in _HEALTHCARE_SUBSECTOR_TERMS)
+    regex_anchor = any(rx.search(text) for rx in _HEALTHCARE_ANCHOR_REGEXES)
+    asset_anchor = bool(assets_cfg and any(asset in text_lower for asset in assets_cfg))
     anchor_reason_parts: list[str] = []
     if cfg_ticker_hit:
         anchor_reason_parts.append("configured healthcare ticker")
     if ticker_healthcare_hit:
         anchor_reason_parts.append("healthcare company ticker")
+    if company_name_anchor:
+        anchor_reason_parts.append("healthcare company name")
+    if asset_anchor:
+        anchor_reason_parts.append("healthcare asset name")
     if regulator_anchor:
         anchor_reason_parts.append("regulator term")
     if clinical_anchor:
         anchor_reason_parts.append("clinical term")
     if subsector_anchor:
         anchor_reason_parts.append("healthcare subsector term")
+    if regex_anchor:
+        anchor_reason_parts.append("healthcare anchor regex")
+    if event_type == "biotech_financing" and re.search(r"\b(biotech|bio|therapeutic|pharma)\b", text, re.I):
+        anchor_reason_parts.append("biotech financing anchor")
 
     has_hard_anchor = bool(anchor_reason_parts)
     if any(term in text_lower for term in _GENERIC_TECH_HEALTH_NOISE) and not has_hard_anchor:
         return None
-    if not has_hard_anchor and not has_healthcare_signal:
+    if not has_hard_anchor:
         return None
 
     severity = EVENT_SEVERITY.get(event_type, "low")
@@ -144,6 +174,9 @@ def classify_healthcare_event(
     trial_phase = _infer_trial_phase(text)
     regulator = _infer_regulator(text)
     themes = _theme_tags(text_lower)
+    if {"API", "CDMO", "manufacturing"} & set(themes):
+        if not _PHARMA_MANUFACTURING_CONTEXT.search(text):
+            themes = [theme for theme in themes if theme not in {"API", "CDMO", "manufacturing"}]
     if themes_cfg:
         themes = [theme for theme in themes if theme.lower() in set(themes_cfg) or theme.lower() in {"glp-1", "cdmo", "api"}]
     asset_names = [asset for asset in assets_cfg if asset and asset in text_lower]
@@ -319,3 +352,21 @@ def _is_healthcare_company_ticker(ticker: str) -> bool:
         "lifesciences",
     )
     return any(marker in company for marker in healthcare_markers)
+
+
+def _company_name_appears_in_text(ticker: str, text_lower: str) -> bool:
+    company = company_name_for_ticker(str(ticker or "").upper().strip()).lower().strip()
+    if not company or company == str(ticker or "").lower().strip():
+        return False
+    cleaned = _COMPANY_REDUCER.sub(" ", company)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        return False
+    parts = [part for part in cleaned.split(" ") if len(part) >= 4]
+    return any(part in text_lower for part in ([cleaned] + parts[:2]))
+
+
+_COMPANY_REDUCER = re.compile(
+    r"\b(inc|corp|corporation|company|co|group|plc|ltd|limited|holdings?|sa|ag|nv)\b",
+    re.I,
+)

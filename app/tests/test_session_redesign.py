@@ -201,6 +201,7 @@ def test_intraday_output_is_shorter_and_omits_full_calendar():
     assert intraday_text.count("<b>") < morning_text.count("<b>")
     assert "WHAT CHANGED" in intraday_text
     assert "EARNINGS CALENDAR" not in intraday_text
+    assert "MACRO CONTEXT" not in intraday_text
     assert "MARKET SNAPSHOT" in intraday_text
 
 

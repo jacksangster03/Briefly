@@ -309,6 +309,8 @@ def test_chart_renderer_cross_asset_uses_normalized_axis_and_no_in_chart_title(m
         market_data_service=_StubMarketData(with_history=True),
     )
     spec = next(item for item in selected_chart_specs(bundle) if item.get("chart_key") == "cross_asset_impulse_strip")
+    assert "Units are" not in str(spec.get("caption") or "")
+    assert "normalised for comparison" in str(spec.get("caption") or "")
     captured: dict = {}
 
     def _capture(self, fig, *, key: str, title: str, caption: str, filename: str):
@@ -371,6 +373,36 @@ def test_chart_renderer_event_annotation_uses_explicit_non_overlapping_summary(m
     assert "Event:" in text_block
     assert "Full-period move:" in text_block
     assert "Event: event" not in text_block
+
+
+def test_oil_transmission_marks_brent_unavailable_when_missing():
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=_sample_briefing(),
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+    )
+    chart_map = {row["chart_key"]: row for row in (bundle.get("charts") or [])}
+    spec = chart_map["oil_transmission_card"]
+    assert "Brent unavailable" in str(spec.get("caption") or "")
+    brent_row = next((row for row in spec.get("series", []) if str(row.get("name")) == "Brent"), {})
+    assert brent_row.get("value") is None
+
+
+def test_pnl_caption_all_negative_has_no_positive_offset_phrase():
+    briefing = _sample_briefing()
+    briefing.portfolio_quotes = [
+        QuoteData(symbol="NVDA", display_name="Nvidia", current_price=905, change=-8.0, change_percent=-0.9),
+        QuoteData(symbol="MSFT", display_name="Microsoft", current_price=418, change=-3.0, change_percent=-0.7),
+    ]
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=briefing,
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+    )
+    chart_map = {row["chart_key"]: row for row in (bundle.get("charts") or [])}
+    caption = str((chart_map.get("pnl_attribution_waterfall") or {}).get("caption") or "")
+    assert "no displayed sleeve offset the decline" in caption
+    assert "(0/2." not in caption
 
 
 def test_briefing_morning_charts_route_renders_preview(monkeypatch, validation_test_settings):

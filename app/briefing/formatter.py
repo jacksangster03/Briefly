@@ -638,7 +638,7 @@ class TelegramFormatter:
         empty_with_quotes = [snap for snap in sectors if not snap.top_events and snap.etf_quote]
 
         if not non_empty_sectors:
-            lines.append("  <i>No high-trust sector developments in this cycle.</i>")
+            lines.append("  <i>No high-trust sector-specific developments; sector move appears price-led rather than news-led.</i>")
             if empty_with_quotes:
                 compact = self._format_empty_sector_compact(empty_with_quotes, session_mode)
                 if compact:
@@ -908,6 +908,13 @@ class TelegramFormatter:
             "price target",
             "analyst note",
             "analysts love",
+            "smart buy",
+            "risky move",
+            "losing its edge",
+            "should you buy",
+            "what's behind",
+            "no-brainer",
+            "price prediction",
         )
         return any(term in text for term in low_signal_terms)
 

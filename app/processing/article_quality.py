@@ -363,7 +363,7 @@ def neutralize_headline(title: str, *, event_type: str = "", ticker: str = "") -
     symbol = (ticker or "").upper().strip()
     if has_hard_catalyst(event_type, raw):
         subject = symbol or "Company"
-        return f"{subject}: hard catalyst update under review."
+        return f"{subject}: reported catalyst headline; awaiting verified operating details."
     return f"{symbol + ': ' if symbol else ''}Low-signal commentary; no primary market catalyst identified."
 
 

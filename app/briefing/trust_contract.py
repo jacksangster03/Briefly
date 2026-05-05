@@ -136,6 +136,7 @@ def run_pre_send_lints(
     warnings.extend(_lint_closed_market_breadth(briefing, timezone_name=timezone_name))
     warnings.extend(_lint_index_level_integrity(briefing))
     warnings.extend(_lint_rates_direction_conflict(briefing))
+    warnings.extend(_lint_chart_commodity_consistency(briefing))
     return warnings
 
 
@@ -547,6 +548,60 @@ def _lint_rates_direction_conflict(briefing: MorningBriefing) -> list[str]:
             warnings.append(
                 f"Rates direction conflict: US2Y setup_change={setup:+.4f}, macro_change={macro:+.4f}."
             )
+    return warnings
+
+
+def _lint_chart_commodity_consistency(briefing: MorningBriefing) -> list[str]:
+    bundle = briefing.morning_chart_bundle or {}
+    charts = list(bundle.get("charts") or [])
+    if not charts:
+        return []
+
+    canonical = dict(briefing.canonical_prices or {})
+
+    def _canon_pct(key: str) -> float | None:
+        row = dict(canonical.get(key) or {})
+        val = row.get("change_percent")
+        return float(val) if isinstance(val, (int, float)) else None
+
+    expected = {"WTI": _canon_pct("WTI"), "BRENT": _canon_pct("BRENT"), "GOLD": _canon_pct("GOLD")}
+    warnings: list[str] = []
+
+    def _check(symbol_key: str, observed: float | None, section: str) -> None:
+        exp = expected.get(symbol_key)
+        if exp is None or observed is None:
+            return
+        if abs(float(observed) - float(exp)) > 0.06:
+            warnings.append(
+                f"Asset mismatch: {symbol_key} {section}={float(observed):+.2f}% vs canonical={float(exp):+.2f}%."
+            )
+
+    for chart in charts:
+        key = str(chart.get("chart_key") or "")
+        series = list(chart.get("series") or [])
+        if key == "oil_transmission_card":
+            for row in series:
+                name = str(row.get("name") or "").upper()
+                value = row.get("value")
+                observed = float(value) if isinstance(value, (int, float)) else None
+                if "WTI" in name:
+                    _check("WTI", observed, "oil_transmission")
+                elif "BRENT" in name:
+                    _check("BRENT", observed, "oil_transmission")
+                elif "GOLD" in name:
+                    _check("GOLD", observed, "oil_transmission")
+        elif key == "cross_asset_impulse_strip":
+            for row in series:
+                if str(row.get("unit") or "").lower() not in {"pct", "%", "percent"}:
+                    continue
+                name = str(row.get("name") or "").upper()
+                observed = float(row.get("impulse") or 0.0)
+                if "WTI" in name:
+                    _check("WTI", observed, "cross_asset")
+                elif "BRENT" in name:
+                    _check("BRENT", observed, "cross_asset")
+                elif "GOLD" in name:
+                    _check("GOLD", observed, "cross_asset")
     return warnings
 
 

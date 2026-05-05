@@ -9,6 +9,7 @@ from io import BytesIO
 from pathlib import Path
 
 from app.logger import get_logger
+from app.briefing.move_colors import move_color_hex
 from app.schemas.delivery import ChartAsset
 from app.schemas.events import PricePoint, QuoteData
 
@@ -726,7 +727,7 @@ class ChartRenderer:
         rows = sorted(rows, key=lambda row: float(row.get("excess_pct") or 0.0), reverse=True)[:8]
         labels = [self._truncate_label(str(row.get("symbol") or row.get("name") or ""), max_len=22) for row in rows]
         excess = [float(row.get("excess_pct") or 0.0) for row in rows]
-        colors = [POSITIVE if value >= 0 else NEGATIVE for value in excess]
+        colors = [move_color_hex(value) for value in excess]
 
         fig, ax = self._figure(8.8, 5.0)
         y_pos = list(range(len(labels)))
@@ -1091,8 +1092,21 @@ class ChartRenderer:
         if not rows:
             return None
         labels = [str(row.get("name") or "") for row in rows]
-        values = [float(row.get("value") or 0.0) for row in rows]
-        colors = [POSITIVE if value >= 0 else NEGATIVE for value in values]
+        values: list[float] = []
+        colors: list[str] = []
+        display_text: list[str] = []
+        for row in rows:
+            raw = row.get("value")
+            available = bool(row.get("available", raw is not None))
+            if not available or raw is None:
+                values.append(0.0)
+                colors.append(NEUTRAL)
+                display_text.append("unavailable")
+            else:
+                value = float(raw)
+                values.append(value)
+                colors.append(POSITIVE if value >= 0 else NEGATIVE)
+                display_text.append(f"{value:+.2f}%")
         fig, ax = self._figure(8.2, 3.8)
         y_pos = list(range(len(labels)))
         ax.barh(y_pos, values, color=colors, alpha=0.82, height=0.55)
@@ -1104,11 +1118,24 @@ class ChartRenderer:
         pad = max(0.25, x_range * 0.28)
         ax.set_xlim(-x_range - pad, x_range + pad)
         for idx, value in enumerate(values):
+            text = display_text[idx]
+            if text == "unavailable":
+                anchor = x_range + pad * 0.55
+                self._value_box(
+                    ax,
+                    anchor,
+                    idx,
+                    text,
+                    color=MUTED,
+                    ha="right",
+                    fontsize=8.3,
+                )
+                continue
             self._value_box(
                 ax,
                 value + (0.06 if value >= 0 else -0.06),
                 idx,
-                f"{value:+.2f}%",
+                text,
                 color=colors[idx],
                 ha="left" if value >= 0 else "right",
                 fontsize=8.9,
@@ -1614,7 +1641,7 @@ class ChartRenderer:
             return None
         labels = [str(row.get("symbol") or row.get("name") or "") for row in rows]
         values = [float(row.get("value") or 0.0) for row in rows]
-        colors = [POSITIVE if val >= 0 else NEGATIVE for val in values]
+        colors = [move_color_hex(val) for val in values]
         fig, ax = self._figure(8.8, max(3.1, 0.55 * len(rows) + 1.5))
         y = list(range(len(rows)))
         bars = ax.barh(y, values, color=colors, alpha=0.82, height=0.54)

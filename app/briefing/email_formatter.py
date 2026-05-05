@@ -12,6 +12,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.briefing.formatter import TelegramFormatter
+from app.briefing.move_colors import move_color_hex
 from app.briefing.trust_contract import chart_copy_is_distinct, contract_warning_summary, distinct_lines
 from app.schemas.briefings import MorningBriefing
 from app.schemas.delivery import EmailRenderResult
@@ -406,8 +407,8 @@ class EmailFormatter:
     def _chart_read_line(caption: str | None) -> str:
         text = (caption or "Deterministic market read from current briefing inputs.").strip()
         words = text.split()
-        if len(words) > 20:
-            text = " ".join(words[:20]).rstrip(".,;:") + "."
+        if len(words) > 28:
+            text = " ".join(words[:28]).rstrip(".,;:") + "."
         return text
 
     @staticmethod
@@ -506,6 +507,9 @@ class EmailFormatter:
         if key == "breadth_leadership_panel":
             return "If breadth remains split, avoid treating headline index strength as broad risk confirmation."
         if key == "pnl_attribution_waterfall":
+            lower_base = (base or "").lower()
+            if "no displayed sleeve offset the decline" in lower_base:
+                return "Losses are broad across displayed sleeves; treat the day as drag-led until positive contribution breadth improves."
             symbols = re.findall(r"([A-Z]{2,6})\s+[+\-]\d+(?:\.\d+)?%", base or "")
             if len(symbols) >= 2:
                 return f"{symbols[0]} is the main directional driver today; validate whether offsets from {symbols[1]} and other sleeves are broad enough."
@@ -517,7 +521,7 @@ class EmailFormatter:
         if key == "global_relative_performance":
             return "Regional leaders should align with portfolio geography; widening spreads can lift tracking-error risk."
         if base:
-            return "Anchor this signal to current exposures before changing posture."
+            return "Link this signal to current portfolio beta, duration, and concentration before changing posture."
         return "Use this panel with the setup read and dominant driver before changing posture."
 
     def _top_desk_read(self, briefing: MorningBriefing) -> str:
@@ -638,6 +642,9 @@ class EmailFormatter:
             return raw
 
         context = self._line_context(plain)
+        section = (section_title or "").strip().lower()
+        if section in {"watchlist", "portfolio impact today", "portfolio check", "portfolio attribution"}:
+            context = "watchlist"
         if " | " in plain and ":" not in plain:
             return self._colorize_watchlist_strip(raw, context)
 
@@ -691,7 +698,16 @@ class EmailFormatter:
             return False
 
         section = (section_title or "").strip().lower()
-        in_target_section = section in {"market setup", "macro context", "watchlist", "sector scan", "portfolio impact today"}
+        in_target_section = section in {
+            "market setup",
+            "market snapshot",
+            "macro context",
+            "watchlist",
+            "sector scan",
+            "portfolio impact today",
+            "portfolio check",
+            "portfolio attribution",
+        }
         has_move = bool(_PAIR_MOVE_RE.search(plain) or _PAREN_MOVE_RE.search(plain) or re.search(r"[+\-−]\d[\d,]*(?:\.\d+)?%", plain))
         if not has_move:
             return False
@@ -708,6 +724,8 @@ class EmailFormatter:
     def _line_context(plain: str) -> str:
         lower = plain.lower()
         name = lower.split(":", 1)[0] if ":" in lower else lower
+        if re.search(r"\b[A-Z0-9\.\-]{2,8}\s+[+\-−]\d", plain):
+            return "watchlist"
         if any(tok in name for tok in ("wti", "crude", "brent", "copper", "gold", "commodity")):
             return "commodity"
         if any(tok in name for tok in ("vix", "move index", "volatility", "fear", "stress")):
@@ -720,6 +738,8 @@ class EmailFormatter:
         value = EmailFormatter._extract_signed_value(token)
         if value is None:
             return _TEXT_PRIMARY
+        if context in {"watchlist", "portfolio_move"}:
+            return move_color_hex(value)
         if abs(value) < 1e-12:
             return _NEUTRAL_MOVE
         positive_is_good = context not in {"stress", "rates"}

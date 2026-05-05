@@ -52,7 +52,21 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 - **Phase 6/7:** session-aware decision layer, regime-to-chart-stack selection, desk/full density modes, and new cards (yield curve, VIX risk, geo confirmation, regional divergence, watchlist movers, setup confirmation, what changed)
 - **Phase 8:** routing/materiality/snapshot hardening, session-aware logs and metadata, required chart coverage enforcement, and provider-note cleanup
 - **Phase 8.5 polish:** day-replay banner semantics, replay action/status summary, snapshot missing-value safety (no fake 0.00s), session-shaped output tightening, canonical Brent propagation, and chart-copy consistency fixes
+- **Phase 8.6 QA polish:** deterministic watchlist move color scaling (magnitude-aware red/green intensity), stricter healthcare hard-anchor suppression (blocks generic AI/power overmatch), canonical commodity consistency lints across chart specs, improved all-negative P&L wording, and replay end-summary counters (generated/sent/suppressed/held/future + provider calls made/avoided + healthcare include/suppress counts)
 - **Healthcare vertical (optional):** deterministic healthcare taxonomy/classifier/scorer/section-builder, Telegram+email rendering, breaking biotech label path, and configurable preferences in `configs/healthcare.yaml`
+
+### Day Replay quickstart (manual QA)
+
+- Dry run summary only:
+  - `python -m app.cli day-replay --date today`
+- Print full rendered session outputs:
+  - `python -m app.cli --show-output day-replay --date today --force-all --ignore-materiality`
+- Send test-labeled replay messages to channels:
+  - `python -m app.cli day-replay --date today --send-test telegram,email --force-all --ignore-materiality`
+
+Notes:
+- `day-replay` is manual only (never scheduler-driven).
+- Replay sends are test-labeled and do **not** update live sent-message idempotency markers.
 
 ### Portfolio workbench (Phases 4.7–5.8)
 
