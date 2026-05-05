@@ -1129,9 +1129,18 @@ def run_catch_up(
 
         backfill_ctx: BackfillContext | None = None
         if is_past_date:
+            # Use the latest plausible send time within each session's window
+            # (one minute before window close) so the banner reflects when the
+            # session would have been sent, not when this backfill command ran.
+            session_win = session_window_for_key(session_key)
+            win_end = session_win.end
+            session_generated_local = datetime(
+                target_date.year, target_date.month, target_date.day,
+                win_end.hour, win_end.minute, tzinfo=tz,
+            ) - timedelta(minutes=1)
             backfill_ctx = BackfillContext(
                 session_date=target_date,
-                generated_at_local=local_now,
+                generated_at_local=session_generated_local,
                 timezone_name=timezone_name,
             )
         logger.info("Catch-up: sending | session=%s force_all=%s ignore_materiality=%s backfill=%s", session_key, force_all, ignore_materiality, is_past_date)
