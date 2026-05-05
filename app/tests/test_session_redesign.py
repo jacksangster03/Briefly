@@ -248,3 +248,336 @@ def test_cli_brief_dispatches_to_session_brief(monkeypatch):
     result = runner.invoke(cli, ["--dry-run", "brief"])
     assert result.exit_code == 0, result.output
     assert called["count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Idempotency cross-session tests (tasks a-j)
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+from app.db.models import SessionSendState  # noqa: E402
+from app.db.session import get_session  # noqa: E402
+from app.main import run_morning_briefing, run_catch_up  # noqa: E402
+from app.settings import Settings  # noqa: E402
+
+
+class _StubGenerator2:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def generate(self, *, session_key: str = "morning", session_title: str = "Morning Briefing") -> MorningBriefing:
+        return MorningBriefing(
+            generated_at=datetime(2026, 5, 6, 8, 0, tzinfo=timezone.utc),
+            session_key=session_key,
+            session_title=session_title,
+        )
+
+
+class _StubEmailFormatter2:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def format_morning_briefing(self, briefing):
+        from app.schemas.delivery import EmailRenderResult
+        return EmailRenderResult(
+            subject=briefing.session_title,
+            plain_text=f"{briefing.session_title}: email",
+            html_body=f"<p>{briefing.session_title}: email</p>",
+            inline_assets=[],
+        )
+
+
+class _StubTelegramFormatter2:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def format_morning_briefing(self, briefing):
+        return [f"{briefing.session_title}: telegram"]
+
+
+class _StubLLMRenderer2:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def render_morning(self, *, deterministic_email, **kwargs):
+        return SimpleNamespace(active_email=deterministic_email, shadow_preview=None)
+
+
+def _apply_session_monkeypatches(monkeypatch, send_log: list):
+    """Wire up all stubs needed for run_morning_briefing tests."""
+
+    class _FakeEmailMessenger:
+        name = "email"
+        dry_run = False
+        last_error = ""
+
+        def __init__(self, s):
+            pass
+
+        def is_configured(self):
+            return True
+
+        def send_rich(self, *, subject, plain_text, html_body, inline_assets=None):
+            send_log.append(f"email:{subject}")
+            return True
+
+    monkeypatch.setattr("app.main.load_user_profile", lambda s: UserProfile(name="default_user"))
+    monkeypatch.setattr("app.main.load_sector_universe", lambda s: object())
+    monkeypatch.setattr("app.main._build_services", lambda s: (object(), object(), object()))
+    monkeypatch.setattr("app.main.MorningBriefingGenerator", _StubGenerator2)
+    monkeypatch.setattr("app.main.TelegramFormatter", _StubTelegramFormatter2)
+    monkeypatch.setattr("app.main.EmailFormatter", _StubEmailFormatter2)
+    monkeypatch.setattr("app.main.LLMEmailRenderer", _StubLLMRenderer2)
+    monkeypatch.setattr("app.main.EmailMessenger", _FakeEmailMessenger)
+    monkeypatch.setattr("app.main.load_previous_snapshot", lambda **kw: (None, {}))
+    monkeypatch.setattr("app.main.persist_snapshot", lambda **kw: None)
+    monkeypatch.setattr("app.main.record_sent_events", lambda *a, **kw: None)
+
+
+def _settings_email_live(tmp_path) -> Settings:
+    return Settings(
+        dry_run=False,
+        delivery_channel="email",
+        email_user="sender@example.com",
+        email_password="secret",
+        email_to="recipient@example.com",
+        data_dir=str(tmp_path),
+    )
+
+
+# b. Morning send does not block Europe Midday.
+def test_morning_send_does_not_block_europe_midday(monkeypatch, tmp_path, validation_isolated_db):
+    send_log: list[str] = []
+    _apply_session_monkeypatches(monkeypatch, send_log)
+    settings = _settings_email_live(tmp_path)
+
+    run_morning_briefing(settings, auto_route_session=False, session_override="morning")
+    run_morning_briefing(settings, auto_route_session=False, session_override="europe_midday")
+
+    assert any("morning" in s.lower() or "Morning" in s for s in send_log), send_log
+    assert any("europe" in s.lower() or "Midday" in s for s in send_log), send_log
+
+    with get_session() as db:
+        states = db.query(SessionSendState).filter_by(profile_name="default_user").all()
+    session_keys_sent = {s.session_key for s in states if s.success}
+    assert "morning" in session_keys_sent
+    assert "europe_midday" in session_keys_sent
+
+
+# c. Morning send does not block US Pre-Open.
+def test_morning_send_does_not_block_us_pre_open(monkeypatch, tmp_path, validation_isolated_db):
+    send_log: list[str] = []
+    _apply_session_monkeypatches(monkeypatch, send_log)
+    settings = _settings_email_live(tmp_path)
+
+    run_morning_briefing(settings, auto_route_session=False, session_override="morning")
+    run_morning_briefing(settings, auto_route_session=False, session_override="us_pre_open")
+
+    with get_session() as db:
+        states = db.query(SessionSendState).filter_by(profile_name="default_user").all()
+    session_keys_sent = {s.session_key for s in states if s.success}
+    assert "morning" in session_keys_sent
+    assert "us_pre_open" in session_keys_sent
+
+
+# d. Different sessions create different SessionSendState rows.
+def test_different_sessions_create_different_state_rows(monkeypatch, tmp_path, validation_isolated_db):
+    send_log: list[str] = []
+    _apply_session_monkeypatches(monkeypatch, send_log)
+    settings = _settings_email_live(tmp_path)
+
+    for session in ["morning", "europe_midday", "us_pre_open"]:
+        run_morning_briefing(settings, auto_route_session=False, session_override=session)
+
+    with get_session() as db:
+        rows = db.query(SessionSendState).filter_by(profile_name="default_user", channel="email").all()
+
+    assert len(rows) == 3
+    keys = {r.session_key for r in rows}
+    assert keys == {"morning", "europe_midday", "us_pre_open"}
+    for r in rows:
+        assert r.message_type == f"session_brief:{r.session_key}"
+        assert r.success is True
+
+
+# e. Default mode only allows morning + us_pre_open (with respect_cadence=True).
+def test_default_mode_suppresses_europe_midday(monkeypatch, tmp_path, validation_isolated_db):
+    suppressed: list[str] = []
+    send_log: list[str] = []
+
+    def _fake_load_profile(s):
+        return UserProfile(name="default_user", delivery={"session_mode": "default"})
+
+    monkeypatch.setattr("app.main.load_user_profile", _fake_load_profile)
+    monkeypatch.setattr("app.main.load_sector_universe", lambda s: object())
+    monkeypatch.setattr("app.main._build_services", lambda s: (object(), object(), object()))
+    monkeypatch.setattr("app.main.has_cadence_marker", lambda *a, **kw: False)
+    monkeypatch.setattr("app.main.record_cadence_marker", lambda **kw: None)
+
+    logged: list[str] = []
+    real_logger_info = __import__("app.main", fromlist=["logger"]).logger.info
+
+    def _capture_info(msg, *args):
+        formatted = msg % args if args else msg
+        logged.append(formatted)
+
+    import app.main as main_mod
+    monkeypatch.setattr(main_mod.logger, "info", _capture_info)
+
+    settings = _settings_email_live(tmp_path)
+    run_morning_briefing(settings, auto_route_session=False, session_override="europe_midday", respect_cadence=True)
+
+    assert any("not_in_mode_schedule" in line for line in logged), logged
+
+
+# f. Active mode allows all scheduled sessions when cadence marker absent.
+def test_active_mode_allows_europe_midday(monkeypatch, tmp_path, validation_isolated_db):
+    send_log: list[str] = []
+
+    def _fake_load_profile(s):
+        return UserProfile(name="default_user", delivery={"session_mode": "active", "suppress_low_materiality": False})
+
+    _apply_session_monkeypatches(monkeypatch, send_log)
+    monkeypatch.setattr("app.main.load_user_profile", _fake_load_profile)
+    monkeypatch.setattr("app.main.has_cadence_marker", lambda *a, **kw: False)
+    monkeypatch.setattr("app.main.record_cadence_marker", lambda **kw: None)
+
+    settings = _settings_email_live(tmp_path)
+    run_morning_briefing(settings, auto_route_session=False, session_override="europe_midday", respect_cadence=True)
+
+    with get_session() as db:
+        rows = db.query(SessionSendState).filter_by(
+            profile_name="default_user", session_key="europe_midday", channel="email"
+        ).all()
+    assert rows, "europe_midday should have been sent in active mode"
+    assert rows[0].success is True
+
+
+# g. active-mode + ignore-materiality via catch-up sends all eligible sessions.
+def test_catch_up_active_mode_ignore_materiality(monkeypatch, tmp_path, validation_isolated_db):
+    send_log: list[str] = []
+    _apply_session_monkeypatches(monkeypatch, send_log)
+
+    import datetime as _dt
+
+    # Simulate local time = 16:00 CEST (14:00 UTC) so morning, midday, pre-open, intraday have started.
+    fake_now = _dt.datetime(2026, 5, 6, 14, 0, tzinfo=_dt.timezone.utc)
+    monkeypatch.setattr("app.main.datetime", type("_FakeDT", (), {
+        "now": staticmethod(lambda tz=None: fake_now.astimezone(tz) if tz else fake_now),
+    }))
+
+    settings = _settings_email_live(tmp_path)
+    summary = run_catch_up(
+        settings,
+        force_all=False,
+        ignore_materiality=True,
+        active_mode=True,
+        command_source="test:catch-up",
+    )
+
+    sent = [r for r in summary if r["action"] == "sent"]
+    session_keys_attempted = {r["session"] for r in sent}
+    # All sessions whose window started before 16:00 CEST (14:00 UTC) should be attempted.
+    assert "morning" in session_keys_attempted
+    assert "europe_midday" in session_keys_attempted
+    assert "us_pre_open" in session_keys_attempted
+
+
+# h. catch-up sends missed sessions but does not resend already-sent sessions.
+def test_catch_up_skips_already_sent_sessions(monkeypatch, tmp_path, validation_isolated_db):
+    send_log: list[str] = []
+    _apply_session_monkeypatches(monkeypatch, send_log)
+
+    import datetime as _dt
+    fake_now = _dt.datetime(2026, 5, 6, 14, 0, tzinfo=_dt.timezone.utc)
+    monkeypatch.setattr("app.main.datetime", type("_FakeDT", (), {
+        "now": staticmethod(lambda tz=None: fake_now.astimezone(tz) if tz else fake_now),
+    }))
+
+    settings = _settings_email_live(tmp_path)
+
+    # First, send morning via normal path so it records success in SessionSendState.
+    run_morning_briefing(settings, auto_route_session=False, session_override="morning")
+    send_log.clear()
+
+    # Now run catch-up in active mode: morning should be skipped, others attempted.
+    summary = run_catch_up(
+        settings,
+        force_all=False,
+        ignore_materiality=True,
+        active_mode=True,
+        command_source="test:catch-up",
+    )
+
+    already_sent = [r for r in summary if r["action"] == "already_sent"]
+    assert any(r["session"] == "morning" for r in already_sent), summary
+
+
+# i. Stale scheduler lock is detected and reported clearly.
+def test_schedule_status_detects_held_lock(monkeypatch, tmp_path, validation_isolated_db):
+    import fcntl as _fcntl
+
+    class _LockedFcntl:
+        LOCK_EX = _fcntl.LOCK_EX
+        LOCK_NB = _fcntl.LOCK_NB
+        LOCK_UN = _fcntl.LOCK_UN
+
+        @staticmethod
+        def flock(fd, flags):
+            if flags & _fcntl.LOCK_NB:
+                raise OSError("locked")
+
+    monkeypatch.setattr("app.main.load_user_profile", lambda s: UserProfile(name="default_user"))
+
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        import os
+        data_dir = str(tmp_path / "data")
+        os.makedirs(f"{data_dir}/state", exist_ok=True)
+        lock_path = f"{data_dir}/state/scheduler.lock"
+        open(lock_path, "a").close()
+
+        settings_args = [f"--data-dir={data_dir}"] if False else []
+        import app.cli as cli_mod
+        import fcntl as real_fcntl
+
+        orig_open = open
+
+        def _patched_flock(fd, flags):
+            if flags & real_fcntl.LOCK_NB:
+                raise OSError("simulated lock held")
+            real_fcntl.flock(fd, flags)
+
+        monkeypatch.setattr(real_fcntl, "flock", _patched_flock)
+
+        from app.settings import Settings as _S
+        monkeypatch.setattr("app.cli.get_settings", lambda: _S(dry_run=True, data_dir=data_dir))
+
+        result = runner.invoke(cli, ["schedule-status"])
+        assert result.exit_code == 0, result.output
+        assert "held" in result.output.lower() or "unable" in result.output.lower(), result.output
+
+
+# j. Scheduler logs suppression reason for each non-sent session.
+def test_scheduler_logs_suppression_reason_for_non_sent_session(monkeypatch, tmp_path, validation_isolated_db):
+    logged: list[str] = []
+
+    def _fake_load_profile(s):
+        return UserProfile(name="default_user", delivery={"session_mode": "default"})
+
+    monkeypatch.setattr("app.main.load_user_profile", _fake_load_profile)
+    monkeypatch.setattr("app.main.load_sector_universe", lambda s: object())
+    monkeypatch.setattr("app.main._build_services", lambda s: (object(), object(), object()))
+    monkeypatch.setattr("app.main.has_cadence_marker", lambda *a, **kw: False)
+    monkeypatch.setattr("app.main.record_cadence_marker", lambda **kw: None)
+
+    import app.main as main_mod
+    monkeypatch.setattr(main_mod.logger, "info", lambda msg, *a: logged.append((msg % a) if a else msg))
+
+    settings = _settings_email_live(tmp_path)
+    run_morning_briefing(settings, auto_route_session=False, session_override="into_close", respect_cadence=True)
+
+    suppression_logs = [line for line in logged if "not_in_mode_schedule" in line or "suppress" in line.lower()]
+    assert suppression_logs, f"Expected a suppression log for into_close in default mode. Got: {logged}"
+    assert "into_close" in suppression_logs[0]

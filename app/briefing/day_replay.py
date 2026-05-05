@@ -14,6 +14,12 @@ from zoneinfo import ZoneInfo
 from app.briefing.email_formatter import EmailFormatter
 from app.briefing.formatter import TelegramFormatter
 from app.briefing.morning_generator import MorningBriefingGenerator
+from app.briefing.session_delivery import (
+    SessionDeliveryContext,
+    canonical_session_message_key,
+    claim_session_send,
+    finalize_session_send_claim,
+)
 from app.briefing.session_materiality import compute_materiality
 from app.briefing.session_routing import SessionWindow, session_window_for_key
 from app.briefing.session_snapshot import build_what_changed_lines, snapshot_metrics
@@ -366,23 +372,42 @@ def _deliver_test(
     telegram_messages: list[str],
     email_content,
     channels: list[str],
+    session_delivery_context: SessionDeliveryContext,
 ) -> list[str]:
     sent: list[str] = []
     send_settings = settings.model_copy(deep=True)
     send_settings.dry_run = False
     if "telegram" in channels:
         messenger = TelegramMessenger(send_settings)
-        if messenger.is_configured() and messenger.send_messages(telegram_messages):
-            sent.append("telegram")
+        if messenger.is_configured():
+            claim = claim_session_send(channel="telegram", context=session_delivery_context)
+            if claim.acquired:
+                success = messenger.send_messages(telegram_messages)
+                finalize_session_send_claim(
+                    claim=claim,
+                    success=bool(success),
+                    error_message=None if success else "replay telegram delivery failed",
+                )
+                if success:
+                    sent.append("telegram")
     if "email" in channels:
         messenger = EmailMessenger(send_settings)
-        if messenger.is_configured() and messenger.send_rich(
-            subject=email_content.subject,
-            plain_text=email_content.plain_text,
-            html_body=email_content.html_body,
-            inline_assets=email_content.inline_assets,
-        ):
-            sent.append("email")
+        if messenger.is_configured():
+            claim = claim_session_send(channel="email", context=session_delivery_context)
+            if claim.acquired:
+                success = messenger.send_rich(
+                    subject=email_content.subject,
+                    plain_text=email_content.plain_text,
+                    html_body=email_content.html_body,
+                    inline_assets=email_content.inline_assets,
+                )
+                finalize_session_send_claim(
+                    claim=claim,
+                    success=bool(success),
+                    error_message=None if success else "replay email delivery failed",
+                )
+                if success:
+                    sent.append("email")
     return sent
 
 
@@ -613,6 +638,16 @@ def run_day_replay(
                     f"day_replay:{row.session_key}",
                 )
             if channels:
+                session_delivery_context = SessionDeliveryContext(
+                    profile_name=profile.name,
+                    session_key=row.session_key,
+                    local_date=row.replay_time_local.date(),
+                    command_source="day_replay",
+                    replay_namespace=replay_namespace,
+                )
+                row.warnings.append(
+                    "canonical_session_key=" + canonical_session_message_key(row.session_key)
+                )
                 test_messages = _with_test_banner_messages(
                     messages=telegram_messages,
                     session_title=row.session_title,
@@ -628,6 +663,7 @@ def run_day_replay(
                     telegram_messages=test_messages,
                     email_content=test_email,
                     channels=channels,
+                    session_delivery_context=session_delivery_context,
                 )
                 row.send_action = "test_sent" if row.sent_channels else "generated_only"
             summary_counts[row.send_action] = summary_counts.get(row.send_action, 0) + 1

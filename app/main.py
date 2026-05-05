@@ -9,10 +9,11 @@ Each function here represents a complete workflow:
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import date, time, timedelta
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 try:
     import fcntl
@@ -24,8 +25,14 @@ from app.briefing.formatter import TelegramFormatter
 from app.briefing.breaking_generator import BreakingAlertGenerator
 from app.briefing.llm_email_renderer import LLMEmailRenderer
 from app.briefing.morning_generator import MorningBriefingGenerator
+from app.briefing.session_delivery import (
+    SessionDeliveryContext,
+    canonical_session_message_key,
+    claim_session_send,
+    finalize_session_send_claim,
+)
 from app.briefing.session_materiality import compute_materiality
-from app.briefing.session_routing import next_session_window, resolve_session_window, session_window_for_key
+from app.briefing.session_routing import SESSION_WINDOWS, next_session_window, resolve_session_window, session_window_for_key
 from app.briefing.session_snapshot import load_previous_snapshot, persist_snapshot, snapshot_metrics
 from app.cadence.engine import DecisionEngine
 from app.cadence.state_store import (
@@ -42,7 +49,7 @@ from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
 from app.db.models import BreakingStoryState
-from app.db.models import SentMessage
+from app.db.models import SentMessage, SessionSendState
 from app.db.session import get_session, init_db
 from app.logger import get_logger
 from app.healthcare.section_builder import filter_breaking_healthcare_events
@@ -359,15 +366,35 @@ def _deliver(
     events: list | None = None,
     settings: Settings | None = None,
     tracking_ids: list[str] | None = None,
+    session_delivery_context: SessionDeliveryContext | None = None,
 ):
     """Deliver messages via all configured channels and record to DB."""
     any_success = False
     if settings and settings.show_output:
         _print_terminal_output(messages, msg_type)
     for messenger in messengers:
+        claim = None
+        is_dry_run = bool(getattr(messenger, "dry_run", False))
+        if not is_dry_run and session_delivery_context and msg_type.startswith("session_brief:"):
+            claim = claim_session_send(channel=messenger.name, context=session_delivery_context)
+            if not claim.acquired:
+                if claim.existing_success:
+                    logger.info(
+                        "Skipping %s send; existing successful session delivery found | channel=%s idempotency_key=%s",
+                        msg_type,
+                        messenger.name,
+                        claim.idempotency_key,
+                    )
+                else:
+                    logger.warning(
+                        "Skipping %s send; session delivery already claimed by another process | channel=%s idempotency_key=%s",
+                        msg_type,
+                        messenger.name,
+                        claim.idempotency_key,
+                    )
+                continue
         success = messenger.send_messages(messages)
         any_success = any_success or bool(success)
-        is_dry_run = bool(getattr(messenger, "dry_run", False))
         try:
             if not is_dry_run:
                 _record_delivery(
@@ -381,6 +408,17 @@ def _deliver(
                 )
         except Exception:
             logger.debug("Failed to record sent message", exc_info=True)
+        if claim is not None:
+            try:
+                finalize_session_send_claim(
+                    claim=claim,
+                    success=bool(success),
+                    error_message=None
+                    if success
+                    else str(getattr(messenger, "last_error", "") or "delivery returned unsuccessful status"),
+                )
+            except Exception:
+                logger.debug("Failed to finalize session send claim", exc_info=True)
         if success and not is_dry_run:
             try:
                 record_sent_events(events or [])
@@ -395,6 +433,7 @@ def _deliver_rich_email(
     msg_type: str,
     events: list | None = None,
     settings: Settings | None = None,
+    session_delivery_context: SessionDeliveryContext | None = None,
 ) -> bool:
     """Deliver a rich HTML email with inline assets and record the result."""
     if settings and settings.show_output:
@@ -405,13 +444,33 @@ def _deliver_rich_email(
             msg_type,
         )
 
+    is_dry_run = bool(getattr(messenger, "dry_run", False))
+    claim = None
+    if not is_dry_run and session_delivery_context and msg_type.startswith("session_brief:"):
+        claim = claim_session_send(channel=messenger.name, context=session_delivery_context)
+        if not claim.acquired:
+            if claim.existing_success:
+                logger.info(
+                    "Skipping %s send; existing successful session delivery found | channel=%s idempotency_key=%s",
+                    msg_type,
+                    messenger.name,
+                    claim.idempotency_key,
+                )
+            else:
+                logger.warning(
+                    "Skipping %s send; session delivery already claimed by another process | channel=%s idempotency_key=%s",
+                    msg_type,
+                    messenger.name,
+                    claim.idempotency_key,
+                )
+            return False
+
     success = messenger.send_rich(
         subject=email_content.subject,
         plain_text=email_content.plain_text,
         html_body=email_content.html_body,
         inline_assets=email_content.inline_assets,
     )
-    is_dry_run = bool(getattr(messenger, "dry_run", False))
     try:
         if not is_dry_run:
             _record_delivery(
@@ -424,6 +483,17 @@ def _deliver_rich_email(
             )
     except Exception:
         logger.debug("Failed to record rich email message", exc_info=True)
+    if claim is not None:
+        try:
+            finalize_session_send_claim(
+                claim=claim,
+                success=bool(success),
+                error_message=None
+                if success
+                else str(getattr(messenger, "last_error", "") or "email send returned unsuccessful status"),
+            )
+        except Exception:
+            logger.debug("Failed to finalize rich email session send claim", exc_info=True)
     if success and not is_dry_run:
         try:
             record_sent_events(events or [])
@@ -553,6 +623,9 @@ def run_morning_briefing(
     force_morning: bool = False,
     auto_route_session: bool = True,
     session_override: str | None = None,
+    command_source: str = "cli",
+    force_send: bool = False,
+    override_suppress_materiality: bool = False,
 ) -> None:
     """Generate and deliver the morning briefing."""
     settings = settings or get_settings()
@@ -632,6 +705,7 @@ def run_morning_briefing(
         )
         if (
             profile.suppress_low_materiality
+            and not override_suppress_materiality
             and briefing.session_key != "morning"
             and briefing.session_key not in always_send
         ):
@@ -709,7 +783,15 @@ def run_morning_briefing(
     delivered_ok = False
     for messenger in telegram_messengers:
         _send_telegram_chart_preview(messenger, briefing.chart_assets, settings)
-    delivery_msg_type = f"session_brief:{briefing.session_key or session_key}"
+    canonical_session_key = briefing.session_key or session_key
+    delivery_msg_type = canonical_session_message_key(canonical_session_key)
+    session_delivery_context = SessionDeliveryContext(
+        profile_name=profile.name,
+        session_key=canonical_session_key,
+        local_date=local_now.date(),
+        command_source=command_source,
+        force_send=force_send,
+    )
     if telegram_messengers:
         for messenger in telegram_messengers:
             telegram_ok = _deliver(
@@ -718,6 +800,7 @@ def run_morning_briefing(
                 delivery_msg_type,
                 display_events,
                 settings=settings,
+                session_delivery_context=session_delivery_context,
             )
             delivered_ok = telegram_ok or delivered_ok
             channel_status["telegram"] = "sent" if telegram_ok else "failed"
@@ -745,6 +828,7 @@ def run_morning_briefing(
             delivery_msg_type,
             display_events,
             settings=settings,
+            session_delivery_context=session_delivery_context,
         )
         delivered_ok = email_ok or delivered_ok
         channel_status["email"] = "sent" if email_ok else "failed"
@@ -797,26 +881,194 @@ def run_morning_briefing(
     )
 
 
-def run_session_brief(settings: Settings | None = None, *, respect_cadence: bool = False) -> None:
+def run_session_brief(
+    settings: Settings | None = None,
+    *,
+    respect_cadence: bool = False,
+    command_source: str = "cli",
+) -> None:
     """Render the correct session-aware briefing for local time."""
     run_morning_briefing(
         settings,
         force_morning=False,
         auto_route_session=True,
         respect_cadence=respect_cadence,
+        command_source=command_source,
     )
 
 
 # -- Intraday Update ----------------------------------------------------------
 
-def run_intraday_update(settings: Settings | None = None, *, respect_cadence: bool = False) -> None:
+def run_intraday_update(
+    settings: Settings | None = None,
+    *,
+    respect_cadence: bool = False,
+    command_source: str = "cli",
+) -> None:
     """Render a session-based US intraday risk check."""
     run_morning_briefing(
         settings,
         respect_cadence=respect_cadence,
         auto_route_session=False,
         session_override="us_intraday_risk",
+        command_source=command_source,
     )
+
+
+# -- Catch-up -----------------------------------------------------------------
+
+_CATCH_UP_SESSIONS: tuple[tuple[str, str, time], ...] = (
+    ("morning",          "Morning Briefing",                 time(6, 0)),
+    ("europe_midday",    "Europe Midday Check",              time(10, 30)),
+    ("us_pre_open",      "US Pre-Open Setup",                time(13, 30)),
+    ("us_intraday_risk", "US Intraday Risk Check",           time(15, 30)),
+    ("into_close",       "Into Close Update",                time(17, 30)),
+    ("closing_wrap",     "Closing Wrap / Next-Day Setup",    time(22, 0)),
+)
+
+
+def _channel_send_states_today(
+    profile_name: str,
+    session_key: str,
+    local_date: date,
+    channels: list[str],
+) -> dict[str, bool]:
+    """Return {channel: sent_successfully} for each channel for a session today."""
+    result: dict[str, bool] = {ch: False for ch in channels}
+    with get_session() as db_sess:
+        rows = (
+            db_sess.query(SessionSendState)
+            .filter(
+                SessionSendState.profile_name == profile_name,
+                SessionSendState.session_key == session_key,
+                SessionSendState.local_date == local_date,
+                SessionSendState.replay_namespace == "",
+                SessionSendState.success.is_(True),
+            )
+            .all()
+        )
+    for row in rows:
+        if row.channel in result:
+            result[row.channel] = True
+    return result
+
+
+def _parse_catch_up_date(date_str: str, *, local_now: "datetime") -> date:
+    """Parse today|yesterday|YYYY-MM-DD into a date in the profile timezone."""
+    s = (date_str or "today").strip().lower()
+    if s == "today":
+        return local_now.date()
+    if s == "yesterday":
+        return (local_now - timedelta(days=1)).date()
+    from datetime import date as _date
+    return _date.fromisoformat(s)
+
+
+def run_catch_up(
+    settings: Settings | None = None,
+    *,
+    target_date_str: str = "today",
+    force_all: bool = False,
+    ignore_materiality: bool = False,
+    active_mode: bool = False,
+    command_source: str = "cli:catch-up",
+) -> list[dict]:
+    """Send all sessions that have started for the target date but not yet been delivered.
+
+    target_date_str: 'today' | 'yesterday' | 'YYYY-MM-DD'
+
+    Returns a summary list of dicts with keys:
+      session, title, action (sent|skipped|already_sent), reason.
+    """
+    settings = settings or get_settings()
+    init_db()
+
+    profile = load_user_profile(settings)
+    timezone_name = profile.timezone or settings.timezone
+    now_utc = datetime.now(timezone.utc)
+    tz = ZoneInfo(timezone_name)
+    local_now = now_utc.astimezone(tz)
+
+    target_date = _parse_catch_up_date(target_date_str, local_now=local_now)
+    is_past_date = target_date < local_now.date()
+
+    # For past dates every session window has already started; use 23:59 as the cutoff.
+    # For today use the actual current time-of-day.
+    current_tod = time(23, 59) if is_past_date else local_now.time()
+
+    effective_mode = "active" if active_mode else profile.session_mode
+    allowed = _allowed_sessions_for_mode(effective_mode)
+    always_send_set = set(profile.always_send_sessions)
+
+    delivery_plan = _delivery_channel_plan(settings=settings, profile=profile, message_type="intraday")
+    active_channels = [item["channel"] for item in delivery_plan if item.get("attempted")]
+    if not active_channels:
+        active_channels = ["telegram", "email"]
+
+    date_label = target_date.isoformat()
+    if is_past_date:
+        logger.info("Catch-up targeting past date %s; all session windows treated as elapsed.", date_label)
+
+    summary: list[dict] = []
+    for session_key, session_title, window_start in _CATCH_UP_SESSIONS:
+        if window_start > current_tod:
+            summary.append({
+                "session": session_key,
+                "title": session_title,
+                "action": "skipped",
+                "reason": "window not yet started",
+            })
+            continue
+
+        is_allowed = session_key in allowed or session_key in always_send_set or force_all
+        if not is_allowed:
+            logger.info(
+                "Catch-up: suppress | session=%s mode=%s reason=not_in_mode_schedule",
+                session_key,
+                effective_mode,
+            )
+            summary.append({
+                "session": session_key,
+                "title": session_title,
+                "action": "skipped",
+                "reason": f"not in {effective_mode} mode schedule",
+            })
+            continue
+
+        if not force_all:
+            channel_states = _channel_send_states_today(profile.name, session_key, target_date, active_channels)
+            if all(channel_states.values()) and channel_states:
+                logger.info(
+                    "Catch-up: already sent | session=%s channels=%s",
+                    session_key,
+                    list(channel_states.keys()),
+                )
+                summary.append({
+                    "session": session_key,
+                    "title": session_title,
+                    "action": "already_sent",
+                    "reason": "successful delivery found for all channels",
+                })
+                continue
+
+        logger.info("Catch-up: sending | session=%s force_all=%s ignore_materiality=%s", session_key, force_all, ignore_materiality)
+        run_morning_briefing(
+            settings,
+            auto_route_session=False,
+            session_override=session_key,
+            respect_cadence=False,
+            force_send=force_all,
+            override_suppress_materiality=ignore_materiality,
+            command_source=command_source,
+        )
+        summary.append({
+            "session": session_key,
+            "title": session_title,
+            "action": "sent",
+            "reason": "",
+        })
+
+    return summary
 
 
 # -- Breaking Alerts ----------------------------------------------------------

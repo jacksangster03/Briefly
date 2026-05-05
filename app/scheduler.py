@@ -17,6 +17,11 @@ from app.logger import get_logger
 from app.main import run_breaking_check, run_session_brief
 from app.settings import Settings, get_settings
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-Unix fallback
+    fcntl = None
+
 logger = get_logger("scheduler")
 
 
@@ -96,12 +101,33 @@ def _load_schedule_config(settings: Settings) -> dict:
 def start_scheduler() -> None:
     """Build and start the scheduler (blocking)."""
     settings = get_settings()
+    lock_handle = None
+    if fcntl is not None:
+        lock_path = Path(settings.data_dir) / "state" / "scheduler.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = lock_path.open("a+")
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            logger.warning(
+                "Scheduler lock already held at %s; scheduler may already be running in another process. "
+                "Skipping second scheduler start.",
+                lock_path,
+            )
+            lock_handle.close()
+            return
     scheduler = build_scheduler(settings)
     logger.info("Starting scheduler (tz=%s, dry_run=%s)...", settings.timezone, settings.dry_run)
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
         logger.info("Scheduler stopped.")
+    finally:
+        if lock_handle is not None:
+            try:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                lock_handle.close()
 
 
 def _days_expr(days: list[str] | None) -> str:
@@ -134,9 +160,9 @@ def _breaking_run_times(start: str, end: str, interval_minutes: int) -> list[tup
 
 def _run_morning_cadence_check(settings: Settings) -> None:
     """Run session-aware cadence check across all windows."""
-    run_session_brief(settings, respect_cadence=True)
+    run_session_brief(settings, respect_cadence=True, command_source="scheduler")
 
 
 def _run_intraday_cadence_check(settings: Settings) -> None:
     """Run session-aware cadence check across all windows."""
-    run_session_brief(settings, respect_cadence=True)
+    run_session_brief(settings, respect_cadence=True, command_source="scheduler")

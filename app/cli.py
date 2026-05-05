@@ -797,5 +797,252 @@ def portfolio_snapshot(ctx, profile_name: str, lookback_days: int, force: bool, 
     click.echo(text)
 
 
+@cli.command("session-send")
+@click.option(
+    "--session",
+    "session_key",
+    required=True,
+    type=click.Choice(
+        ["morning", "europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"],
+        case_sensitive=False,
+    ),
+    help="Session to send.",
+)
+@click.option(
+    "--send",
+    "channels",
+    default="",
+    help="Comma-separated channels to use: telegram,email. Overrides global --email-only/--telegram-only.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Bypass idempotency: resend even if already sent today.",
+)
+@click.pass_context
+def session_send(ctx, session_key: str, channels: str, force: bool):
+    """Manually send a specific session briefing, bypassing clock routing.
+
+    Uses idempotency unless --force is passed. Channel flags are inherited
+    from the global --email-only/--telegram-only options, or override them
+    with --send telegram,email.
+
+    Examples:
+      python -m app.cli session-send --session europe_midday --send telegram,email
+      python -m app.cli session-send --session us_pre_open --force
+    """
+    from app.main import run_morning_briefing
+
+    settings = ctx.obj["settings"]
+    if channels:
+        channel_list = [c.strip().lower() for c in channels.split(",") if c.strip()]
+        if "email" in channel_list and "telegram" not in channel_list:
+            settings.delivery_channel = "email"
+        elif "telegram" in channel_list and "email" not in channel_list:
+            settings.delivery_channel = "telegram"
+        elif channel_list:
+            settings.delivery_channel = "all"
+    run_morning_briefing(
+        settings,
+        auto_route_session=False,
+        session_override=session_key,
+        respect_cadence=False,
+        force_send=force,
+        command_source="cli:session-send",
+    )
+
+
+@cli.command("catch-up")
+@click.option(
+    "--date",
+    "target_date",
+    default="today",
+    show_default=True,
+    help="Date to catch up: today | yesterday | YYYY-MM-DD.",
+)
+@click.option(
+    "--send",
+    "channels",
+    default="",
+    help="Comma-separated channels: telegram,email. Overrides global --email-only/--telegram-only.",
+)
+@click.option(
+    "--force-all",
+    is_flag=True,
+    default=False,
+    help="Resend even sessions already successfully sent for the target date.",
+)
+@click.option(
+    "--ignore-materiality",
+    is_flag=True,
+    default=False,
+    help="Skip materiality gating; send all eligible sessions regardless of score.",
+)
+@click.option(
+    "--active-mode",
+    is_flag=True,
+    default=False,
+    help="Treat all six sessions as allowed regardless of profile session_mode.",
+)
+@click.pass_context
+def catch_up(ctx, target_date: str, channels: str, force_all: bool, ignore_materiality: bool, active_mode: bool):
+    """Send all sessions that have started for the target date but not yet been delivered.
+
+    Accepts today, yesterday, or a specific YYYY-MM-DD date. For past dates
+    all six session windows are treated as elapsed so everything is eligible.
+
+    Examples:
+      python -m app.cli catch-up --send telegram,email
+      python -m app.cli catch-up --date yesterday --send telegram,email
+      python -m app.cli catch-up --active-mode --ignore-materiality
+      python -m app.cli catch-up --force-all --send telegram
+    """
+    from app.main import run_catch_up
+
+    settings = ctx.obj["settings"]
+    if channels:
+        channel_list = [c.strip().lower() for c in channels.split(",") if c.strip()]
+        if "email" in channel_list and "telegram" not in channel_list:
+            settings.delivery_channel = "email"
+        elif "telegram" in channel_list and "email" not in channel_list:
+            settings.delivery_channel = "telegram"
+        elif channel_list:
+            settings.delivery_channel = "all"
+
+    summary = run_catch_up(
+        settings,
+        target_date_str=target_date,
+        force_all=force_all,
+        ignore_materiality=ignore_materiality,
+        active_mode=active_mode,
+        command_source="cli:catch-up",
+    )
+
+    click.echo("\nCatch-up summary")
+    click.echo(f"  {'Session':<22} {'Action':<14} {'Reason'}")
+    click.echo(f"  {'-'*22} {'-'*14} {'-'*30}")
+    for row in summary:
+        click.echo(f"  {row['session']:<22} {row['action']:<14} {row.get('reason', '')}")
+    sent_count = sum(1 for r in summary if r["action"] == "sent")
+    skipped_count = sum(1 for r in summary if r["action"] in {"skipped", "already_sent"})
+    click.echo(f"\n  Sent: {sent_count}   Skipped/already sent: {skipped_count}")
+
+
+@cli.command("schedule-status")
+@click.option(
+    "--profile",
+    "profile_name",
+    default="default_user",
+    show_default=True,
+    help="Profile to inspect.",
+)
+@click.pass_context
+def schedule_status(ctx, profile_name: str):
+    """Show scheduler state, current session window, and today's send history.
+
+    Includes:
+      - Scheduler lock status (running or not)
+      - Current and next session windows
+      - Profile cadence preferences
+      - Per-channel send state for each session today
+    """
+    import fcntl as _fcntl_mod
+    from pathlib import Path as _Path
+    from zoneinfo import ZoneInfo
+
+    from app.briefing.session_routing import next_session_window, resolve_session_window
+    from app.db.models import SessionSendState
+    from app.db.session import get_session, init_db
+    from app.main import _allowed_sessions_for_mode
+    from app.personalization.user_profile import load_user_profile
+
+    import datetime as _dt
+
+    init_db()
+    settings = ctx.obj["settings"]
+    profile = load_user_profile(settings)
+    tz = ZoneInfo(profile.timezone or settings.timezone)
+    now_utc = _dt.datetime.now(_dt.timezone.utc)
+    local_now = now_utc.astimezone(tz)
+    today = local_now.date()
+
+    current_window = resolve_session_window(now=now_utc, timezone_name=profile.timezone or settings.timezone)
+    next_window = next_session_window(now=now_utc, timezone_name=profile.timezone or settings.timezone)
+
+    # Scheduler lock status
+    lock_path = _Path(settings.data_dir) / "state" / "scheduler.lock"
+    scheduler_running = False
+    lock_status_msg = "not held"
+    try:
+        if lock_path.exists():
+            handle = lock_path.open("a+")
+            try:
+                _fcntl_mod.flock(handle.fileno(), _fcntl_mod.LOCK_EX | _fcntl_mod.LOCK_NB)
+                _fcntl_mod.flock(handle.fileno(), _fcntl_mod.LOCK_UN)
+                lock_status_msg = "not held (file exists, scheduler not running)"
+            except OSError:
+                scheduler_running = True
+                lock_status_msg = "held (scheduler is running)"
+            finally:
+                handle.close()
+        else:
+            lock_status_msg = "lock file not found (scheduler has not run yet)"
+    except Exception as exc:
+        lock_status_msg = f"unable to probe ({exc})"
+
+    click.echo("Briefly schedule status")
+    click.echo(f"  Timezone:         {profile.timezone or settings.timezone}")
+    click.echo(f"  Local time:       {local_now.strftime('%Y-%m-%d %H:%M')}")
+    click.echo(f"  Current session:  {current_window.key} ({current_window.title})")
+    click.echo(f"  Next session:     {next_window.key} ({next_window.title})")
+    click.echo(f"  Scheduler lock:   {lock_status_msg}")
+    click.echo("")
+    click.echo("  Cadence preferences")
+    allowed = _allowed_sessions_for_mode(profile.session_mode)
+    always_list = profile.always_send_sessions or []
+    click.echo(f"    session_mode:             {profile.session_mode}")
+    click.echo(f"    allowed_sessions:         {', '.join(sorted(allowed))}")
+    click.echo(f"    always_send_sessions:     {', '.join(always_list) if always_list else '(none)'}")
+    click.echo(f"    suppress_low_materiality: {profile.suppress_low_materiality}")
+    click.echo("")
+    click.echo(f"  Today's send state ({today.isoformat()})")
+
+    all_session_keys = [
+        "morning", "europe_midday", "us_pre_open",
+        "us_intraday_risk", "into_close", "closing_wrap",
+    ]
+    channels = ["telegram", "email"]
+
+    with get_session() as db_sess:
+        rows = (
+            db_sess.query(SessionSendState)
+            .filter(
+                SessionSendState.profile_name == profile_name,
+                SessionSendState.local_date == today,
+                SessionSendState.replay_namespace == "",
+            )
+            .order_by(SessionSendState.session_key, SessionSendState.channel)
+            .all()
+        )
+    state_map: dict[tuple[str, str], SessionSendState] = {
+        (r.session_key, r.channel): r for r in rows
+    }
+
+    for sk in all_session_keys:
+        for ch in channels:
+            row = state_map.get((sk, ch))
+            if row is None:
+                state_str = "(not attempted)"
+            elif row.success:
+                sent_at = row.sent_at.strftime("%H:%M") if row.sent_at else "?"
+                state_str = f"sent at {sent_at}"
+            elif row.in_progress:
+                state_str = "in progress"
+            else:
+                state_str = f"failed: {(row.error_message or '')[:60]}"
+            click.echo(f"    {sk:<22} {ch:<10} {state_str}")
+
+
 if __name__ == "__main__":
     cli()

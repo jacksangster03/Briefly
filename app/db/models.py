@@ -78,6 +78,40 @@ class SentMessage(Base):
     error_message = Column(Text, nullable=True)
 
 
+class SessionSendState(Base):
+    """Per-session/channel idempotency and in-flight send claim state."""
+
+    __tablename__ = "session_send_state"
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_name",
+            "channel",
+            "session_key",
+            "local_date",
+            "replay_namespace",
+            name="uq_session_send_scope",
+        ),
+        UniqueConstraint("idempotency_key", name="uq_session_send_idempotency_key"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    channel = Column(String(50), nullable=False, index=True)
+    session_key = Column(String(50), nullable=False, index=True)
+    local_date = Column(Date, nullable=False, index=True)
+    replay_namespace = Column(String(120), nullable=False, default="", index=True)
+    message_type = Column(String(80), nullable=False)
+    idempotency_key = Column(String(255), nullable=False, index=True)
+    in_progress = Column(Boolean, default=True, index=True)
+    success = Column(Boolean, default=False, index=True)
+    command_source = Column(String(40), nullable=False, default="cli")
+    process_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow)
+    sent_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
+
+
 class ProviderHealthLog(Base):
     """Per-call observability for data providers."""
 

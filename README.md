@@ -374,7 +374,13 @@ The web control center at `http://127.0.0.1:8080/ui/settings` exposes a full por
 - CadenceEngine enforces: one morning briefing per local day, one intraday update per pre-US-open window, breaking only above threshold
 - US cash open computed from `09:30 America/New_York` with DST-safe IANA zone conversion
 - NYSE holiday and half-day awareness
-- Daily idempotency markers in SQLite prevent duplicate sends across process restarts
+- Per-session, per-channel idempotency via `SessionSendState` table: duplicate sends blocked, different sessions never block each other
+- Session delivery claims are process-safe with 30-minute stale takeover for crash recovery
+- Three delivery modes: `quiet` (morning only), `default` (morning + US pre-open), `active` (all six sessions)
+- `suppress_low_materiality` gates non-morning sessions by materiality score; disable for full cadence delivery
+- `schedule-status` command shows lock state, current/next session, preferences, and per-channel send history at a glance
+- Manual catch-up command sends all missed sessions for today without resending already-delivered ones
+- `session-send` command bypasses clock routing for any specific session; `--force` ignores idempotency for a true resend
 
 ---
 
@@ -417,6 +423,22 @@ python -m app.cli preopen
 python -m app.cli close
 python -m app.cli breaking
 python -m app.cli scheduler
+
+# Session delivery (bypass clock routing, use idempotency)
+python -m app.cli session-send --session europe_midday --send telegram,email
+python -m app.cli session-send --session us_pre_open --send telegram,email
+python -m app.cli session-send --session us_intraday_risk --send telegram,email
+python -m app.cli session-send --session into_close --send telegram,email
+python -m app.cli session-send --session closing_wrap --send telegram,email
+python -m app.cli session-send --session morning --force          # resend even if already sent
+
+# Catch-up: send all missed sessions for today
+python -m app.cli catch-up --send telegram,email
+python -m app.cli catch-up --active-mode --ignore-materiality --send telegram,email
+python -m app.cli catch-up --force-all --send telegram,email
+
+# Scheduler diagnostics
+python -m app.cli schedule-status
 
 # Manual day/session replay QA
 python -m app.cli day-replay --date today --show-output
@@ -579,7 +601,9 @@ coverage.home_region / coverage.weights
 delivery.morning_channels / delivery.intraday_channels / delivery.breaking_channels
 delivery.morning_brief_time / delivery.hourly_updates / delivery.breaking_alerts
 delivery.llm_email_morning / delivery.llm_shadow_mode
-delivery.session_mode / delivery.always_send_sessions / delivery.suppress_low_materiality
+delivery.session_mode              # quiet | default | active
+delivery.always_send_sessions      # JSON array of session keys, e.g. '["us_intraday_risk"]'
+delivery.suppress_low_materiality  # true | false
 delivery.email_density_mode
 delivery.quiet_hours_start / delivery.quiet_hours_end
 sections.morning.market_setup / sections.morning.macro_context / sections.morning.top_themes
@@ -588,6 +612,20 @@ healthcare.enabled / healthcare.max_items_morning / healthcare.max_items_intrada
 healthcare.themes / healthcare.tickers / healthcare.assets
 healthcare.minimum_severity_morning / healthcare.minimum_severity_intraday / healthcare.minimum_severity_breaking
 risk.lookback_days / risk.risk_free_rate_pct
+```
+
+#### Session mode quick reference
+
+| Mode | Sessions sent |
+|---|---|
+| `quiet` | Morning only |
+| `default` | Morning + US Pre-Open |
+| `active` | Morning, Europe Midday, US Pre-Open, US Intraday Risk, Into Close, Closing Wrap |
+
+Enable active mode:
+```bash
+python -m app.cli prefs-set --key delivery.session_mode --value active
+python -m app.cli prefs-set --key delivery.suppress_low_materiality --value false
 ```
 
 ---
@@ -974,6 +1012,7 @@ python -m app.cli simulation runs --profile default_user
 | 7B | Complete | PDF Portfolio Reports: fpdf2 renderer, user-selectable sections, DB-tracked report history, download |
 | 7C | Complete | ESG/SRI Scoring: yfinance sustainability, exclusion screens, alignment labels, per-profile config |
 | 7D | Complete | Multi-Currency: ticker-suffix currency inference, FX rate cache, exposure breakdown, hedge recommendations |
+| 8.7 | Complete | Session delivery hardening: per-session idempotency, `session-send`, `catch-up`, `schedule-status` commands, `session_mode`/`suppress_low_materiality` preference keys, 10 new idempotency and catch-up tests |
 | 5.7B | Planned | Historical selection and interaction effects using holding-level daily return series |
 
 ---

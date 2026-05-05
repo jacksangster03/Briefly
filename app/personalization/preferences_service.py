@@ -11,6 +11,11 @@ from app.db.models import UserPreference as UserPreferenceRow
 from app.db.session import get_session
 
 ALLOWED_CHANNELS = {"telegram", "email"}
+ALLOWED_SESSION_MODES = {"quiet", "default", "active"}
+ALLOWED_SESSION_KEYS = {
+    "morning", "europe_midday", "us_pre_open",
+    "us_intraday_risk", "into_close", "closing_wrap",
+}
 ALLOWED_MORNING_SECTIONS = {
     "market_setup",
     "macro_context",
@@ -157,6 +162,44 @@ def _normalize_string_list(value: Any) -> list[str]:
     raise ValueError("Value must be a comma-separated string or JSON array")
 
 
+def _normalize_session_mode(value: Any) -> str:
+    mode = str(value).strip().lower()
+    if mode not in ALLOWED_SESSION_MODES:
+        raise ValueError(
+            f"Unsupported session_mode '{mode}'. Allowed: {', '.join(sorted(ALLOWED_SESSION_MODES))}"
+        )
+    return mode
+
+
+def _normalize_session_key_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                candidates = [str(item).strip().lower() for item in parsed if str(item).strip()]
+            else:
+                candidates = [item.strip().lower() for item in value.split(",") if item.strip()]
+        except Exception:
+            candidates = [item.strip().lower() for item in value.split(",") if item.strip()]
+    elif isinstance(value, list):
+        candidates = [str(item).strip().lower() for item in value if str(item).strip()]
+    else:
+        raise ValueError("always_send_sessions must be a comma-separated string or JSON array")
+    invalid = [k for k in candidates if k not in ALLOWED_SESSION_KEYS]
+    if invalid:
+        raise ValueError(
+            f"Unsupported session key(s): {', '.join(invalid)}. "
+            f"Allowed: {', '.join(sorted(ALLOWED_SESSION_KEYS))}"
+        )
+    seen: set[str] = set()
+    unique: list[str] = []
+    for key in candidates:
+        if key not in seen:
+            seen.add(key)
+            unique.append(key)
+    return unique
+
+
 def _normalize_healthcare_severity(value: Any) -> str:
     severity = str(value).strip().lower()
     if severity not in ALLOWED_HEALTHCARE_SEVERITIES:
@@ -206,6 +249,9 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "delivery.llm_shadow_mode": _normalize_bool,
     "delivery.quiet_hours_start": _normalize_time,
     "delivery.quiet_hours_end": _normalize_time,
+    "delivery.session_mode": _normalize_session_mode,
+    "delivery.always_send_sessions": _normalize_session_key_list,
+    "delivery.suppress_low_materiality": _normalize_bool,
     "delivery.email_density_mode": _normalize_email_density_mode,
     "sections.morning.market_setup": _normalize_bool,
     "sections.morning.macro_context": _normalize_bool,
