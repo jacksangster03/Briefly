@@ -66,6 +66,18 @@ _FX_TOKENS: frozenset[str] = frozenset({
     "USDCHF", "USDCAD", "DOLLAR INDEX",
 })
 
+_TREASURY_YIELD_TOKENS: frozenset[str] = frozenset({
+    "10Y US TREASURY", "2Y US TREASURY", "US10Y", "US2Y", "DGS10", "DGS2",
+    "^TNX", "^TYX", "^FVX", "TREASURY YIELD", "GOVT YIELD",
+    "10Y YIELD", "2Y YIELD", "10-YEAR", "2-YEAR",
+})
+
+
+def is_treasury_yield_quote(q) -> bool:
+    """Return True if this QuoteData represents a Treasury yield (not a price instrument)."""
+    key = f"{(q.symbol or '').upper()} {(q.display_name or '').upper()}"
+    return any(token in key for token in _TREASURY_YIELD_TOKENS)
+
 
 def _asset_type_for_quote(q) -> str:
     """Infer the move_context asset type from a QuoteData symbol/display_name."""
@@ -444,6 +456,8 @@ class TelegramFormatter:
 
         # Index quotes
         for q in briefing.market_setup.index_quotes:
+            if is_treasury_yield_quote(q):
+                continue  # rendered below via compute_yield_context
             name = self._friendly_instrument_label(q.display_name or q.symbol, q.symbol)
             asset_type = _asset_type_for_quote(q)
             ctx = move_context_from_quote(q, asset_type=asset_type, label=name, session_mode=session_mode)
@@ -460,6 +474,8 @@ class TelegramFormatter:
 
         # Macro instruments (gold, oil, USD, BTC)
         for q in briefing.market_setup.macro_quotes:
+            if is_treasury_yield_quote(q):
+                continue
             name = self._friendly_instrument_label(q.display_name or q.symbol, q.symbol)
             asset_type = _asset_type_for_quote(q)
             ctx = move_context_from_quote(q, asset_type=asset_type, label=name, session_mode=session_mode)

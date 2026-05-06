@@ -1691,5 +1691,128 @@ def llm_usage_list(profile_name: str, days: int, limit: int):
     click.echo("")
 
 
+@cli.command("delivery-log")
+@click.option("--date", "target_date", default="today", help="Date: today | yesterday | YYYY-MM-DD")
+@click.option("--profile", "profile_name", default="default_user", help="Profile name")
+@click.pass_context
+def delivery_log(ctx, target_date: str, profile_name: str) -> None:
+    """Show delivery history for a date: session, channel, source, times, success."""
+    from app.main import get_session
+    from app.db.models import SessionSendState
+    from app.personalization.user_profile import load_user_profile
+    from datetime import date as _date, datetime as _dt, timedelta
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+
+    settings = ctx.obj["settings"]
+    init_db()
+
+    try:
+        profile = load_user_profile(settings, profile_name)
+        tz = ZoneInfo(profile.timezone or "Europe/Madrid")
+    except Exception:
+        tz = ZoneInfo("Europe/Madrid")
+
+    now_local = _dt.now(tz)
+    if target_date.lower() == "today":
+        target = now_local.date()
+    elif target_date.lower() == "yesterday":
+        target = (now_local - timedelta(days=1)).date()
+    else:
+        target = _date.fromisoformat(target_date)
+
+    date_str = target.strftime("%A %d %b %Y")
+    print(f"\nDelivery Log — {date_str} ({profile.timezone or 'Europe/Madrid'})\n")
+
+    with get_session() as db:
+        rows = (
+            db.query(SessionSendState)
+            .filter(
+                SessionSendState.profile_name == profile_name,
+                SessionSendState.local_date == target,
+            )
+            .order_by(SessionSendState.sent_at)
+            .all()
+        )
+
+    if not rows:
+        print("  No delivery records found for this date.")
+        return
+
+    from app.briefing.session_metadata import label_for
+
+    print(f"  {'Session':<28} {'Channel':<10} {'Source':<12} {'Sent at':<8} {'OK':<5} {'Namespace'}")
+    print("  " + "-" * 80)
+    for r in rows:
+        label = label_for(r.session_key)
+        sent_str = ""
+        if r.sent_at:
+            sent_utc = r.sent_at.replace(tzinfo=timezone.utc)
+            sent_local = sent_utc.astimezone(tz)
+            sent_str = sent_local.strftime("%H:%M")
+        ok = "✓" if r.success else "✗"
+        ns = r.replay_namespace or "live"
+        src = r.command_source or "?"
+        print(f"  {label:<28} {r.channel:<10} {src:<12} {sent_str:<8} {ok:<5} {ns}")
+    print()
+
+
+@cli.command("version")
+@click.pass_context
+def version_cmd(ctx, **kwargs) -> None:
+    """Show app version, git commit, and scheduler status."""
+    import subprocess
+    import os
+
+    # Git info
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd="/Users/jack/market-briefing-bot",
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        commit = "unknown"
+
+    try:
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd="/Users/jack/market-briefing-bot",
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        branch = "unknown"
+
+    try:
+        commit_date = subprocess.check_output(
+            ["git", "log", "-1", "--format=%ci"],
+            cwd="/Users/jack/market-briefing-bot",
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        commit_date = "unknown"
+
+    print(f"Briefly")
+    print(f"  Branch:  {branch}")
+    print(f"  Commit:  {commit}  ({commit_date})")
+
+    # Check scheduler lock file
+    lock_path = "/tmp/briefly_scheduler.lock"
+    if os.path.exists(lock_path):
+        try:
+            import fcntl
+            with open(lock_path) as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            print(f"  Scheduler: not running (lock file exists but no process holds it)")
+        except BlockingIOError:
+            print(f"  Scheduler: running (lock held)")
+    else:
+        print(f"  Scheduler: not running")
+
+
 if __name__ == "__main__":
     cli()

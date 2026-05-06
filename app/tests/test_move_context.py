@@ -115,16 +115,22 @@ class TestMagnitudeLabelPrice:
 
 class TestMagnitudeLabelPricePercentile:
     def test_small_gain(self) -> None:
-        assert "Small gain" == _magnitude_label_price_percentile(0.10, True)
+        # pct < 0.25 => "Normal gain, typical vs 1Y"
+        assert "Normal gain" in _magnitude_label_price_percentile(0.10, True)
+        assert "typical" in _magnitude_label_price_percentile(0.10, True)
 
     def test_strong_day(self) -> None:
-        assert "Strong day" == _magnitude_label_price_percentile(0.75, True)
+        # pct 0.75 falls in [0.75, 0.90) => "Strong day, top quartile vs 1Y"
+        assert "Strong day" in _magnitude_label_price_percentile(0.75, True)
+        assert "top quartile" in _magnitude_label_price_percentile(0.75, True)
 
     def test_top_decile_gain(self) -> None:
         assert "top decile" in _magnitude_label_price_percentile(0.90, True)
 
     def test_weak_day(self) -> None:
-        assert "Weak day" == _magnitude_label_price_percentile(0.75, False)
+        # pct 0.75 falls in [0.75, 0.90) => "Weak day, top quartile vs 1Y"
+        assert "Weak day" in _magnitude_label_price_percentile(0.75, False)
+        assert "top quartile" in _magnitude_label_price_percentile(0.75, False)
 
 
 class TestMagnitudeLabelYieldBp:
@@ -905,3 +911,192 @@ class TestMoveContextFromQuote:
         q = self._FakeQuote()
         ctx = move_context_from_quote(q, asset_type=ASSET_TYPE_STOCK)
         assert ctx.label == "NVIDIA"
+
+
+# ---------------------------------------------------------------------------
+# Part N: new tests for treasury yield de-duplication, range sanity,
+# percentile labels, and WHAT CHANGED cleanup
+# ---------------------------------------------------------------------------
+
+class TestIsTreasuryYieldQuote:
+    """Test is_treasury_yield_quote from formatter.py."""
+
+    def _q(self, symbol: str, display_name: str = ""):
+        class _Q:
+            pass
+        q = _Q()
+        q.symbol = symbol
+        q.display_name = display_name
+        return q
+
+    def test_10y_display_name(self) -> None:
+        from app.briefing.formatter import is_treasury_yield_quote
+        q = self._q("FRED_DGS10", "10Y US Treasury Yield")
+        assert is_treasury_yield_quote(q) is True
+
+    def test_tnx_symbol(self) -> None:
+        from app.briefing.formatter import is_treasury_yield_quote
+        q = self._q("^TNX", "")
+        assert is_treasury_yield_quote(q) is True
+
+    def test_us10y_symbol(self) -> None:
+        from app.briefing.formatter import is_treasury_yield_quote
+        q = self._q("US10Y", "")
+        assert is_treasury_yield_quote(q) is True
+
+    def test_dgs10_symbol(self) -> None:
+        from app.briefing.formatter import is_treasury_yield_quote
+        q = self._q("DGS10", "")
+        assert is_treasury_yield_quote(q) is True
+
+    def test_spy_not_treasury(self) -> None:
+        from app.briefing.formatter import is_treasury_yield_quote
+        q = self._q("SPY", "S&P 500 ETF")
+        assert is_treasury_yield_quote(q) is False
+
+    def test_gold_not_treasury(self) -> None:
+        from app.briefing.formatter import is_treasury_yield_quote
+        q = self._q("GC", "Gold")
+        assert is_treasury_yield_quote(q) is False
+
+
+class TestRangeSanityChecks:
+    """Test range quality suppression for commodity and equity index."""
+
+    def test_wide_wti_range_suppressed(self) -> None:
+        """WTI with low=-11.8%, high=+2.2% should be suppressed (width > 10pp, move < 4%)."""
+        prev = 50.0
+        low = prev * (1 - 0.118)   # -11.8%
+        high = prev * (1 + 0.022)  # +2.2%
+        ctx = compute_move_context(
+            symbol="CL",
+            label="WTI",
+            asset_type=ASSET_TYPE_COMMODITY,
+            current_price=prev * 1.01,
+            change=prev * 0.01,
+            change_percent=1.0,
+            day_high=high,
+            day_low=low,
+            prev_close=prev,
+        )
+        assert ctx.range_quality in {"suppressed", "wide_provider_range"}
+        assert ctx.day_range_display is None
+
+    def test_normal_equity_range_available(self) -> None:
+        """Normal equity range of +0.3% to +1.5% (width 1.2pp) should be available."""
+        prev = 4500.0
+        low = prev * 1.003
+        high = prev * 1.015
+        current = prev * 1.010
+        ctx = compute_move_context(
+            symbol="SPX",
+            label="S&P 500",
+            asset_type=ASSET_TYPE_EQUITY_INDEX,
+            current_price=current,
+            change=current - prev,
+            change_percent=1.0,
+            day_high=high,
+            day_low=low,
+            prev_close=prev,
+        )
+        assert ctx.range_quality == "available"
+        assert ctx.day_range_display is not None
+
+    def test_yield_range_wider_than_30bp_suppressed(self) -> None:
+        """Yield intraday range wider than 30 bp should be suppressed."""
+        ctx = compute_yield_context(
+            symbol="US10Y",
+            label="US 10Y",
+            current_yield=4.42,
+            change_yield=0.05,
+            day_high_yield=4.80,  # +38 bp from prev 4.42
+            day_low_yield=4.42,
+            prev_yield=4.42,
+            session_mode="morning",
+        )
+        assert ctx.range_quality == "suppressed"
+        assert ctx.day_range_display is None
+
+    def test_yield_range_under_30bp_available(self) -> None:
+        """Yield intraday range of 20 bp should be available."""
+        ctx = compute_yield_context(
+            symbol="US10Y",
+            label="US 10Y",
+            current_yield=4.42,
+            change_yield=0.05,
+            day_high_yield=4.52,  # +10 bp from prev
+            day_low_yield=4.32,   # -10 bp from prev (total 20 bp range)
+            prev_yield=4.42,
+            session_mode="morning",
+        )
+        assert ctx.range_quality == "available"
+        assert ctx.day_range_display is not None
+
+
+class TestPercentileLabels:
+    """Test direction-sensitive percentile label at various thresholds."""
+
+    def test_pct_85_gain_includes_top_quartile(self) -> None:
+        # pct=0.85 falls in [0.75, 0.90) => "Strong day, top quartile vs 1Y"
+        label = _magnitude_label_price_percentile(0.85, True)
+        assert "top quartile" in label
+
+    def test_pct_92_gain_includes_top_decile(self) -> None:
+        label = _magnitude_label_price_percentile(0.92, True)
+        assert "top decile" in label
+
+    def test_pct_99_extreme_gain(self) -> None:
+        label = _magnitude_label_price_percentile(0.99, True)
+        assert "Extreme gain" in label
+
+    def test_pct_10_typical_decline(self) -> None:
+        label = _magnitude_label_price_percentile(0.10, False)
+        assert "Normal decline" in label
+        assert "typical" in label
+
+
+class TestWhatChangedCleanup:
+    """Test that build_what_changed_lines handles zero-delta case cleanly."""
+
+    def _same_snapshot(self) -> dict:
+        return {
+            "vix_level": 18.5,
+            "wti_pct": -0.5,
+            "brent_pct": -0.3,
+            "gold_pct": 0.2,
+            "us10y": 4.42,
+            "breadth_up_pct": 60.0,
+            "us_avg_pct": 0.3,
+            "eu_avg_pct": 0.1,
+            "asia_avg_pct": -0.2,
+            "portfolio_contrib_pct": 0.15,
+        }
+
+    def test_identical_snapshots_returns_flat_summary(self) -> None:
+        from app.briefing.session_snapshot import build_what_changed_lines
+        snap = self._same_snapshot()
+        result = build_what_changed_lines(previous=snap, current=snap)
+        # Should return a single line summary, not per-metric "+0.00%" entries
+        assert len(result) == 1
+        text = result[0].lower()
+        assert "little changed" in text or "stable" in text or "flat" in text
+
+    def test_identical_snapshots_no_raw_zero_delta(self) -> None:
+        from app.briefing.session_snapshot import build_what_changed_lines
+        snap = self._same_snapshot()
+        result = build_what_changed_lines(previous=snap, current=snap)
+        # No line should show a raw "+0.00" style delta
+        for line in result:
+            assert "+0.00" not in line
+
+    def test_us10y_shows_bp_not_pct(self) -> None:
+        from app.briefing.session_snapshot import build_what_changed_lines
+        previous = self._same_snapshot()
+        current = dict(previous)
+        current["us10y"] = 4.47  # +5 bp
+        result = build_what_changed_lines(previous=previous, current=current)
+        us10y_lines = [l for l in result if "US 10Y" in l]
+        assert us10y_lines, "Expected a US 10Y line"
+        line = us10y_lines[0]
+        # Should show bp, not raw pct delta like (+0.05%)
+        assert "bp" in line or "flat" in line or "little changed" in line

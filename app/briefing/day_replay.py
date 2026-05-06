@@ -294,24 +294,33 @@ def _with_test_banner_messages(
         return messages
     banner = (
         "<b>[TEST DAY REPLAY - NOT LIVE]</b>\n"
-        f"<b>{session_title.upper()}</b> | replay_time {replay_time_local.strftime('%H:%M')}"
+        f"<b>{session_title.upper()}</b> | replay_time {replay_time_local.strftime('%H:%M')}\n"
+        "<i>Replay caveat: all sessions use the latest available provider snapshot, not true point-in-time historical data. "
+        "WHAT CHANGED comparisons between sessions reflect the same underlying data.</i>"
     )
     first = f"{banner}\n\n{messages[0]}"
     return [first] + messages[1:]
 
 
 def _with_test_banner_email(email_content, *, session_title: str, replay_time_local: datetime):
-    subject = f"[TEST Replay] {session_title} - {replay_time_local.strftime('%a %d %b %Y')}"
+    date_str = replay_time_local.strftime("%a %d %b %Y")
+    slot_str = replay_time_local.strftime("%H:%M")
+    subject = f"[TEST DAY REPLAY] Briefly | {session_title} | {date_str} | slot {slot_str}"
     plain_prefix = (
         "[TEST DAY REPLAY - NOT LIVE]\n"
-        f"{session_title} | replay_time {replay_time_local.strftime('%H:%M')}\n\n"
+        f"{session_title} | replay_time {slot_str}\n"
+        "Replay caveat: all sessions use the latest available provider snapshot. "
+        "WHAT CHANGED between sessions reflects the same underlying data.\n\n"
     )
     html_prefix = (
         "<div style=\"font-family:Arial,sans-serif;background:#2a1010;color:#ffd7d7;"
         "padding:10px 14px;font-size:12px;font-weight:700;border-bottom:1px solid #6f2a2a;\">"
         "[TEST DAY REPLAY - NOT LIVE] "
-        f"{session_title} | replay_time {replay_time_local.strftime('%H:%M')}"
-        "</div>"
+        f"{session_title} | replay_time {slot_str}"
+        "<br><span style=\"font-weight:400;font-size:11px;color:#ffb3b3;\">"
+        "Replay caveat: all sessions use the latest available provider snapshot. "
+        "WHAT CHANGED between sessions reflects the same underlying data."
+        "</span></div>"
     )
     return email_content.model_copy(
         update={

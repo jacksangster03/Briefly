@@ -193,7 +193,7 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
 
     magnitudes: list[float] = []
 
-    def _delta(name: str, key: str, suffix: str, scale: float = 1.0) -> None:
+    def _delta(name: str, key: str, suffix: str, scale: float = 1.0, is_rate: bool = False) -> None:
         cur_raw = current.get(key)
         prv_raw = previous.get(key)
         if cur_raw is None and prv_raw is None:
@@ -208,14 +208,44 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
         cur = float(cur_raw)
         prv = float(prv_raw)
         d = (cur - prv) * scale
-        magnitudes.append(abs(d))
-        lines.append(f"{name}: {cur:.2f}{suffix} ({d:+.2f}{suffix})")
+
+        if is_rate:
+            bp = round(d * 100)
+            abs_bp = abs(bp)
+            if abs_bp < 1:
+                qualifier = "flat"
+            elif abs_bp < 3:
+                qualifier = "little changed"
+            else:
+                qualifier = f"{bp:+d} bp"
+            if abs_bp < 1:
+                lines.append(f"{name}: {cur:.2f}% ({qualifier})")
+            else:
+                lines.append(f"{name}: {cur:.2f}% ({qualifier})")
+            magnitudes.append(abs_bp / 100)
+            return
+
+        abs_d = abs(d)
+        if abs_d < 0.05:
+            qualifier = "flat"
+        elif abs_d < 0.25:
+            qualifier = f"little changed ({d:+.2f}{suffix})"
+        elif abs_d < 0.75:
+            qualifier = f"{'higher' if d > 0 else 'lower'} ({d:+.2f}{suffix})"
+        else:
+            qualifier = f"{'sharply higher' if d > 0 else 'sharply lower'} ({d:+.2f}{suffix})"
+
+        magnitudes.append(abs_d)
+        if abs_d < 0.05:
+            lines.append(f"{name}: {cur:.2f}{suffix} ({qualifier})")
+        else:
+            lines.append(f"{name}: {cur:.2f}{suffix} ({qualifier})")
 
     _delta("VIX", "vix_level", "")
     _delta("WTI", "wti_pct", "%")
     _delta("Brent", "brent_pct", "%")
     _delta("Gold", "gold_pct", "%")
-    _delta("US 10Y", "us10y", "%")
+    _delta("US 10Y", "us10y", "%", is_rate=True)
     _delta("Sector breadth up", "breadth_up_pct", "%")
     _delta("US avg", "us_avg_pct", "%")
     _delta("Europe avg", "eu_avg_pct", "%")
@@ -232,6 +262,6 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
             f"Watchlist leadership spread: {(cur_leader - cur_laggard):+.2f}pp "
             f"({spread_delta:+.2f}pp)"
         )
-    if magnitudes and max(magnitudes) < 0.25:
-        return ["Little changed since prior replay slot: rates and oil remain the main pressure points."] + lines[:6]
+    if magnitudes and max(magnitudes) < 0.05:
+        return ["Little changed since prior session: cross-asset signals stable."]
     return lines[:8]

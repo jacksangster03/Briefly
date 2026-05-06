@@ -117,11 +117,13 @@ class EmailFormatter:
 
     def _subject(self, briefing: MorningBriefing) -> str:
         date_str = briefing.generated_at.strftime("%a %d %b")
-        if briefing.session_title and briefing.session_key not in {"", "morning"}:
-            return f"{briefing.session_title} | {date_str}"
         if briefing.session_mode in {"saturday", "sunday"}:
-            return f"Weekend Briefing | {date_str}"
-        return f"Morning Briefing | {date_str}"
+            session_label = "Weekend Briefing"
+        elif briefing.session_title and briefing.session_key not in {"", "morning"}:
+            session_label = briefing.session_title
+        else:
+            session_label = "Morning Briefing"
+        return f"Briefly | {session_label} | {date_str}"
 
     def _html_body(self, briefing: MorningBriefing, full_html: str, subject: str) -> str:
         self._move_shading_baselines = self._build_move_shading_baselines(briefing)

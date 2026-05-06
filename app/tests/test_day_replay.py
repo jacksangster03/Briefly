@@ -173,7 +173,7 @@ def test_day_replay_send_test_labels_without_sentmessage_writes(monkeypatch, val
     assert sent_email
     assert "[TEST DAY REPLAY - NOT LIVE]" in sent_telegram[0][0]
     assert "REPLAY MODE: session slot simulated at" in sent_telegram[0][0]
-    assert sent_email[0]["subject"].startswith("[TEST Replay]")
+    assert sent_email[0]["subject"].startswith("[TEST DAY REPLAY]")
 
     with get_session() as session:
         assert session.query(SentMessage).count() == 0

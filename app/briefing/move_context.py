@@ -56,6 +56,8 @@ class MoveContext:
     day_range_position_label: str | None
     final_display: str
     errors: list[str] = field(default_factory=list)
+    range_quality: str = "available"  # "available" | "suppressed" | "unavailable" | "wide_provider_range"
+    range_suppression_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -92,15 +94,23 @@ def _magnitude_label_price(abs_pct: float, is_gain: bool) -> str:
 
 def _magnitude_label_price_percentile(pct: float, is_gain: bool) -> str:
     """Direction-sensitive label from 1Y daily-move percentile."""
-    if pct < 0.20:
-        return "Small gain" if is_gain else "Small decline"
-    if pct < 0.40:
-        return "Normal gain" if is_gain else "Normal decline"
-    if pct < 0.60:
-        return "Firm gain" if is_gain else "Firm decline"
-    if pct < 0.80:
-        return "Strong day" if is_gain else "Weak day"
-    return "Strong day, top decile vs 1Y daily moves" if is_gain else "Weak day, bottom decile vs 1Y daily moves"
+    if pct < 0.25:
+        label = "Normal gain" if is_gain else "Normal decline"
+        return f"{label}, typical vs 1Y"
+    if pct < 0.50:
+        label = "Firm gain" if is_gain else "Firm decline"
+        return f"{label}, above typical vs 1Y"
+    if pct < 0.75:
+        label = "Strong gain" if is_gain else "Sharp fall"
+        return f"{label}, elevated vs 1Y"
+    if pct < 0.90:
+        label = "Strong day" if is_gain else "Weak day"
+        return f"{label}, top quartile vs 1Y"
+    if pct < 0.98:
+        label = "Strong gain" if is_gain else "Sharp fall"
+        return f"{label}, top decile vs 1Y"
+    label = "Extreme gain" if is_gain else "Extreme fall"
+    return f"{label}, >98th pct vs 1Y"
 
 
 def _magnitude_label_yield_bp(abs_bp: float, is_rally: bool) -> str:
@@ -285,6 +295,11 @@ def compute_move_context(
         except Exception as exc:
             errors.append(f"level_percentile: {exc}")
 
+    # For equity indices, suppress level context unless very near 1Y extremes
+    if level_context_label and asset_type == ASSET_TYPE_EQUITY_INDEX:
+        if level_range_percentile_1y is not None and 0.15 <= level_range_percentile_1y <= 0.85:
+            level_context_label = None
+
     # ── Day range ─────────────────────────────────────────────────────────────
     day_range_display: str | None = None
     day_range_position_label: str | None = None
@@ -292,6 +307,9 @@ def compute_move_context(
     dh = float(day_high)
     dl = float(day_low)
 
+    # Range sanity check
+    range_quality = "unavailable"
+    range_suppression_reason: str | None = None
     if dh > 0 and dl > 0 and effective_prev > 0 and dh != dl:
         try:
             low_move_pct = (dl / effective_prev - 1) * 100
@@ -303,6 +321,38 @@ def compute_move_context(
             range_span = dh - dl
             price_pos = _clamp((float(current_price) - dl) / range_span)
             day_range_position_label = _range_position_label(price_pos)
+
+            # Validate range width
+            low_move_pct_val = (dl / effective_prev - 1) * 100
+            high_move_pct_val = (dh / effective_prev - 1) * 100
+            width_pp = abs(high_move_pct_val - low_move_pct_val)
+
+            if asset_type == ASSET_TYPE_VOLATILITY_INDEX:
+                max_width = 50.0
+            elif asset_type == ASSET_TYPE_COMMODITY:
+                max_width = 10.0
+            elif asset_type in {ASSET_TYPE_EQUITY_INDEX, ASSET_TYPE_EQUITY_ETF}:
+                max_width = 5.0
+            elif asset_type == ASSET_TYPE_STOCK:
+                max_width = 8.0
+            else:
+                max_width = 8.0
+
+            if width_pp > max_width and asset_type == ASSET_TYPE_COMMODITY:
+                if abs_pct > 4.0:
+                    range_quality = "available"
+                else:
+                    day_range_display = None
+                    day_range_position_label = None
+                    range_quality = "wide_provider_range"
+                    range_suppression_reason = f"range width {width_pp:.1f}pp exceeds {max_width}pp threshold"
+            elif width_pp > max_width:
+                day_range_display = None
+                day_range_position_label = None
+                range_quality = "suppressed"
+                range_suppression_reason = f"range width {width_pp:.1f}pp exceeds {max_width}pp threshold"
+            elif day_range_display:
+                range_quality = "available"
         except Exception as exc:
             errors.append(f"day_range: {exc}")
 
@@ -340,6 +390,8 @@ def compute_move_context(
         day_range_position_label=day_range_position_label,
         final_display=final_display,
         errors=errors,
+        range_quality=range_quality,
+        range_suppression_reason=range_suppression_reason,
     )
 
 
@@ -431,6 +483,9 @@ def compute_yield_context(
     dh = float(day_high_yield)
     dl = float(day_low_yield)
 
+    # Validate yield bp range width
+    range_quality = "unavailable"
+    range_suppression_reason: str | None = None
     if dh > 0 and dl > 0 and eff_prev > 0 and abs(dh - dl) > 1e-6:
         try:
             low_bp = round((dl - eff_prev) * 100)
@@ -445,6 +500,15 @@ def compute_yield_context(
             # But for yield display we track yield position naturally
             pos = _clamp((float(current_yield) - dl) / span)
             day_range_position_label = _range_position_label(pos)
+
+            bp_width = abs((dh - dl) * 100)
+            if bp_width > 30:
+                day_range_display = None
+                day_range_position_label = None
+                range_quality = "suppressed"
+                range_suppression_reason = f"yield bp range width {bp_width:.0f} bp exceeds 30 bp threshold"
+            elif day_range_display:
+                range_quality = "available"
         except Exception as exc:
             errors.append(f"yield_day_range: {exc}")
 
@@ -480,6 +544,8 @@ def compute_yield_context(
         day_range_position_label=day_range_position_label,
         final_display=final_display,
         errors=errors,
+        range_quality=range_quality,
+        range_suppression_reason=range_suppression_reason,
     )
 
 
