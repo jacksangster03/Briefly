@@ -38,11 +38,13 @@ class TelegramMessenger(BaseMessenger):
         # this messenger skips its own dry-run echo so the terminal
         # doesn't show the same payload twice.
         self.show_output = settings.show_output
+        self.last_error: str = ""
 
     def is_configured(self) -> bool:
         return bool(self.token and self.chat_id)
 
     def send(self, text: str, parse_mode: str = "HTML") -> bool:
+        self.last_error = ""
         if self.dry_run:
             logger.info("[DRY RUN] Would send Telegram message (%d chars)", len(text))
             if not self.show_output:
@@ -58,6 +60,7 @@ class TelegramMessenger(BaseMessenger):
 
         if not self.is_configured():
             logger.warning("Telegram not configured; message not sent")
+            self.last_error = "not configured"
             return False
 
         url = f"{API_BASE}/bot{self.token}/sendMessage"
@@ -76,9 +79,11 @@ class TelegramMessenger(BaseMessenger):
             else:
                 error = resp.json().get("description", resp.text[:200])
                 logger.error("Telegram send failed: %s", error)
+                self.last_error = error
                 return False
         except requests.exceptions.RequestException as exc:
             logger.error("Telegram request failed: %s", exc)
+            self.last_error = str(exc)
             return False
 
     def send_photo(self, asset: ChartAsset, caption: str = "", with_feedback_keyboard: bool = False) -> bool:

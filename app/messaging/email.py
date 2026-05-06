@@ -80,7 +80,11 @@ class EmailMessenger(BaseMessenger):
         html_body: str,
         inline_assets: list[ChartAsset] | None = None,
     ) -> bool:
-        """Send an HTML email with optional inline PNG charts."""
+        """Send an HTML email with optional inline PNG charts.
+
+        The MIME message is built once; only the SMTP connection is retried on
+        transient failures.
+        """
         inline_assets = inline_assets or []
         self.last_error = ""
 
@@ -97,6 +101,25 @@ class EmailMessenger(BaseMessenger):
             self.last_error = "email not configured"
             return False
 
+        msg = self._build_mime_message(subject, plain_text, html_body, inline_assets)
+
+        from app.messaging.retry import call_with_retry
+        ok, reason = call_with_retry(
+            lambda: self._smtp_send(msg, plain_text=plain_text, n_assets=len(inline_assets)),
+            channel="email",
+        )
+        if not ok:
+            self.last_error = self.last_error or reason or "rich email send failed"
+        return ok
+
+    def _build_mime_message(
+        self,
+        subject: str,
+        plain_text: str,
+        html_body: str,
+        inline_assets: list[ChartAsset],
+    ) -> MIMEMultipart:
+        """Assemble the MIME message (no network I/O)."""
         msg = MIMEMultipart("related")
         msg["Subject"] = subject or "Market Briefing"
         msg["From"] = self.user
@@ -114,6 +137,10 @@ class EmailMessenger(BaseMessenger):
             image.add_header("Content-Disposition", "inline", filename=asset.filename or f"{asset.key}.png")
             msg.attach(image)
 
+        return msg
+
+    def _smtp_send(self, msg: MIMEMultipart, *, plain_text: str = "", n_assets: int = 0) -> bool:
+        """Open an SMTP connection and transmit msg. Returns True on success."""
         try:
             with smtplib.SMTP(self.host, self.port, timeout=30) as server:
                 server.starttls()
@@ -123,7 +150,7 @@ class EmailMessenger(BaseMessenger):
                 "Rich email sent to %s (%d chars, %d inline assets)",
                 self.to_addr,
                 len(plain_text),
-                len(inline_assets),
+                n_assets,
             )
             return True
         except Exception as exc:

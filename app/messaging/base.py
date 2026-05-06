@@ -13,6 +13,7 @@ class BaseMessenger(ABC):
     """Abstract messenger. All delivery channels implement this."""
 
     name: str = "base"
+    last_error: str = ""
 
     @abstractmethod
     def is_configured(self) -> bool:
@@ -25,13 +26,25 @@ class BaseMessenger(ABC):
         ...
 
     def send_messages(self, messages: list[str], parse_mode: str = "HTML") -> bool:
-        """Send a list of messages (e.g. split long briefings). Return True if all succeed.
+        """Send a list of messages with per-message retry on transient failures.
 
-        Each channel's send() method is responsible for handling its own
-        configuration and dry-run checks.
+        Live, configured sends are retried up to the default max_attempts with
+        backoff. Dry-run and unconfigured channels go through send() directly
+        without retry so they never sleep.
         """
+        from app.messaging.retry import call_with_retry
+        dry_run = getattr(self, "dry_run", False)
         all_ok = True
         for msg in messages:
-            if not self.send(msg, parse_mode=parse_mode):
-                all_ok = False
+            if dry_run or not self.is_configured():
+                if not self.send(msg, parse_mode=parse_mode):
+                    all_ok = False
+            else:
+                ok, reason = call_with_retry(
+                    lambda m=msg, pm=parse_mode: self.send(m, parse_mode=pm),
+                    channel=self.name,
+                )
+                if not ok:
+                    all_ok = False
+                    self.last_error = reason
         return all_ok
