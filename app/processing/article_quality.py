@@ -220,6 +220,19 @@ _CLICKBAIT_TERMS = (
     "should you buy",
     "stock to watch",
     "stocks to watch",
+    # Opinion/valuation-commentary patterns (TODO: replace with ML classifier)
+    "hiding in plain sight",
+    "at a discount",
+    "hidden gem",
+    "no-brainer",
+    "screaming buy",
+    "must-own",
+    "time to buy",
+    "time to sell",
+    "worth buying",
+    "bargain",
+    "undervalued gem",
+    "too cheap to ignore",
 )
 
 _HARD_CATALYST_TERMS = (

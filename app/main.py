@@ -902,7 +902,10 @@ def run_morning_briefing(
     messages = formatter.format_morning_briefing(briefing)
     email_content = EmailFormatter(profile.timezone).format_morning_briefing(briefing)
 
-    message_type = "morning" if session_key == "morning" else "intraday"
+    # Use the session key directly so profile.channels_for() can be configured
+    # per session; falls back to "morning" defaults for unconfigured sessions,
+    # which always include both telegram and email.
+    message_type = session_key or "morning"
     delivery_plan = _delivery_channel_plan(settings=settings, profile=profile, message_type=message_type)
     messengers = [item["messenger"] for item in delivery_plan if item.get("attempted") and item.get("messenger")]
     display_events = []
@@ -1179,6 +1182,141 @@ def run_intraday_update(
         session_override="us_intraday_risk",
         command_source=command_source,
     )
+
+
+# -- Daily summary ------------------------------------------------------------
+
+def run_daily_summary(
+    settings: Settings | None = None,
+    *,
+    target_date_str: str = "today",
+    profile_name: str = "default_user",
+) -> str:
+    """Generate and return a plain-text daily summary of session send states.
+
+    Reads from SessionSendState; no provider calls are made. The summary is
+    returned as a string so the CLI and scheduler can both use it.
+
+    Args:
+        settings: Settings instance (uses get_settings() if None).
+        target_date_str: "today", "yesterday", or "YYYY-MM-DD".
+        profile_name: Profile to inspect.
+
+    Returns:
+        Multi-line plain-text summary string.
+    """
+    from app.briefing.session_metadata import ALL_SESSIONS, ASIA_COVERAGE_NOTE
+    from app.briefing.session_snapshot_service import list_session_snapshots
+
+    settings = settings or get_settings()
+    init_db()
+    tz = ZoneInfo(settings.timezone)
+    now_utc = datetime.now(timezone.utc)
+    local_now = now_utc.astimezone(tz)
+
+    if target_date_str in ("today", ""):
+        target_date = local_now.date()
+    elif target_date_str == "yesterday":
+        target_date = (local_now - timedelta(days=1)).date()
+    else:
+        from datetime import date as _date
+        target_date = _date.fromisoformat(target_date_str)
+
+    channels = ["telegram", "email"]
+    with get_session() as db_sess:
+        rows = (
+            db_sess.query(SessionSendState)
+            .filter(
+                SessionSendState.profile_name == profile_name,
+                SessionSendState.local_date == target_date,
+                SessionSendState.replay_namespace == "",
+            )
+            .all()
+        )
+
+    state_map: dict[tuple[str, str], SessionSendState] = {
+        (r.session_key, r.channel): r for r in rows
+    }
+
+    try:
+        snapshots = list_session_snapshots(profile_name=profile_name, local_date=target_date, limit=20)
+        snapped_keys = {s["session_key"] for s in snapshots}
+    except Exception:
+        snapped_keys = set()
+
+    lines: list[str] = [
+        f"[DAILY SUMMARY] Briefly — {target_date.isoformat()}",
+        "",
+    ]
+
+    failures = 0
+    archived = 0
+    breaking_count = 0
+
+    for meta in ALL_SESSIONS:
+        sk = meta.key
+        session_lines: list[str] = []
+        for ch in channels:
+            row = state_map.get((sk, ch))
+            if row is None:
+                continue
+            if row.success:
+                sent_at = row.sent_at.strftime("%H:%M") if row.sent_at else "?"
+                session_lines.append(f"  {ch}: sent at {sent_at}")
+            elif row.in_progress:
+                session_lines.append(f"  {ch}: in progress")
+            else:
+                failures += 1
+                err = (row.error_message or "unknown error")[:80]
+                session_lines.append(f"  {ch}: FAILED — {err}")
+
+        if session_lines:
+            lines.append(f"{meta.label}: {_session_send_status_summary(state_map, sk, channels)}")
+            lines.append(f"  Focus: {meta.focus}")
+            lines.extend(session_lines)
+            if sk in snapped_keys:
+                archived += 1
+        else:
+            lines.append(f"{meta.label}: not sent")
+            lines.append(f"  Focus: {meta.focus}")
+
+        lines.append("")
+
+    # Breaking alerts from SentMessage
+    with get_session() as db_sess:
+        breaking_count = (
+            db_sess.query(SentMessage)
+            .filter(
+                SentMessage.message_type == "breaking",
+                SentMessage.success.is_(True),
+            )
+            .count()
+        )
+
+    lines.append(f"Failures:          {failures}")
+    lines.append(f"Archived snapshots: {archived}/{len(ALL_SESSIONS)}")
+    lines.append(f"Breaking alerts:   {breaking_count}")
+    lines.append("")
+    lines.append(f"Note: {ASIA_COVERAGE_NOTE}")
+
+    return "\n".join(lines)
+
+
+def _session_send_status_summary(
+    state_map: dict[tuple[str, str], SessionSendState],
+    session_key: str,
+    channels: list[str],
+) -> str:
+    """Return a short status string ('sent', 'failed', 'not attempted') for a session."""
+    rows = [state_map.get((session_key, ch)) for ch in channels]
+    rows = [r for r in rows if r is not None]
+    if not rows:
+        return "not attempted"
+    if any(r.success for r in rows):
+        return "sent"
+    if any(r.in_progress for r in rows):
+        return "in progress"
+    return "failed"
 
 
 # -- Catch-up -----------------------------------------------------------------

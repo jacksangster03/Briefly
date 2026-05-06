@@ -3,7 +3,13 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, call, patch
 
-from app.scheduler import _breaking_run_times, _intraday_run_times, _run_startup_catchup, build_scheduler
+from app.scheduler import (
+    _breaking_run_times,
+    _intraday_run_times,
+    _run_session_cadence_check,
+    _run_startup_catchup,
+    build_scheduler,
+)
 from app.settings import Settings
 
 
@@ -33,14 +39,31 @@ def test_breaking_run_times_stop_at_end_hour():
     assert len(times) == (15 * 12) + 1
 
 
-def test_scheduler_builds_explicit_intraday_jobs():
+def test_scheduler_builds_single_cadence_job():
+    """Exactly one session cadence check job; no legacy morning/intraday split."""
     scheduler = build_scheduler(Settings())
     job_ids = {job.id for job in scheduler.get_jobs()}
-    assert "morning_cadence_check" in job_ids
-    assert "intraday_cadence_check" in job_ids
+    assert "session_cadence_check" in job_ids, "unified cadence job must be registered"
+    assert "morning_cadence_check" not in job_ids, "legacy morning job must not exist"
+    assert "intraday_cadence_check" not in job_ids, "legacy intraday job must not exist"
     # Breaking polling jobs still exist as explicit checks in the configured window.
     assert "breaking_alerts_0800" in job_ids
     assert "breaking_alerts_2300" in job_ids
+
+
+def test_session_cadence_check_calls_run_session_brief():
+    """_run_session_cadence_check delegates to run_session_brief with scheduler source."""
+    settings = Settings()
+    with patch("app.scheduler.run_session_brief") as mock_brief:
+        _run_session_cadence_check(settings)
+    mock_brief.assert_called_once_with(settings, respect_cadence=True, command_source="scheduler")
+
+
+def test_session_cadence_check_max_instances_one():
+    """Unified job must set max_instances=1 to prevent overlap on slow sends."""
+    scheduler = build_scheduler(Settings())
+    job = next(j for j in scheduler.get_jobs() if j.id == "session_cadence_check")
+    assert job.max_instances == 1
 
 
 def test_scheduler_breaking_end_boundary_does_not_overshoot():
@@ -215,3 +238,70 @@ class TestRunStartupCatchup:
         _, kwargs = mock_cu.call_args
         assert kwargs["ignore_materiality"] is False
         assert kwargs["active_mode"] is False
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-send guard tests
+# ---------------------------------------------------------------------------
+
+class TestDuplicateSendGuard:
+    """Verify that two rapid scheduler ticks cannot double-send a session."""
+
+    def test_two_ticks_call_run_session_brief_twice_but_brief_handles_idempotency(self):
+        """Two ticks both call run_session_brief; idempotency is inside that function."""
+        settings = _make_settings()
+        calls: list[dict] = []
+
+        def _fake_brief(s, *, respect_cadence, command_source):
+            calls.append({"respect_cadence": respect_cadence, "command_source": command_source})
+
+        with patch("app.scheduler.run_session_brief", side_effect=_fake_brief):
+            _run_session_cadence_check(settings)
+            _run_session_cadence_check(settings)
+
+        # Both ticks delegated to run_session_brief — idempotency is run_session_brief's job.
+        assert len(calls) == 2
+        for call_kwargs in calls:
+            assert call_kwargs["respect_cadence"] is True
+            assert call_kwargs["command_source"] == "scheduler"
+
+    def test_legacy_job_names_absent_from_scheduler(self):
+        """No legacy morning_cadence_check or intraday_cadence_check jobs registered."""
+        scheduler = build_scheduler(Settings())
+        job_ids = {job.id for job in scheduler.get_jobs()}
+        assert "morning_cadence_check" not in job_ids
+        assert "intraday_cadence_check" not in job_ids
+
+    def test_unified_job_registered_weekdays(self):
+        """session_cadence_check exists and is of interval type."""
+        from apscheduler.triggers.interval import IntervalTrigger
+        scheduler = build_scheduler(Settings())
+        job = next(j for j in scheduler.get_jobs() if j.id == "session_cadence_check")
+        assert isinstance(job.trigger, IntervalTrigger)
+
+    def test_startup_catchup_and_scheduler_do_not_force_resend(self):
+        """Startup catch-up passes force_all=False, preserving idempotency for already-sent sessions."""
+        settings = _make_settings()
+        weekday_local = MagicMock()
+        weekday_local.weekday.return_value = 1
+        weekday_local.date.return_value.isoformat.return_value = "2026-05-06"
+        weekday_local.strftime.return_value = "10:00"
+        now_utc = MagicMock()
+        now_utc.astimezone.return_value = weekday_local
+
+        with patch("app.scheduler.datetime") as mock_dt, \
+             patch("app.scheduler.run_catch_up", return_value=_summary(
+                 already_sent=["morning"],
+                 skipped=["europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"],
+             )) as mock_cu, \
+             patch("app.scheduler.load_user_profile") as mock_profile, \
+             patch("app.scheduler.ZoneInfo"), \
+             patch("app.scheduler.init_db"):
+            mock_dt.now.return_value = now_utc
+            profile = MagicMock()
+            profile.timezone = "Europe/Madrid"
+            mock_profile.return_value = profile
+            _run_startup_catchup(settings)
+
+        _, kwargs = mock_cu.call_args
+        assert kwargs["force_all"] is False, "startup catch-up must never force-resend already-sent sessions"

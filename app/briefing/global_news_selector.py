@@ -349,7 +349,12 @@ def build_market_relevance_note(
     templates: list[str]
     is_em_fx = any(term in text for term in ("fx", "currency", "dollar", "yuan", "yen", "euro", "devaluation"))
     is_conflict = any(term in text for term in ("iran", "israel", "war", "conflict", "ceasefire", "missile", "naval"))
-    if any(term in text for term in ("hormuz", "blockade", "naval", "toll", "opec", "oil", "crude", "shipping", "tanker", "freight")):
+    # Require at least one genuinely energy/commodity term alongside a routing keyword
+    # to avoid misclassifying non-energy stories that contain "shipping", "freight", etc.
+    # TODO (signal quality): replace keyword matching with a proper topic classifier
+    _has_energy_core = any(term in text for term in ("opec", "oil", "crude", "tanker", "hormuz", "brent", "wti"))
+    _has_shipping_geo = any(term in text for term in ("blockade", "naval", "shipping", "freight", "toll"))
+    if _has_energy_core or (_has_shipping_geo and is_conflict):
         templates = [
             "Why market-relevant: energy chokepoints can quickly reprice inflation and transport-sensitive sectors.",
             "Why market-relevant: oil and shipping shocks can move inflation expectations, margins, and risk premia.",

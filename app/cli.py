@@ -1140,12 +1140,35 @@ def schedule_status(ctx, profile_name: str):
     except Exception as exc:
         lock_status_msg = f"unable to probe ({exc})"
 
+    from app.briefing.session_metadata import ALL_SESSIONS, ASIA_COVERAGE_NOTE, get_session_meta
+
+    current_meta = get_session_meta(current_window.key)
+    next_meta = get_session_meta(next_window.key)
+
     click.echo("Briefly schedule status")
     click.echo(f"  Timezone:         {profile.timezone or settings.timezone}")
     click.echo(f"  Local time:       {local_now.strftime('%Y-%m-%d %H:%M')}")
-    click.echo(f"  Current session:  {current_window.key} ({current_window.title})")
-    click.echo(f"  Next session:     {next_window.key} ({next_window.title})")
+    click.echo(f"  Current session:  {current_window.key}")
+    click.echo(f"    Label:          {current_meta.label if current_meta else current_window.title}")
+    click.echo(f"    Focus:          {current_meta.focus if current_meta else '—'}")
+    click.echo(f"    Window:         {current_meta.window_str if current_meta else '—'}")
+    click.echo(f"  Next session:     {next_window.key}")
+    click.echo(f"    Label:          {next_meta.label if next_meta else next_window.title}")
+    click.echo(f"    Focus:          {next_meta.focus if next_meta else '—'}")
+    click.echo(f"    Window:         {next_meta.window_str if next_meta else '—'}")
     click.echo(f"  Scheduler lock:   {lock_status_msg}")
+    if scheduler_running:
+        click.echo("  WARNING: Do not also run CLI brief/morning manually or start a second")
+        click.echo("           service instance — duplicate sends can occur if two processes")
+        click.echo("           race the idempotency window. Use --force only for recovery.")
+    click.echo("")
+    click.echo("  Session schedule (all times local)")
+    click.echo(f"  {'Key':<22} {'Label':<32} {'Window':<14} {'Focus'}")
+    click.echo(f"  {'-'*22} {'-'*32} {'-'*14} {'-'*40}")
+    for meta in ALL_SESSIONS:
+        click.echo(f"  {meta.key:<22} {meta.label:<32} {meta.window_str:<14} {meta.focus}")
+    click.echo("")
+    click.echo(f"  Note: {ASIA_COVERAGE_NOTE}")
     click.echo("")
     click.echo("  Cadence preferences")
     allowed = _allowed_sessions_for_mode(profile.session_mode)
@@ -1157,10 +1180,6 @@ def schedule_status(ctx, profile_name: str):
     click.echo("")
     click.echo(f"  Today's send state ({today.isoformat()})")
 
-    all_session_keys = [
-        "morning", "europe_midday", "us_pre_open",
-        "us_intraday_risk", "into_close", "closing_wrap",
-    ]
     channels = ["telegram", "email"]
 
     with get_session() as db_sess:
@@ -1178,7 +1197,8 @@ def schedule_status(ctx, profile_name: str):
         (r.session_key, r.channel): r for r in rows
     }
 
-    for sk in all_session_keys:
+    for meta in ALL_SESSIONS:
+        sk = meta.key
         for ch in channels:
             row = state_map.get((sk, ch))
             if row is None:
@@ -1191,6 +1211,41 @@ def schedule_status(ctx, profile_name: str):
             else:
                 state_str = f"failed: {(row.error_message or '')[:60]}"
             click.echo(f"    {sk:<22} {ch:<10} {state_str}")
+
+
+@cli.command("daily-summary")
+@click.option(
+    "--date",
+    "target_date",
+    default="today",
+    show_default=True,
+    help="Date to summarise: today | yesterday | YYYY-MM-DD.",
+)
+@click.option(
+    "--profile",
+    "profile_name",
+    default="default_user",
+    show_default=True,
+    help="Profile to inspect.",
+)
+@click.pass_context
+def daily_summary(ctx, target_date: str, profile_name: str):
+    """Print a daily summary of all six session send states.
+
+    Shows each session's label, focus, and per-channel delivery status.
+    No provider calls are made; reads from SQLite only.
+
+    Example:
+        python -m app.cli daily-summary
+        python -m app.cli daily-summary --date yesterday
+    """
+    from app.db.session import init_db
+    from app.main import run_daily_summary
+
+    init_db()
+    settings = ctx.obj["settings"]
+    summary = run_daily_summary(settings, target_date_str=target_date, profile_name=profile_name)
+    click.echo(summary)
 
 
 @cli.group("snapshots")

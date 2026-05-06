@@ -38,30 +38,24 @@ def build_scheduler(settings: Settings | None = None) -> BlockingScheduler:
     # Load schedule config
     schedule_config = _load_schedule_config(settings)
 
-    # Cadence checks: polling decisions, not fixed send cadence.
-    # Morning send still happens once/day via idempotency + window gating.
-    morning_check_mins = int(schedule_config.get("morning_briefing", {}).get("check_interval_minutes", 5))
+    # Single unified cadence check covers all six session windows.
+    # Using one job eliminates the race condition that two concurrent polling
+    # jobs could attempt the same session before the first finishes and marks
+    # its idempotency row as success.
+    session_check_mins = int(
+        schedule_config.get("session_cadence", {}).get("check_interval_minutes",
+        schedule_config.get("hourly_intraday", {}).get("check_interval_minutes", 2))
+    )
     scheduler.add_job(
-        _run_morning_cadence_check,
-        IntervalTrigger(minutes=max(1, morning_check_mins), timezone=tz),
-        id="morning_cadence_check",
-        name="Morning Cadence Check",
+        _run_session_cadence_check,
+        IntervalTrigger(minutes=max(1, session_check_mins), timezone=tz),
+        id="session_cadence_check",
+        name="Session Cadence Check",
         kwargs={"settings": settings},
         misfire_grace_time=120,
+        max_instances=1,  # prevent overlap if one tick takes > check_interval_minutes
     )
-    logger.info("Scheduled morning cadence checks every %d minute(s)", max(1, morning_check_mins))
-
-    # Intraday send is aligned dynamically to US 09:30 NY open converted to local.
-    intraday_check_mins = int(schedule_config.get("hourly_intraday", {}).get("check_interval_minutes", 2))
-    scheduler.add_job(
-        _run_intraday_cadence_check,
-        IntervalTrigger(minutes=max(1, intraday_check_mins), timezone=tz),
-        id="intraday_cadence_check",
-        name="Intraday Cadence Check",
-        kwargs={"settings": settings},
-        misfire_grace_time=90,
-    )
-    logger.info("Scheduled intraday cadence checks every %d minute(s)", max(1, intraday_check_mins))
+    logger.info("Scheduled unified session cadence checks every %d minute(s)", max(1, session_check_mins))
 
     # Breaking alerts (polling)
     breaking = schedule_config.get("breaking_alerts", {})
@@ -223,11 +217,13 @@ def _breaking_run_times(start: str, end: str, interval_minutes: int) -> list[tup
     return _intraday_run_times(start, end, interval_minutes)
 
 
-def _run_morning_cadence_check(settings: Settings) -> None:
-    """Run session-aware cadence check across all windows."""
-    run_session_brief(settings, respect_cadence=True, command_source="scheduler")
+def _run_session_cadence_check(settings: Settings) -> None:
+    """Single unified cadence check covering all six session windows.
 
-
-def _run_intraday_cadence_check(settings: Settings) -> None:
-    """Run session-aware cadence check across all windows."""
+    Replaces the former separate morning_cadence_check and intraday_cadence_check
+    jobs, which were identical and introduced a race-condition risk: two concurrent
+    APScheduler threads could both detect the same session window before either
+    had written its idempotency claim to the DB. Having one job with max_instances=1
+    eliminates that window entirely.
+    """
     run_session_brief(settings, respect_cadence=True, command_source="scheduler")

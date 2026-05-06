@@ -158,21 +158,50 @@ class UserProfile:
         return self.style.get("numbers_first", True)
 
     def channels_for(self, message_type: str) -> list[str]:
-        """Return preferred delivery channels for a message type."""
-        key_map = {
+        """Return preferred delivery channels for a message type or session key.
+
+        All six canonical session keys (morning, europe_midday, us_pre_open,
+        us_intraday_risk, into_close, closing_wrap) are supported. A session key
+        with no explicit channel config falls back to the "morning" config, which
+        always includes both telegram and email unless the profile overrides it.
+        """
+        # Map all six canonical session keys to their config key.
+        # Non-morning sessions fall back to "morning" if not explicitly configured,
+        # ensuring all six sessions default to both telegram and email.
+        _CANONICAL_SESSIONS = frozenset({
+            "morning", "europe_midday", "us_pre_open",
+            "us_intraday_risk", "into_close", "closing_wrap",
+        })
+        key_map: dict[str, str] = {
             "morning": "morning",
             "morning_brief": "morning",
             "intraday": "intraday",
             "breaking": "breaking",
         }
-        normalized = key_map.get((message_type or "").strip().lower(), "")
+        mt = (message_type or "").strip().lower()
+        if mt in _CANONICAL_SESSIONS and mt != "morning":
+            # Use session-specific config if present, otherwise fall through to "morning"
+            normalized = mt
+        else:
+            normalized = key_map.get(mt, "")
+
         if not normalized:
             return []
+
         channels = self.delivery_channels.get(normalized)
         if not channels:
             raw = self.delivery.get(f"{normalized}_channels")
             if isinstance(raw, list):
                 channels = [str(item).strip().lower() for item in raw if str(item).strip()]
+
+        # For non-morning canonical sessions without explicit config, fall back to morning config.
+        if not channels and normalized in _CANONICAL_SESSIONS and normalized != "morning":
+            channels = self.delivery_channels.get("morning")
+            if not channels:
+                raw = self.delivery.get("morning_channels")
+                if isinstance(raw, list):
+                    channels = [str(item).strip().lower() for item in raw if str(item).strip()]
+
         if not channels:
             return []
         allowed = {"telegram", "email"}
