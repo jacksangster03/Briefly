@@ -1224,6 +1224,9 @@ def run_daily_summary(
         from datetime import date as _date
         target_date = _date.fromisoformat(target_date_str)
 
+    is_today = target_date == local_now.date()
+    current_local_tod = local_now.time() if is_today else None
+
     channels = ["telegram", "email"]
     with get_session() as db_sess:
         rows = (
@@ -1246,25 +1249,38 @@ def run_daily_summary(
     except Exception:
         snapped_keys = set()
 
+    # UTC window covering the target local date (for breaking alerts count)
+    from datetime import time as _time, datetime as _dt
+    day_start_utc = _dt.combine(target_date, _time.min, tzinfo=tz).astimezone(timezone.utc).replace(tzinfo=None)
+    day_end_utc = _dt.combine(target_date + timedelta(days=1), _time.min, tzinfo=tz).astimezone(timezone.utc).replace(tzinfo=None)
+
+    header_time = local_now.strftime("%H:%M") if is_today else "end of day"
     lines: list[str] = [
-        f"[DAILY SUMMARY] Briefly — {target_date.isoformat()}",
+        f"[DAILY SUMMARY] Briefly — {target_date.strftime('%A %d %b %Y')} (as of {header_time} {profile_obj.timezone or settings.timezone})",
         "",
     ]
 
     failures = 0
     archived = 0
-    breaking_count = 0
 
     for meta in ALL_SESSIONS:
         sk = meta.key
+        window_started = current_local_tod is None or meta.window_start <= current_local_tod
+
         session_lines: list[str] = []
         for ch in channels:
             row = state_map.get((sk, ch))
             if row is None:
                 continue
             if row.success:
-                sent_at = row.sent_at.strftime("%H:%M") if row.sent_at else "?"
-                session_lines.append(f"  {ch}: sent at {sent_at}")
+                # sent_at is stored as naive UTC; convert to local for display
+                if row.sent_at:
+                    sent_utc = row.sent_at.replace(tzinfo=timezone.utc)
+                    sent_local = sent_utc.astimezone(tz)
+                    sent_str = sent_local.strftime("%H:%M")
+                else:
+                    sent_str = "?"
+                session_lines.append(f"  {ch}: sent at {sent_str}")
             elif row.in_progress:
                 session_lines.append(f"  {ch}: in progress")
             else:
@@ -1272,8 +1288,14 @@ def run_daily_summary(
                 err = (row.error_message or "unknown error")[:80]
                 session_lines.append(f"  {ch}: FAILED — {err}")
 
-        if session_lines:
-            lines.append(f"{meta.label}: {_session_send_status_summary(state_map, sk, channels)}")
+        status = _session_send_status_summary(state_map, sk, channels)
+
+        if not window_started and status == "not attempted":
+            # Window hasn't opened yet today; show as upcoming
+            lines.append(f"{meta.label}: upcoming ({meta.window_str})")
+            lines.append(f"  Focus: {meta.focus}")
+        elif session_lines:
+            lines.append(f"{meta.label}: {status}")
             lines.append(f"  Focus: {meta.focus}")
             lines.extend(session_lines)
             if sk in snapped_keys:
@@ -1284,20 +1306,22 @@ def run_daily_summary(
 
         lines.append("")
 
-    # Breaking alerts from SentMessage
+    # Breaking alerts scoped to the target date in local time
     with get_session() as db_sess:
         breaking_count = (
             db_sess.query(SentMessage)
             .filter(
                 SentMessage.message_type == "breaking",
                 SentMessage.success.is_(True),
+                SentMessage.sent_at >= day_start_utc,
+                SentMessage.sent_at < day_end_utc,
             )
             .count()
         )
 
     lines.append(f"Failures:          {failures}")
     lines.append(f"Archived snapshots: {archived}/{len(ALL_SESSIONS)}")
-    lines.append(f"Breaking alerts:   {breaking_count}")
+    lines.append(f"Breaking alerts:   {breaking_count} (today)")
     lines.append("")
     lines.append(f"Note: {ASIA_COVERAGE_NOTE}")
 
