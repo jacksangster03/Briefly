@@ -1417,6 +1417,119 @@ def snapshots_prune(ctx, retention_days: int, profile_name: str):
     click.echo(f"Pruned {count} snapshot(s) older than {retention_days} day(s) for profile '{profile_name}'.")
 
 
+@snapshots_group.command("replay")
+@click.option(
+    "--date",
+    "target_date",
+    required=True,
+    help="Date of the snapshot to replay: today | yesterday | YYYY-MM-DD.",
+)
+@click.option(
+    "--session",
+    "session_key",
+    required=True,
+    type=click.Choice(
+        ["morning", "europe_midday", "us_pre_open", "us_intraday_risk_check", "into_close", "closing_wrap"],
+        case_sensitive=False,
+    ),
+    help="Session key to replay.",
+)
+@click.option(
+    "--profile",
+    "profile_name",
+    default="default_user",
+    show_default=True,
+    help="Profile whose snapshot archive is used.",
+)
+@click.option(
+    "--channel",
+    "channel",
+    default="all",
+    show_default=True,
+    type=click.Choice(["all", "telegram", "email"], case_sensitive=False),
+    help="Which channel(s) to replay to.",
+)
+@click.option(
+    "--no-banner",
+    "no_banner",
+    is_flag=True,
+    default=False,
+    help="Omit the SNAPSHOT REPLAY prefix from the delivered content.",
+)
+@click.pass_context
+def snapshots_replay(ctx, target_date: str, session_key: str, profile_name: str, channel: str, no_banner: bool):
+    """Re-deliver an archived snapshot exactly as originally sent.
+
+    Loads stored Telegram text and email content from the session archive
+    and sends them through the configured messenger channels. No provider
+    data is fetched, no LLM is called, and no new snapshot is created.
+    Idempotency keys are not written.
+
+    A SNAPSHOT REPLAY banner is prepended to all content so the recipient
+    can distinguish replays from live sends. Use --no-banner to suppress it.
+
+    Examples:
+      python -m app.cli snapshots replay --date yesterday --session morning
+      python -m app.cli snapshots replay --date 2026-05-05 --session closing_wrap --channel telegram
+      python -m app.cli snapshots replay --date today --session morning --no-banner --channel email
+    """
+    from app.briefing.snapshot_replay import replay_snapshot
+    from app.db.session import init_db
+
+    init_db()
+    settings = ctx.obj["settings"]
+    tz = ZoneInfo(settings.timezone or "Europe/Madrid")
+    local_now = datetime.now(timezone.utc).astimezone(tz)
+
+    s = (target_date or "today").strip().lower()
+    if s == "today":
+        d = local_now.date()
+    elif s == "yesterday":
+        d = (local_now - timedelta(days=1)).date()
+    else:
+        from datetime import date as _date
+        try:
+            d = _date.fromisoformat(s)
+        except ValueError as exc:
+            raise click.ClickException(f"Invalid date: {target_date!r}. Use today, yesterday, or YYYY-MM-DD.") from exc
+
+    click.echo(
+        f"\nSnapshot replay: profile={profile_name!r} session={session_key!r} "
+        f"date={d.isoformat()} channel={channel} dry_run={settings.dry_run}"
+    )
+    if settings.dry_run:
+        click.echo("  [DRY RUN] No messages will actually be sent.")
+
+    result = replay_snapshot(
+        profile_name=profile_name,
+        session_key=session_key,
+        local_date=d,
+        channel=channel,
+        no_banner=no_banner,
+        settings=settings,
+    )
+
+    if result.errors and not result.telegram_attempted and not result.email_attempted:
+        click.echo(f"\n  ERROR: {result.errors[0]}")
+        raise SystemExit(1)
+
+    if result.telegram_attempted:
+        status = "sent" if result.telegram_ok else ("skipped" if not result.telegram_reason or result.telegram_reason in {"Telegram not configured", "no Telegram text stored in snapshot"} else "failed")
+        icon = "OK" if result.telegram_ok else ("--" if status == "skipped" else "FAIL")
+        click.echo(f"  [{icon}] telegram: {status}" + (f" — {result.telegram_reason}" if result.telegram_reason else ""))
+
+    if result.email_attempted:
+        status = "sent" if result.email_ok else ("skipped" if not result.email_reason or result.email_reason in {"email not configured", "no email content stored in snapshot"} else "failed")
+        icon = "OK" if result.email_ok else ("--" if status == "skipped" else "FAIL")
+        click.echo(f"  [{icon}] email:    {status}" + (f" — {result.email_reason}" if result.email_reason else ""))
+
+    if result.errors:
+        click.echo(f"\n  {len(result.errors)} error(s) — check logs for details.")
+        raise SystemExit(1)
+
+    click.echo("")
+
+
 # ── llm-usage ────────────────────────────────────────────────────────────────
 
 @cli.group("llm-usage")
