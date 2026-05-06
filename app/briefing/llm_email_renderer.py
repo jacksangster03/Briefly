@@ -9,7 +9,7 @@ This module is intentionally render-only:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 import html
 import json
 import re
@@ -70,6 +70,9 @@ class LLMEmailRenderer:
         selected_events: list[NormalisedEvent],
         enabled_override: bool | None = None,
         shadow_mode_override: bool | None = None,
+        profile_name: str = "",
+        session_key: str | None = None,
+        local_date: date | None = None,
     ) -> LLMRenderDecision:
         """Return active email content after LLM render attempt and safeguards."""
         llm_enabled = (
@@ -106,13 +109,27 @@ class LLMEmailRenderer:
             )
 
         try:
-            raw_candidate = self._request_llm(payload.prompt)
+            raw_candidate, pt, ct, est_cost = self._request_llm(payload.prompt)
         except Exception as exc:
             logger.warning("LLM email render request failed; using deterministic fallback (%s)", exc)
             return LLMRenderDecision(
                 active_email=deterministic_email,
                 mode="fallback",
                 reason=f"LLM request failed: {exc}",
+            )
+
+        def _log(mode: str) -> None:
+            from app.llm.usage_tracker import log_llm_usage
+            log_llm_usage(
+                profile_name=profile_name,
+                session_key=session_key,
+                local_date=local_date,
+                model=self.settings.llm_email_model,
+                call_type="email_render",
+                mode=mode,
+                prompt_tokens=pt,
+                completion_tokens=ct,
+                estimated_cost_usd=est_cost,
             )
 
         candidate = self._coerce_candidate(raw_candidate)
@@ -122,6 +139,7 @@ class LLMEmailRenderer:
                 "LLM email render validation failed; using deterministic fallback (%s)",
                 "; ".join(errors),
             )
+            _log("fallback")
             return LLMRenderDecision(
                 active_email=deterministic_email,
                 mode="fallback",
@@ -139,6 +157,7 @@ class LLMEmailRenderer:
 
         if llm_shadow_mode:
             logger.info("LLM email render succeeded in shadow mode; deterministic email remains active.")
+            _log("shadow")
             return LLMRenderDecision(
                 active_email=deterministic_email,
                 mode="shadow",
@@ -147,6 +166,7 @@ class LLMEmailRenderer:
             )
 
         logger.info("LLM email render succeeded in live mode; rendered email is active.")
+        _log("live")
         return LLMRenderDecision(
             active_email=rendered,
             mode="live",
@@ -271,7 +291,7 @@ class LLMEmailRenderer:
             allowed_numeric_tokens=self._numeric_allowlist("\n".join(numeric_source_parts)),
         )
 
-    def _request_llm(self, prompt_payload: dict[str, Any]) -> dict[str, Any]:
+    def _request_llm(self, prompt_payload: dict[str, Any]) -> tuple[dict[str, Any], int, int, float | None]:
         endpoint = f"{self.settings.llm_api_base_url.rstrip('/')}/chat/completions"
         response = requests.post(
             endpoint,
@@ -323,13 +343,16 @@ class LLMEmailRenderer:
         response.raise_for_status()
         payload = response.json()
         usage = payload.get("usage", {})
+        prompt_tokens: int = 0
+        completion_tokens: int = 0
+        estimated_cost: float | None = None
         if usage:
-            prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
-            completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
-            total_tokens = int(prompt_tokens) + int(completion_tokens)
+            prompt_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+            completion_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+            total_tokens = prompt_tokens + completion_tokens
             estimated_cost = self._estimate_usage_cost(
-                prompt_tokens=int(prompt_tokens),
-                completion_tokens=int(completion_tokens),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
             )
             if estimated_cost is None:
                 logger.info(
@@ -349,7 +372,7 @@ class LLMEmailRenderer:
                     estimated_cost,
                 )
         message_content = payload["choices"][0]["message"]["content"]
-        return self._extract_json_object(message_content)
+        return self._extract_json_object(message_content), prompt_tokens, completion_tokens, estimated_cost
 
     def _estimate_usage_cost(
         self,

@@ -1417,5 +1417,88 @@ def snapshots_prune(ctx, retention_days: int, profile_name: str):
     click.echo(f"Pruned {count} snapshot(s) older than {retention_days} day(s) for profile '{profile_name}'.")
 
 
+# ── llm-usage ────────────────────────────────────────────────────────────────
+
+@cli.group("llm-usage")
+def llm_usage():
+    """View LLM API call history and cost estimates (Phase 9.5)."""
+
+
+@llm_usage.command("summary")
+@click.option("--profile", "profile_name", default="default_user", show_default=True, help="Profile to query.")
+@click.option("--days", default=30, show_default=True, help="Lookback window in calendar days.")
+def llm_usage_summary(profile_name: str, days: int):
+    """Summarise LLM token usage and costs grouped by date and model.
+
+    Examples:
+      python -m app.cli llm-usage summary
+      python -m app.cli llm-usage summary --days 7
+      python -m app.cli llm-usage summary --profile default_user --days 14
+    """
+    from app.db.session import init_db
+    from app.llm.usage_tracker import query_usage_summary
+
+    init_db()
+    rows = query_usage_summary(profile_name, days=days)
+    if not rows:
+        click.echo(f"No LLM usage recorded in the last {days} day(s) for profile '{profile_name}'.")
+        return
+
+    total_calls = sum(r["calls"] for r in rows)
+    total_tokens = sum(r["total_tokens"] for r in rows)
+    cost_rows = [r["estimated_cost_usd"] for r in rows if r["estimated_cost_usd"] is not None]
+    total_cost = sum(cost_rows) if cost_rows else None
+
+    click.echo(f"\nLLM usage summary — last {days} day(s), profile: {profile_name}")
+    click.echo(f"  Total calls:  {total_calls}")
+    click.echo(f"  Total tokens: {total_tokens:,}")
+    if total_cost is not None:
+        click.echo(f"  Total cost:   ${total_cost:.6f} USD")
+    else:
+        click.echo("  Total cost:   n/a (set llm_email_input_cost_per_1m_tokens / llm_email_output_cost_per_1m_tokens to enable)")
+    click.echo("")
+    click.echo(f"  {'Date':<12} {'Model':<22} {'Calls':>5} {'Prompt':>8} {'Completion':>11} {'Total':>8} {'Cost USD':>12}")
+    click.echo("  " + "-" * 82)
+    for r in rows:
+        cost_str = f"${r['estimated_cost_usd']:.6f}" if r["estimated_cost_usd"] is not None else "n/a"
+        click.echo(
+            f"  {r['date']:<12} {r['model']:<22} {r['calls']:>5} "
+            f"{r['prompt_tokens']:>8,} {r['completion_tokens']:>11,} {r['total_tokens']:>8,} {cost_str:>12}"
+        )
+    click.echo("")
+
+
+@llm_usage.command("list")
+@click.option("--profile", "profile_name", default="default_user", show_default=True, help="Profile to query.")
+@click.option("--days", default=7, show_default=True, help="Lookback window in calendar days.")
+@click.option("--limit", default=50, show_default=True, help="Maximum rows to return.")
+def llm_usage_list(profile_name: str, days: int, limit: int):
+    """List individual LLM API calls, newest first.
+
+    Examples:
+      python -m app.cli llm-usage list
+      python -m app.cli llm-usage list --days 14 --limit 20
+    """
+    from app.db.session import init_db
+    from app.llm.usage_tracker import query_usage_rows
+
+    init_db()
+    rows = query_usage_rows(profile_name, days=days, limit=limit)
+    if not rows:
+        click.echo(f"No LLM usage recorded in the last {days} day(s) for profile '{profile_name}'.")
+        return
+
+    click.echo(f"\nLLM calls — last {days} day(s), profile: {profile_name} (showing up to {limit})")
+    click.echo(f"  {'Date':<12} {'Session':<22} {'Model':<18} {'Mode':<8} {'Prompt':>7} {'Compl':>7} {'Cost':>10}")
+    click.echo("  " + "-" * 90)
+    for r in rows:
+        cost_str = f"${r['estimated_cost_usd']:.6f}" if r["estimated_cost_usd"] is not None else "n/a"
+        click.echo(
+            f"  {r['local_date']:<12} {r['session_key']:<22} {r['model']:<18} {r['mode']:<8} "
+            f"{r['prompt_tokens']:>7,} {r['completion_tokens']:>7,} {cost_str:>10}"
+        )
+    click.echo("")
+
+
 if __name__ == "__main__":
     cli()

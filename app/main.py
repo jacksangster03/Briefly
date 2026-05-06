@@ -925,6 +925,9 @@ def run_morning_briefing(
         selected_events=display_events,
         enabled_override=llm_enabled_override,
         shadow_mode_override=llm_shadow_override,
+        profile_name=profile.name,
+        session_key=session_key,
+        local_date=local_now.date(),
     )
     active_email_content = llm_decision.active_email
     if backfill_context is not None:

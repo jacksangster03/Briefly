@@ -775,3 +775,23 @@ class SessionArchiveSnapshot(Base):
     chart_selection_json = Column(JSON, nullable=True)     # compact chart selection list
     events_count = Column(Integer, nullable=True, default=0)
     created_at = Column(DateTime, default=_utcnow, index=True)
+
+
+class LLMUsageLog(Base):
+    """Append-only log of every LLM API call with token counts and estimated cost."""
+
+    __tablename__ = "llm_usage_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    called_at_utc = Column(DateTime, nullable=False, index=True)
+    local_date = Column(Date, nullable=True, index=True)
+    session_key = Column(String(50), nullable=True, index=True)
+    model = Column(String(120), nullable=False)
+    call_type = Column(String(50), nullable=False, default="email_render")
+    mode = Column(String(20), nullable=False)          # live | shadow | fallback | disabled
+    prompt_tokens = Column(Integer, nullable=False, default=0)
+    completion_tokens = Column(Integer, nullable=False, default=0)
+    total_tokens = Column(Integer, nullable=False, default=0)
+    estimated_cost_usd = Column(Float, nullable=True)  # None when rates not configured
+    created_at = Column(DateTime, default=_utcnow)

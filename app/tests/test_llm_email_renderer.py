@@ -136,16 +136,20 @@ def test_render_morning_shadow_mode_keeps_deterministic_active(monkeypatch):
     deterministic = _deterministic_email()
 
     def _fake_request(_prompt):
-        return {
-            "subject": "Weekend Briefing | Sat 12 Apr",
-            "body": (
-                "Tesla pricing in Europe remains the lead portfolio signal into next week.\n\n"
-                "The move matters because EV demand elasticity can reset margin expectations."
-            ),
-            "source_urls": ["https://example.com/tesla-demand-reset"],
-        }
+        return (
+            {
+                "subject": "Weekend Briefing | Sat 12 Apr",
+                "body": (
+                    "Tesla pricing in Europe remains the lead portfolio signal into next week.\n\n"
+                    "The move matters because EV demand elasticity can reset margin expectations."
+                ),
+                "source_urls": ["https://example.com/tesla-demand-reset"],
+            },
+            0, 0, None,
+        )
 
     monkeypatch.setattr(renderer, "_request_llm", _fake_request)
+    monkeypatch.setattr("app.llm.usage_tracker.log_llm_usage", lambda **_kw: None)
     decision = renderer.render_morning(
         briefing=briefing,
         deterministic_email=deterministic,
@@ -171,12 +175,16 @@ def test_render_morning_live_mode_activates_valid_llm_output(monkeypatch):
     monkeypatch.setattr(
         renderer,
         "_request_llm",
-        lambda _prompt: {
-            "subject": "Weekend Portfolio Brief | Sat 12 Apr",
-            "body": "Tesla pricing resets remain the key portfolio risk into Monday's reopen.",
-            "source_urls": ["https://example.com/tesla-demand-reset"],
-        },
+        lambda _prompt: (
+            {
+                "subject": "Weekend Portfolio Brief | Sat 12 Apr",
+                "body": "Tesla pricing resets remain the key portfolio risk into Monday's reopen.",
+                "source_urls": ["https://example.com/tesla-demand-reset"],
+            },
+            0, 0, None,
+        ),
     )
+    monkeypatch.setattr("app.llm.usage_tracker.log_llm_usage", lambda **_kw: None)
 
     decision = renderer.render_morning(
         briefing=briefing,
@@ -203,12 +211,16 @@ def test_render_morning_falls_back_on_validation_failure(monkeypatch):
     monkeypatch.setattr(
         renderer,
         "_request_llm",
-        lambda _prompt: {
-            "subject": "Weekend Briefing",
-            "body": "Tesla (TSLA) and Apple (AAPL) are in focus.",
-            "source_urls": ["https://example.com/tesla-demand-reset"],
-        },
+        lambda _prompt: (
+            {
+                "subject": "Weekend Briefing",
+                "body": "Tesla (TSLA) and Apple (AAPL) are in focus.",
+                "source_urls": ["https://example.com/tesla-demand-reset"],
+            },
+            0, 0, None,
+        ),
     )
+    monkeypatch.setattr("app.llm.usage_tracker.log_llm_usage", lambda **_kw: None)
 
     decision = renderer.render_morning(
         briefing=briefing,
