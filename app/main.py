@@ -148,6 +148,108 @@ def _apply_backfill_email_banner(email_content: EmailRenderResult, ctx: Backfill
     )
 
 
+_ALERT_COOLDOWN_MINUTES = 90
+_ALERT_MESSAGE_TYPE = "delivery_alert"
+
+
+def _delivery_alert_hash(profile_name: str, session_key: str, local_date: "date") -> str:
+    import hashlib
+    key = f"{_ALERT_MESSAGE_TYPE}:{profile_name}:{session_key}:{local_date.isoformat()}"
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def _send_delivery_failure_alert(
+    *,
+    settings: Settings,
+    profile_name: str,
+    session_key: str,
+    session_title: str,
+    local_date: "date",
+    generated_at_str: str,
+    timezone_name: str,
+    channel_status: dict[str, str],
+    channel_reason: dict[str, str],
+) -> None:
+    """Send a Telegram self-alert when the scheduler fails to deliver a session.
+
+    Non-blocking. Respects a 90-minute cooldown per session/date so repeated
+    scheduler retries on a broken channel do not spam the user.
+    """
+    try:
+        failed = [ch for ch, st in channel_status.items() if st == "failed"]
+        sent_ok = [ch for ch, st in channel_status.items() if st == "sent"]
+        if not failed:
+            return
+
+        alert_hash = _delivery_alert_hash(profile_name, session_key, local_date)
+        cooldown_cutoff = datetime.now(timezone.utc) - timedelta(minutes=_ALERT_COOLDOWN_MINUTES)
+        with get_session() as db_sess:
+            recent = (
+                db_sess.query(SentMessage)
+                .filter(
+                    SentMessage.message_type == _ALERT_MESSAGE_TYPE,
+                    SentMessage.content_hash == alert_hash,
+                    SentMessage.sent_at >= cooldown_cutoff,
+                    SentMessage.success.is_(True),
+                )
+                .first()
+            )
+        if recent:
+            logger.debug(
+                "Delivery failure alert suppressed by cooldown | session=%s date=%s",
+                session_key, local_date,
+            )
+            return
+
+        failed_lines = "\n".join(
+            f"  {ch}: {channel_reason.get(ch, 'unknown error')}" for ch in failed
+        )
+        sent_lines = (
+            "\n".join(f"  {ch}: delivered" for ch in sent_ok)
+            if sent_ok else "  (none)"
+        )
+        alert_text = (
+            "[DELIVERY FAILURE] Briefly scheduler alert\n\n"
+            f"Session: {session_title} ({session_key})\n"
+            f"Date: {local_date.isoformat()}  Generated: {generated_at_str} {timezone_name}\n\n"
+            f"Failed channels:\n{failed_lines}\n\n"
+            f"Sent channels:\n{sent_lines}\n\n"
+            "The scheduler will retry automatically on the next poll cycle.\n"
+            f"To resend immediately:\n"
+            f"  python -m app.cli session-send --session {session_key} --force"
+        )
+
+        messenger = TelegramMessenger(settings)
+        if not messenger.is_configured():
+            logger.debug("Delivery failure alert skipped: Telegram not configured.")
+            return
+
+        success = messenger.send_messages([alert_text])
+        with get_session() as db_sess:
+            db_sess.add(SentMessage(
+                message_type=_ALERT_MESSAGE_TYPE,
+                channel="telegram",
+                event_ids=[f"alert:{session_key}:{local_date.isoformat()}"],
+                content_preview=alert_text[:500],
+                content_hash=alert_hash,
+                sent_at=datetime.now(timezone.utc),
+                success=bool(success),
+                error_message=None if success else str(getattr(messenger, "last_error", "") or "alert send failed"),
+            ))
+        if success:
+            logger.info(
+                "Delivery failure alert sent | session=%s date=%s failed_channels=%s",
+                session_key, local_date, failed,
+            )
+        else:
+            logger.warning(
+                "Delivery failure alert itself failed to send | session=%s failed_channels=%s",
+                session_key, failed,
+            )
+    except Exception:
+        logger.debug("Delivery failure alert raised unexpectedly (non-blocking)", exc_info=True)
+
+
 def _allowed_sessions_for_mode(mode: str) -> set[str]:
     normalised = (mode or "default").strip().lower()
     if normalised == "quiet":
@@ -921,6 +1023,24 @@ def run_morning_briefing(
         channel_status.get("email", "skipped"),
         channel_reason.get("email", "n/a"),
     )
+
+    if (
+        command_source == "scheduler"
+        and not settings.dry_run
+        and backfill_context is None
+        and any(v == "failed" for v in channel_status.values())
+    ):
+        _send_delivery_failure_alert(
+            settings=settings,
+            profile_name=profile.name,
+            session_key=canonical_session_key,
+            session_title=briefing.session_title or session_title,
+            local_date=local_now.date(),
+            generated_at_str=local_now.strftime("%Y-%m-%d %H:%M"),
+            timezone_name=profile.timezone or settings.timezone,
+            channel_status=channel_status,
+            channel_reason=channel_reason,
+        )
 
     if respect_cadence and delivered_ok and not settings.dry_run:
         local_now = decision_engine.cadence.now_local()
