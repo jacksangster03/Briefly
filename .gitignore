@@ -45,3 +45,7 @@ htmlcov/
 # User configs (examples are tracked)
 configs/user_profile.yaml
 configs/watchlists.yaml
+
+# Database backups (keep local, do not commit)
+backups/*.db
+backups/*.db-*

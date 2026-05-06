@@ -1,0 +1,46 @@
+# Briefly scheduler — systemd unit template
+#
+# Install:
+#   sudo cp scripts/briefly.service /etc/systemd/system/briefly-scheduler.service
+#   # Edit User=, WorkingDirectory=, and EnvironmentFile= below
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now briefly-scheduler
+#
+# Control:
+#   sudo systemctl start|stop|restart|status briefly-scheduler
+#   journalctl -u briefly-scheduler -f
+
+[Unit]
+Description=Briefly market briefing scheduler
+Documentation=https://github.com/jacksangster03/Briefly/blob/main/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# --- Edit these three lines to match your install ---
+User=briefly
+WorkingDirectory=/opt/briefly
+EnvironmentFile=/opt/briefly/.env
+# ----------------------------------------------------
+
+ExecStart=/opt/briefly/.venv/bin/python -m app.cli scheduler
+
+# Restart automatically on non-zero exit; wait 15s before each retry.
+# After 5 failures within 2 minutes, systemd stops trying (prevents crash loops).
+Restart=on-failure
+RestartSec=15
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+# Give the process up to 30s to shut down cleanly before SIGKILL.
+TimeoutStopSec=30
+
+# Write stdout/stderr to journald (use: journalctl -u briefly-scheduler -f).
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=briefly-scheduler
+
+[Install]
+WantedBy=multi-user.target

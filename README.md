@@ -62,6 +62,7 @@ Briefly is a local-first portfolio intelligence platform combining morning marke
 - **Phase 9.5 (LLM cost tracking):** every live LLM API call is persisted to a `llm_usage_logs` SQLite table with prompt tokens, completion tokens, model name, render mode (live/shadow/fallback), session key, local date, and estimated cost in USD (when per-1M token rates are configured in settings). The `LLMEmailRenderer.render_morning()` call is instrumented at all three outcome paths: live, shadow, and validation-fallback. API errors that prevent any response are not logged. Two CLI commands are added: `python -m app.cli llm-usage summary [--days N]` aggregates by date and model; `python -m app.cli llm-usage list [--days N] [--limit N]` shows individual calls. All logging is non-blocking — a DB write failure never interrupts the briefing pipeline. Cost rates default to zero (no cost estimation) and are configured via `llm_email_input_cost_per_1m_tokens` and `llm_email_output_cost_per_1m_tokens`.
 - **Phase 9.6 (LLM cost controls):** adds a monthly spend budget (`llm_monthly_budget_usd`, default 0 = no limit) and a `query_monthly_spend()` function that aggregates estimated cost for the current calendar month from `llm_usage_logs`. When a budget is set and the current month's spend meets or exceeds it, `render_morning()` returns `mode="budget_exceeded"` and falls back to the deterministic email without making an API call. The budget gate is skipped when cost rates are not configured (spend would be None) or when the budget is zero. The `llm-usage summary` CLI command is extended to show the current month's spend, budget, percentage used, and remaining headroom.
 - **Phase 9.4 (briefing history UI):** `/ui/briefing/history` is a standalone page in the web control center for browsing the session archive. A date picker and prev/next weekday navigation select the day. Six session cards (Morning, Europe Midday, US Pre-Open, US Intraday Risk Check, Into Close, Closing Wrap) show delivery status chips (sent/failed/skipped/missing) and channel sub-chips. Clicking a card loads an HTMX detail pane with four tabs: Telegram text, email plain text, email HTML (rendered in a sandboxed iframe), and metadata (delivery channels, channel status, content counts, timestamps). All data is read directly from SQLite; no provider calls are made. A "Briefing History" nav card is added to the briefing home section.
+- **Phase 9.7 (always-on deployment profile):** full deployment guide at [`docs/deployment.md`](docs/deployment.md) covering Docker (recommended for VPS), Linux systemd, and macOS launchd. Includes a tiered environment variable checklist (required, recommended, optional providers), persistent volume layout for SQLite and configs, SQLite hot-backup strategy with a cron template, restart policy comparison table, and a clear caveat that a local Mac cannot send briefings while asleep or powered off. New files: `docs/deployment.md`, `scripts/briefly.service` (systemd unit template), `backups/` directory. Dockerfile gains layer-cache ordering and a `HEALTHCHECK`. `docker-compose.yml` gains a `briefly-web` profile service and a `backups/` volume mount.
 
 ### Automatic live session snapshots
 
@@ -968,31 +969,26 @@ Phases 5.6B–5.6D add route-based workspace entry, personalized home context, a
 python -m app.cli scheduler
 ```
 
-### Run web + scheduler in background (macOS launchd)
+### Always-on deployment
 
-Use the bundled helper:
+For Docker, Linux systemd, and macOS launchd setup, environment variable configuration,
+persistent volume layout, backup strategy, and restart policy: see **[`docs/deployment.md`](docs/deployment.md)**.
+
+Quick paths:
 
 ```bash
-# one-time setup
-./scripts/service.sh install
+# Docker (recommended for VPS or home server)
+make docker-up
+docker compose logs -f
 
-# start both services (web + scheduler)
-./scripts/service.sh start
-
-# check state
+# macOS launchd (always-on Mac)
+./scripts/service.sh install && ./scripts/service.sh start
 ./scripts/service.sh status
 
-# follow logs
-./scripts/service.sh logs
-```
-
-Control shortcuts:
-
-```bash
-./scripts/service.sh restart
-./scripts/service.sh stop
-./scripts/service.sh logs-web
-./scripts/service.sh logs-scheduler
+# Linux systemd (VPS)
+sudo cp scripts/briefly.service /etc/systemd/system/briefly-scheduler.service
+# edit User=, WorkingDirectory=, EnvironmentFile= in the unit file
+sudo systemctl enable --now briefly-scheduler
 ```
 
 ### Update risk analytics configuration

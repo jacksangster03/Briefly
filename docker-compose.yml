@@ -1,23 +1,39 @@
 services:
+  # Always-on scheduler — starts on boot, restarts on crash
   briefly:
     build: .
     container_name: briefly-platform
     env_file: .env
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./configs:/app/configs
+      - ./data:/app/data          # SQLite database, cache, raw/processed data
+      - ./logs:/app/logs          # rotating application logs
+      - ./configs:/app/configs    # profile YAML, watchlists, healthcare config
+      - ./backups:/app/backups    # database backup target
     restart: unless-stopped
     command: python -m app.cli scheduler
 
-  # One-shot morning briefing (use: docker compose run briefly-morning)
-  briefly-morning:
+  # Web control center — run alongside scheduler for the UI
+  briefly-web:
     build: .
-    container_name: briefly-morning
+    container_name: briefly-web
     env_file: .env
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./configs:/app/configs
-    command: python -m app.cli morning
+    ports:
+      - "127.0.0.1:8080:8080"    # bind to localhost only; put nginx/caddy in front for remote access
+    restart: unless-stopped
+    command: python -m app.cli web --host 0.0.0.0 --port 8080
+    profiles: ["web"]
+
+  # One-shot manual commands (use: docker compose run --rm briefly-manual <cmd>)
+  briefly-manual:
+    build: .
+    container_name: briefly-manual
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./configs:/app/configs
     profiles: ["manual"]
