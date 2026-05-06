@@ -1421,7 +1421,7 @@ def snapshots_prune(ctx, retention_days: int, profile_name: str):
 
 @cli.group("llm-usage")
 def llm_usage():
-    """View LLM API call history and cost estimates (Phase 9.5)."""
+    """View LLM API call history, cost estimates, and budget status (Phase 9.5/9.6)."""
 
 
 @llm_usage.command("summary")
@@ -1430,18 +1430,43 @@ def llm_usage():
 def llm_usage_summary(profile_name: str, days: int):
     """Summarise LLM token usage and costs grouped by date and model.
 
+    Also shows current-month spend vs. configured budget.
+
     Examples:
       python -m app.cli llm-usage summary
       python -m app.cli llm-usage summary --days 7
       python -m app.cli llm-usage summary --profile default_user --days 14
     """
+    import datetime as _dt
     from app.db.session import init_db
-    from app.llm.usage_tracker import query_usage_summary
+    from app.llm.usage_tracker import query_monthly_spend, query_usage_summary
+    from app.settings import get_settings
 
     init_db()
+    settings = get_settings()
+    now = _dt.datetime.now(_dt.timezone.utc)
+    budget = float(settings.llm_monthly_budget_usd or 0.0)
+    monthly_spend = query_monthly_spend(profile_name, now.year, now.month)
+    month_label = now.strftime("%B %Y")
+
+    click.echo(f"\nLLM usage — {month_label}, profile: {profile_name}")
+    if monthly_spend is not None:
+        if budget > 0:
+            pct = (monthly_spend / budget) * 100
+            remaining = max(0.0, budget - monthly_spend)
+            status = "OVER BUDGET" if monthly_spend >= budget else "OK"
+            click.echo(f"  Month spend:  ${monthly_spend:.6f} / ${budget:.4f} budget ({pct:.1f}%)  [{status}]")
+            click.echo(f"  Remaining:    ${remaining:.6f}")
+        else:
+            click.echo(f"  Month spend:  ${monthly_spend:.6f}  (no budget set)")
+    else:
+        click.echo("  Month spend:  n/a (set llm_email_input/output_cost_per_1m_tokens to enable cost tracking)")
+        if budget > 0:
+            click.echo(f"  Budget:       ${budget:.4f} configured but unenforced (cost rates not set)")
+
     rows = query_usage_summary(profile_name, days=days)
     if not rows:
-        click.echo(f"No LLM usage recorded in the last {days} day(s) for profile '{profile_name}'.")
+        click.echo(f"\nNo LLM usage recorded in the last {days} day(s).")
         return
 
     total_calls = sum(r["calls"] for r in rows)
@@ -1449,13 +1474,11 @@ def llm_usage_summary(profile_name: str, days: int):
     cost_rows = [r["estimated_cost_usd"] for r in rows if r["estimated_cost_usd"] is not None]
     total_cost = sum(cost_rows) if cost_rows else None
 
-    click.echo(f"\nLLM usage summary — last {days} day(s), profile: {profile_name}")
-    click.echo(f"  Total calls:  {total_calls}")
-    click.echo(f"  Total tokens: {total_tokens:,}")
+    click.echo(f"\n  Last {days} day(s) totals:")
+    click.echo(f"  Calls:        {total_calls}")
+    click.echo(f"  Tokens:       {total_tokens:,}")
     if total_cost is not None:
-        click.echo(f"  Total cost:   ${total_cost:.6f} USD")
-    else:
-        click.echo("  Total cost:   n/a (set llm_email_input_cost_per_1m_tokens / llm_email_output_cost_per_1m_tokens to enable)")
+        click.echo(f"  Cost:         ${total_cost:.6f}")
     click.echo("")
     click.echo(f"  {'Date':<12} {'Model':<22} {'Calls':>5} {'Prompt':>8} {'Completion':>11} {'Total':>8} {'Cost USD':>12}")
     click.echo("  " + "-" * 82)

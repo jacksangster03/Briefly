@@ -1,4 +1,4 @@
-"""Tests for Phase 9.5: LLM usage tracking."""
+"""Tests for Phase 9.5/9.6: LLM usage tracking and cost controls."""
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
@@ -350,3 +350,213 @@ class TestRendererLogsUsage:
 
         assert decision.mode == "fallback"
         mock_log.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Phase 9.6 — query_monthly_spend
+# ---------------------------------------------------------------------------
+
+class TestQueryMonthlySpend:
+    def test_sums_current_month_only(self, isolated_db):
+        from app.llm.usage_tracker import log_llm_usage, query_monthly_spend
+
+        # Two rows in May 2026, one in April
+        for d in (date(2026, 5, 1), date(2026, 5, 6)):
+            log_llm_usage(
+                profile_name="test_user",
+                session_key="morning",
+                local_date=d,
+                model="gpt-4o-mini",
+                call_type="email_render",
+                mode="live",
+                prompt_tokens=1000,
+                completion_tokens=400,
+                estimated_cost_usd=0.001,
+            )
+        log_llm_usage(
+            profile_name="test_user",
+            session_key="morning",
+            local_date=date(2026, 4, 30),
+            model="gpt-4o-mini",
+            call_type="email_render",
+            mode="live",
+            prompt_tokens=1000,
+            completion_tokens=400,
+            estimated_cost_usd=0.005,
+        )
+
+        spend = query_monthly_spend("test_user", 2026, 5)
+        assert spend is not None
+        assert abs(spend - 0.002) < 1e-9
+
+    def test_returns_none_when_no_cost_data(self, isolated_db):
+        from app.llm.usage_tracker import log_llm_usage, query_monthly_spend
+
+        log_llm_usage(
+            profile_name="test_user",
+            session_key="morning",
+            local_date=date(2026, 5, 6),
+            model="gpt-4o-mini",
+            call_type="email_render",
+            mode="shadow",
+            prompt_tokens=500,
+            completion_tokens=200,
+            estimated_cost_usd=None,  # no rates configured
+        )
+
+        spend = query_monthly_spend("test_user", 2026, 5)
+        assert spend is None
+
+    def test_returns_none_for_empty_month(self, isolated_db):
+        from app.llm.usage_tracker import query_monthly_spend
+
+        assert query_monthly_spend("test_user", 2026, 1) is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 9.6 — budget gate in LLMEmailRenderer
+# ---------------------------------------------------------------------------
+
+class TestBudgetGate:
+    def _make_settings(self, budget: float = 0.0):
+        from app.settings import Settings
+        s = Settings()
+        s.enable_llm_email_render = True
+        s.llm_render_shadow_mode = False
+        s.openai_api_key = "test-key"
+        s.llm_email_model = "gpt-4o-mini"
+        s.llm_email_input_cost_per_1m_tokens = 0.15
+        s.llm_email_output_cost_per_1m_tokens = 0.60
+        s.llm_monthly_budget_usd = budget
+        return s
+
+    def _make_minimal_briefing(self):
+        from app.schemas.briefings import MorningBriefing
+        b = MagicMock(spec=MorningBriefing)
+        b.session_mode = "morning"
+        b.session_key = "morning"
+        return b
+
+    def _make_render_result(self):
+        from app.schemas.delivery import EmailRenderResult
+        return EmailRenderResult(
+            subject="Test",
+            plain_text="test body",
+            html_body="<p>test</p>",
+            inline_assets=[],
+        )
+
+    def test_budget_exceeded_returns_budget_exceeded_mode(self):
+        from app.briefing.llm_email_renderer import LLMEmailRenderer
+
+        settings = self._make_settings(budget=0.01)
+        renderer = LLMEmailRenderer(settings)
+
+        with patch("app.llm.usage_tracker.query_monthly_spend", return_value=0.02):
+            decision = renderer.render_morning(
+                briefing=self._make_minimal_briefing(),
+                deterministic_email=self._make_render_result(),
+                selected_events=[],
+                profile_name="test_user",
+                session_key="morning",
+                local_date=date(2026, 5, 6),
+            )
+
+        assert decision.mode == "budget_exceeded"
+        assert decision.active_email.subject == "Test"
+        assert "budget" in decision.reason.lower()
+
+    def test_budget_exactly_at_limit_is_blocked(self):
+        from app.briefing.llm_email_renderer import LLMEmailRenderer
+
+        settings = self._make_settings(budget=0.05)
+        renderer = LLMEmailRenderer(settings)
+
+        with patch("app.llm.usage_tracker.query_monthly_spend", return_value=0.05):
+            decision = renderer.render_morning(
+                briefing=self._make_minimal_briefing(),
+                deterministic_email=self._make_render_result(),
+                selected_events=[],
+                profile_name="test_user",
+                session_key="morning",
+                local_date=date(2026, 5, 6),
+            )
+
+        assert decision.mode == "budget_exceeded"
+
+    def test_budget_not_exceeded_proceeds_to_api(self):
+        from app.briefing.llm_email_renderer import LLMEmailRenderer
+
+        settings = self._make_settings(budget=1.00)
+        renderer = LLMEmailRenderer(settings)
+
+        parsed = {"subject": "S", "body": "B text here.", "source_urls": ["https://example.com/1"]}
+        with patch("app.llm.usage_tracker.query_monthly_spend", return_value=0.001), \
+             patch.object(renderer, "_request_llm", return_value=(parsed, 500, 200, 0.0001)), \
+             patch.object(renderer, "_validate_candidate", return_value=([], [])), \
+             patch.object(renderer, "_build_render_result", return_value=self._make_render_result()), \
+             patch.object(renderer, "_build_payload") as mock_payload, \
+             patch("app.llm.usage_tracker.log_llm_usage"):
+            mock_payload.return_value = MagicMock(prompt={"events": [{"title": "x"}]})
+            decision = renderer.render_morning(
+                briefing=self._make_minimal_briefing(),
+                deterministic_email=self._make_render_result(),
+                selected_events=[],
+                profile_name="test_user",
+                session_key="morning",
+                local_date=date(2026, 5, 6),
+            )
+
+        assert decision.mode == "live"
+
+    def test_zero_budget_skips_check(self):
+        """budget=0 means no limit: query_monthly_spend must not be called."""
+        from app.briefing.llm_email_renderer import LLMEmailRenderer
+
+        settings = self._make_settings(budget=0.0)
+        renderer = LLMEmailRenderer(settings)
+
+        parsed = {"subject": "S", "body": "B text here.", "source_urls": ["https://example.com/1"]}
+        with patch("app.llm.usage_tracker.query_monthly_spend") as mock_spend, \
+             patch.object(renderer, "_request_llm", return_value=(parsed, 500, 200, None)), \
+             patch.object(renderer, "_validate_candidate", return_value=([], [])), \
+             patch.object(renderer, "_build_render_result", return_value=self._make_render_result()), \
+             patch.object(renderer, "_build_payload") as mock_payload, \
+             patch("app.llm.usage_tracker.log_llm_usage"):
+            mock_payload.return_value = MagicMock(prompt={"events": [{"title": "x"}]})
+            renderer.render_morning(
+                briefing=self._make_minimal_briefing(),
+                deterministic_email=self._make_render_result(),
+                selected_events=[],
+                profile_name="test_user",
+                session_key="morning",
+                local_date=date(2026, 5, 6),
+            )
+
+        mock_spend.assert_not_called()
+
+    def test_no_cost_data_does_not_block_when_budget_set(self):
+        """If monthly_spend is None (rates not configured), budget check is a no-op."""
+        from app.briefing.llm_email_renderer import LLMEmailRenderer
+
+        settings = self._make_settings(budget=0.01)
+        renderer = LLMEmailRenderer(settings)
+
+        parsed = {"subject": "S", "body": "B text here.", "source_urls": ["https://example.com/1"]}
+        with patch("app.llm.usage_tracker.query_monthly_spend", return_value=None), \
+             patch.object(renderer, "_request_llm", return_value=(parsed, 500, 200, None)), \
+             patch.object(renderer, "_validate_candidate", return_value=([], [])), \
+             patch.object(renderer, "_build_render_result", return_value=self._make_render_result()), \
+             patch.object(renderer, "_build_payload") as mock_payload, \
+             patch("app.llm.usage_tracker.log_llm_usage"):
+            mock_payload.return_value = MagicMock(prompt={"events": [{"title": "x"}]})
+            decision = renderer.render_morning(
+                briefing=self._make_minimal_briefing(),
+                deterministic_email=self._make_render_result(),
+                selected_events=[],
+                profile_name="test_user",
+                session_key="morning",
+                local_date=date(2026, 5, 6),
+            )
+
+        assert decision.mode == "live"

@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # include estimated per-run cost for the LLM render call.
     llm_email_input_cost_per_1m_tokens: float = 0.0
     llm_email_output_cost_per_1m_tokens: float = 0.0
+    # Monthly spend cap in USD. 0 = no limit. Requires cost rates to be set;
+    # if rates are zero the cap is unenforced even when set.
+    llm_monthly_budget_usd: float = 0.0
     # all | telegram | email
     delivery_channel: str = "all"
     web_host: str = "127.0.0.1"

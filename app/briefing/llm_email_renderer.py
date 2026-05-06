@@ -9,7 +9,7 @@ This module is intentionally render-only:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import html
 import json
 import re
@@ -99,6 +99,23 @@ class LLMEmailRenderer:
                 mode="fallback",
                 reason="OPENAI_API_KEY missing",
             )
+
+        budget = float(self.settings.llm_monthly_budget_usd or 0.0)
+        if budget > 0:
+            from app.llm.usage_tracker import query_monthly_spend
+            now_utc = datetime.now(timezone.utc)
+            monthly_spend = query_monthly_spend(profile_name, now_utc.year, now_utc.month)
+            if monthly_spend is not None and monthly_spend >= budget:
+                logger.warning(
+                    "LLM monthly budget $%.4f exceeded (spent $%.4f); using deterministic fallback.",
+                    budget,
+                    monthly_spend,
+                )
+                return LLMRenderDecision(
+                    active_email=deterministic_email,
+                    mode="budget_exceeded",
+                    reason=f"Monthly budget ${budget:.4f} exceeded (spent ${monthly_spend:.4f})",
+                )
 
         payload = self._build_payload(briefing, selected_events)
         if not payload.prompt.get("events"):

@@ -105,6 +105,33 @@ def query_usage_summary(
     ]
 
 
+def query_monthly_spend(
+    profile_name: str,
+    year: int,
+    month: int,
+) -> float | None:
+    """Return total estimated USD spend for a profile in the given calendar month.
+
+    Returns None when no rows have cost data (rates not configured), so callers
+    can distinguish "zero spend" from "cost estimation disabled".
+    """
+    from sqlalchemy import func, extract
+    from app.db.models import LLMUsageLog
+
+    with get_session() as db:
+        result = (
+            db.query(func.sum(LLMUsageLog.estimated_cost_usd))
+            .filter(
+                LLMUsageLog.profile_name == profile_name,
+                extract("year", LLMUsageLog.local_date) == year,
+                extract("month", LLMUsageLog.local_date) == month,
+                LLMUsageLog.estimated_cost_usd.isnot(None),
+            )
+            .scalar()
+        )
+    return float(result) if result is not None else None
+
+
 def query_usage_rows(
     profile_name: str,
     *,
