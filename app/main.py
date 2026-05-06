@@ -1210,7 +1210,9 @@ def run_daily_summary(
 
     settings = settings or get_settings()
     init_db()
-    tz = ZoneInfo(settings.timezone)
+    from app.personalization.user_profile import load_user_profile
+    profile_obj = load_user_profile(settings)
+    tz = ZoneInfo(profile_obj.timezone or settings.timezone)
     now_utc = datetime.now(timezone.utc)
     local_now = now_utc.astimezone(tz)
 
