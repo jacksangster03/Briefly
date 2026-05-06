@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date as _date_cls, datetime, timedelta
 import json
 from pathlib import Path
 from typing import Any
@@ -119,6 +119,12 @@ _PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
         "workspace": "briefing",
         "workspace_page": "morning_charts",
         "visible_sections": ["section-briefing-morning-charts"],
+    },
+    "briefing_history": {
+        "global_nav": "briefing",
+        "workspace": "briefing",
+        "workspace_page": "history",
+        "visible_sections": [],
     },
     "portfolio_home": {
         "global_nav": "portfolio",
@@ -405,6 +411,136 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             state=state,
             extra_context={"morning_chart_preview": preview},
         )
+
+    # ── Phase 9.4: Briefing history UI ──────────────────────────────────────
+
+    _HISTORY_SESSION_SLOTS: list[tuple[str, str, str]] = [
+        ("morning",          "Morning Brief",    "07:00 – 10:30"),
+        ("europe_midday",    "Europe Midday",    "12:00 – 13:00"),
+        ("us_pre_open",      "US Pre-Open",      "14:00 – 15:30"),
+        ("us_intraday_risk", "US Intraday Risk", "16:00 – 18:00"),
+        ("into_close",       "Into Close",       "20:00 – 22:00"),
+        ("closing_wrap",     "Closing Wrap",     "22:00 – 23:59"),
+    ]
+
+    def _history_prev_weekday(d: _date_cls) -> _date_cls:
+        prev = d - timedelta(days=1)
+        while prev.weekday() >= 5:
+            prev -= timedelta(days=1)
+        return prev
+
+    def _history_next_weekday(d: _date_cls) -> _date_cls:
+        nxt = d + timedelta(days=1)
+        while nxt.weekday() >= 5:
+            nxt += timedelta(days=1)
+        return nxt
+
+    def _build_history_sessions(profile_name: str, selected_date: _date_cls) -> list[dict]:
+        from app.briefing.session_snapshot_service import list_session_snapshots
+        snapshots = list_session_snapshots(profile_name, selected_date)
+        snap_by_key = {s["session_key"]: s for s in snapshots}
+        sessions = []
+        for key, label, window in _HISTORY_SESSION_SLOTS:
+            snap = snap_by_key.get(key)
+            if snap is None:
+                status = "missing"
+            elif snap["delivery_success"]:
+                status = "sent"
+            elif snap["delivery_attempted"]:
+                status = "failed"
+            else:
+                status = "skipped"
+            sessions.append({
+                "key": key,
+                "label": label,
+                "window": window,
+                "snap": snap,
+                "status": status,
+            })
+        return sessions
+
+    @app.get("/ui/briefing/history", response_class=HTMLResponse, include_in_schema=False)
+    def ui_briefing_history(
+        request: Request,
+        profile: str = Query(default="default_user"),
+        date: str = Query(default=""),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        today = _date_cls.today()
+        try:
+            selected_date = _date_cls.fromisoformat(date) if date else today
+        except ValueError:
+            selected_date = today
+        if selected_date > today:
+            selected_date = today
+
+        sessions = _build_history_sessions(normalized_profile, selected_date)
+        prev_date = _history_prev_weekday(selected_date)
+        next_wd = _history_next_weekday(selected_date)
+        next_date = next_wd.isoformat() if next_wd <= today else ""
+
+        return templates.TemplateResponse(
+            request,
+            "briefing_history.html",
+            {
+                "profile": normalized_profile,
+                "selected_date": selected_date.isoformat(),
+                "selected_date_display": selected_date.strftime("%A, %-d %B %Y"),
+                "today": today.isoformat(),
+                "sessions": sessions,
+                "prev_date": prev_date.isoformat(),
+                "next_date": next_date,
+                "has_any_data": any(s["snap"] is not None for s in sessions),
+            },
+        )
+
+    @app.get("/ui/briefing/history/session", response_class=HTMLResponse, include_in_schema=False)
+    def ui_briefing_history_session(
+        request: Request,
+        profile: str = Query(default="default_user"),
+        date: str = Query(default=""),
+        session: str = Query(default=""),
+        format: str = Query(default="telegram"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        try:
+            target_date = _date_cls.fromisoformat(date)
+        except ValueError:
+            return HTMLResponse("<p style='padding:20px;color:var(--muted)'>Invalid date.</p>")
+        from app.briefing.session_snapshot_service import get_session_snapshot
+        snap = get_session_snapshot(normalized_profile, target_date, session)
+        if snap is None:
+            return HTMLResponse(
+                "<p style='padding:20px;color:var(--muted)'>No snapshot stored for this session.</p>"
+            )
+        allowed_formats = {"telegram", "email-text", "email-html", "summary"}
+        fmt = format if format in allowed_formats else "telegram"
+        return templates.TemplateResponse(
+            request,
+            "partials/history_detail.html",
+            {"snap": snap, "format": fmt, "profile": normalized_profile, "date": date},
+        )
+
+    @app.get("/ui/briefing/history/session/raw-html", response_class=HTMLResponse, include_in_schema=False)
+    def ui_briefing_history_session_raw_html(
+        request: Request,
+        profile: str = Query(default="default_user"),
+        date: str = Query(default=""),
+        session: str = Query(default=""),
+    ):
+        """Serve raw email HTML for iframe embedding — no external resources called."""
+        normalized_profile = _normalize_profile(profile)
+        try:
+            target_date = _date_cls.fromisoformat(date)
+        except ValueError:
+            return HTMLResponse("<html><body><p>Invalid date.</p></body></html>")
+        from app.briefing.session_snapshot_service import get_session_snapshot
+        snap = get_session_snapshot(normalized_profile, target_date, session)
+        if not snap or not snap.get("email_html"):
+            return HTMLResponse("<html><body><p>No email HTML stored for this session.</p></body></html>")
+        return HTMLResponse(content=snap["email_html"])
+
+    # ── /ui/tearsheet ────────────────────────────────────────────────────────
 
     @app.get("/ui/tearsheet", response_class=HTMLResponse, include_in_schema=False)
     def ui_tearsheet(

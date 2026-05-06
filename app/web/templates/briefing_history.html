@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Briefing History — Briefly</title>
+  <script>
+    (() => {
+      const stored = window.localStorage.getItem("briefly-ui-theme");
+      document.documentElement.setAttribute("data-theme", stored === "light" ? "light" : "dark");
+    })();
+  </script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --bg-secondary: #11151e;
+      --card: #151b26;
+      --card-hover: #1b2331;
+      --ink: #f5f7fa;
+      --muted: #9cb0c9;
+      --border: #2a3445;
+      --accent: #f59f00;
+      --accent-strong: #ffb020;
+      --success: #1faa6f;
+      --success-bg: #10251b;
+      --success-ink: #9ee6bb;
+      --error: #ea5455;
+      --error-bg: #31181a;
+      --error-ink: #f5b2b2;
+      --shadow: 0 14px 38px rgba(0,0,0,0.28);
+      --radius: 12px;
+      --chip-bg: #252f3f;
+      --chip-text: #dce6f3;
+      --input-bg: #101622;
+      --focus-ring: 0 0 0 3px rgba(245,159,0,0.18);
+    }
+    :root[data-theme="light"] {
+      --bg: #f2f5fa;
+      --bg-secondary: #e6ecf5;
+      --card: #ffffff;
+      --card-hover: #f8fbff;
+      --ink: #111b2b;
+      --muted: #4b5e78;
+      --border: #c7d3e3;
+      --accent: #cf7500;
+      --accent-strong: #ba6400;
+      --success: #1b8e5a;
+      --success-bg: #eaf9f0;
+      --success-ink: #1f6641;
+      --error: #c0393f;
+      --error-bg: #ffeef0;
+      --error-ink: #8c2431;
+      --shadow: 0 10px 26px rgba(17,27,43,0.08);
+      --chip-bg: #e8f0fb;
+      --chip-text: #16395f;
+      --input-bg: #ffffff;
+      --focus-ring: 0 0 0 3px rgba(207,117,0,0.16);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "IBM Plex Sans", "Segoe UI", "Avenir Next", "Helvetica Neue", sans-serif;
+      line-height: 1.4;
+    }
+    .shell { max-width: 1200px; margin: 0 auto; padding: 24px 20px 60px; }
+
+    /* ── Topbar ─────────────────────────────────────────────────────────── */
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .eyebrow {
+      margin: 0;
+      color: var(--muted);
+      font-family: "IBM Plex Mono", "SF Mono", monospace;
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .title {
+      font-size: clamp(1.3rem, 2.6vw, 1.9rem);
+      font-weight: 640;
+      margin: 4px 0 6px;
+      letter-spacing: 0.008em;
+    }
+    .subtitle { margin: 0; color: var(--muted); font-size: 0.95rem; }
+    .breadcrumb-row {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .breadcrumb-row a { color: var(--muted); text-decoration: none; }
+    .breadcrumb-row a:hover { color: var(--ink); }
+    .breadcrumb-sep { opacity: 0.5; }
+    .route-actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .route-link {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 11px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      color: var(--ink);
+      text-decoration: none;
+      background: var(--card);
+    }
+    .route-link:hover { border-color: var(--accent); color: var(--accent); }
+    .theme-toggle {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 8px 14px;
+      cursor: pointer;
+      background: var(--card);
+      color: var(--ink);
+      font-size: 0.86rem;
+      font-weight: 600;
+    }
+    .theme-toggle:hover { background: var(--card-hover); border-color: var(--accent); }
+    @media (max-width: 680px) { .topbar { flex-direction: column; } }
+
+    /* ── Date navigation ────────────────────────────────────────────────── */
+    .date-nav {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .date-nav-btn {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      background: var(--card);
+      color: var(--ink);
+      font-size: 0.88rem;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .date-nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .date-nav-btn.disabled { opacity: 0.35; pointer-events: none; }
+    .date-label {
+      font-size: 1.05rem;
+      font-weight: 640;
+      flex: 1;
+      min-width: 200px;
+    }
+    .date-input-wrap { display: flex; align-items: center; gap: 8px; }
+    input[type="date"] {
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 0.88rem;
+      padding: 7px 10px;
+      cursor: pointer;
+    }
+    input[type="date"]:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--accent); }
+
+    /* ── Empty state ────────────────────────────────────────────────────── */
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 20px;
+    }
+    .empty-state h3 { margin: 0 0 8px; color: var(--ink); font-size: 1rem; }
+    .empty-state p { margin: 0; font-size: 0.9rem; }
+
+    /* ── Session grid ───────────────────────────────────────────────────── */
+    .session-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 900px) { .session-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 560px) { .session-grid { grid-template-columns: 1fr; } }
+
+    .session-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color 0.15s;
+    }
+    .session-card.has-data { border-left: 3px solid var(--border); }
+    .session-card.status-sent { border-left-color: var(--success); }
+    .session-card.status-failed { border-left-color: var(--error); }
+    .session-card.status-skipped { border-left-color: var(--accent); }
+
+    .session-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .session-label { font-weight: 660; font-size: 0.95rem; }
+    .session-window {
+      font-size: 0.76rem;
+      color: var(--muted);
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    /* Status chips */
+    .status-chip {
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .chip-sent { background: var(--success-bg); color: var(--success-ink); }
+    .chip-failed { background: var(--error-bg); color: var(--error-ink); }
+    .chip-missing { background: var(--chip-bg); color: var(--muted); }
+    .chip-skipped { background: rgba(245,159,0,0.12); color: var(--accent); }
+
+    /* Channel sub-chips */
+    .channel-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .ch-chip {
+      border-radius: 5px;
+      padding: 2px 7px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .ch-sent { border-color: var(--success); color: var(--success); }
+    .ch-failed { border-color: var(--error); color: var(--error); }
+    .ch-skipped { border-color: var(--border); }
+
+    /* Metadata row */
+    .session-meta {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 0.76rem;
+      color: var(--muted);
+    }
+    .session-meta span { display: flex; align-items: center; gap: 3px; }
+
+    /* View buttons */
+    .view-btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: auto;
+    }
+    .view-btn {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 5px 10px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      background: var(--bg-secondary);
+      color: var(--ink);
+      cursor: pointer;
+      font-family: inherit;
+      transition: border-color 0.12s, color 0.12s, background 0.12s;
+    }
+    .view-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--card-hover); }
+    .view-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(245,159,0,0.08); }
+    .view-btn:disabled { opacity: 0.35; cursor: default; }
+    .view-btn.htmx-request { opacity: 0.6; }
+
+    .no-snap-msg { font-size: 0.82rem; color: var(--muted); padding: 4px 0; }
+
+    /* ── Detail pane ────────────────────────────────────────────────────── */
+    .detail-pane {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      min-height: 80px;
+    }
+    .detail-pane:empty { display: none; }
+    .detail-placeholder {
+      padding: 32px 24px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      text-align: center;
+    }
+
+    /* htmx indicator */
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator { display: inline; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Briefly</p>
+      <h1 class="title">Briefing / History</h1>
+      <p class="subtitle">Browse stored session snapshots. View Telegram text, email, and delivery metadata. Read-only, no provider calls.</p>
+      <div class="breadcrumb-row">
+        <a href="/ui?profile={{ profile }}">&#8962; Home</a>
+        <span class="breadcrumb-sep">/</span>
+        <a href="/ui/briefing?profile={{ profile }}">Briefing</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>History</span>
+      </div>
+      <div class="route-actions">
+        <a class="route-link" href="/ui/briefing?profile={{ profile }}">&#8592; Briefing</a>
+        <a class="route-link" href="/ui?profile={{ profile }}">&#8962; Home</a>
+      </div>
+    </div>
+    <button id="themeToggle" class="theme-toggle" type="button">Switch Theme</button>
+  </header>
+
+  <!-- Date navigation -->
+  <div class="date-nav">
+    <a class="date-nav-btn" href="/ui/briefing/history?profile={{ profile }}&date={{ prev_date }}" aria-label="Previous weekday">&#8592; Prev</a>
+    <span class="date-label">{{ selected_date_display }}</span>
+    {% if next_date %}
+      <a class="date-nav-btn" href="/ui/briefing/history?profile={{ profile }}&date={{ next_date }}" aria-label="Next weekday">Next &#8594;</a>
+    {% else %}
+      <span class="date-nav-btn disabled">Next &#8594;</span>
+    {% endif %}
+    <div class="date-input-wrap">
+      <input
+        type="date"
+        id="datePicker"
+        value="{{ selected_date }}"
+        max="{{ today }}"
+        aria-label="Jump to date"
+      >
+    </div>
+  </div>
+
+  {% if not has_any_data %}
+  <div class="empty-state">
+    <h3>No snapshots for {{ selected_date_display }}</h3>
+    <p>Session snapshots are stored only for live scheduler runs. Backfills, dry runs, and manual CLI sends are excluded.</p>
+  </div>
+  {% endif %}
+
+  <!-- Session grid -->
+  <div class="session-grid" id="history-grid">
+    {% for s in sessions %}
+    <div class="session-card {% if s.snap %}has-data {% endif %}status-{{ s.status }}">
+      <div class="session-head">
+        <span class="session-label">{{ s.label }}</span>
+        <span class="status-chip chip-{{ s.status }}">{{ s.status }}</span>
+      </div>
+      <div class="session-window">{{ s.window }}</div>
+
+      {% if s.snap %}
+        {% set snap = s.snap %}
+
+        <!-- Per-channel delivery chips -->
+        {% if snap.delivery_channels %}
+        <div class="channel-row">
+          {% for ch, st in snap.delivery_channels.items() %}
+            <span class="ch-chip ch-{{ st }}">{{ ch }}: {{ st }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Metadata -->
+        <div class="session-meta">
+          <span>{{ snap.events_count }} event{{ '' if snap.events_count == 1 else 's' }}</span>
+          {% if snap.generated_at_local %}
+            <span>{{ snap.generated_at_local }}</span>
+          {% endif %}
+          {% if snap.source_type %}
+            <span>{{ snap.source_type }}</span>
+          {% endif %}
+        </div>
+
+        <!-- View buttons -->
+        <div class="view-btns">
+          {% if snap.has_telegram or snap.telegram_text %}
+            <button
+              class="view-btn"
+              hx-get="/ui/briefing/history/session?profile={{ profile }}&date={{ selected_date }}&session={{ s.key }}&format=telegram"
+              hx-target="#history-detail"
+              hx-swap="innerHTML"
+              hx-indicator=".detail-pane"
+              onclick="setActive(this)"
+            >Telegram</button>
+          {% else %}
+            <button class="view-btn" disabled title="No Telegram text stored">Telegram</button>
+          {% endif %}
+
+          {% if snap.has_email or snap.email_plain_text %}
+            <button
+              class="view-btn"
+              hx-get="/ui/briefing/history/session?profile={{ profile }}&date={{ selected_date }}&session={{ s.key }}&format=email-text"
+              hx-target="#history-detail"
+              hx-swap="innerHTML"
+              onclick="setActive(this)"
+            >Email text</button>
+          {% else %}
+            <button class="view-btn" disabled title="No email stored">Email text</button>
+          {% endif %}
+
+          {% if snap.email_html %}
+            <button
+              class="view-btn"
+              hx-get="/ui/briefing/history/session?profile={{ profile }}&date={{ selected_date }}&session={{ s.key }}&format=email-html"
+              hx-target="#history-detail"
+              hx-swap="innerHTML"
+              onclick="setActive(this)"
+            >Email HTML</button>
+          {% endif %}
+
+          <button
+            class="view-btn"
+            hx-get="/ui/briefing/history/session?profile={{ profile }}&date={{ selected_date }}&session={{ s.key }}&format=summary"
+            hx-target="#history-detail"
+            hx-swap="innerHTML"
+            onclick="setActive(this)"
+          >Summary</button>
+        </div>
+
+      {% else %}
+        <p class="no-snap-msg">No snapshot stored for this date.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Detail pane: populated via HTMX -->
+  <div id="history-detail" class="detail-pane"></div>
+
+</div><!-- .shell -->
+
+<script>
+  (() => {
+    // Theme
+    function getTheme() {
+      return document.documentElement.getAttribute("data-theme") || "dark";
+    }
+    function setTheme(t) {
+      document.documentElement.setAttribute("data-theme", t);
+      window.localStorage.setItem("briefly-ui-theme", t);
+      const btn = document.getElementById("themeToggle");
+      if (btn) btn.textContent = t === "dark" ? "Light Mode" : "Dark Mode";
+    }
+    const toggle = document.getElementById("themeToggle");
+    if (toggle) {
+      setTheme(getTheme());
+      toggle.addEventListener("click", () => setTheme(getTheme() === "dark" ? "light" : "dark"));
+    }
+
+    // Date picker navigation
+    const picker = document.getElementById("datePicker");
+    if (picker) {
+      picker.addEventListener("change", () => {
+        const d = picker.value;
+        if (d) window.location.href = "/ui/briefing/history?profile={{ profile }}&date=" + d;
+      });
+    }
+  })();
+
+  // Active view button tracking
+  function setActive(btn) {
+    document.querySelectorAll(".view-btn.active").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    // Scroll detail pane into view
+    const pane = document.getElementById("history-detail");
+    if (pane) setTimeout(() => pane.scrollIntoView({ behavior: "smooth", block: "nearest" }), 80);
+  }
+</script>
+</body>
+</html>
