@@ -43,6 +43,42 @@ from app.schemas.events import (
 )
 from app.universe.ticker_metadata import company_name_for_ticker, format_company_ticker, format_company_ticker_list
 from app.cadence.exchange_calendar import exchange_for_symbol, is_exchange_closed
+from app.briefing.move_context import (
+    ASSET_TYPE_COMMODITY,
+    ASSET_TYPE_EQUITY_INDEX,
+    ASSET_TYPE_FX,
+    ASSET_TYPE_VOLATILITY_INDEX,
+    compute_yield_context,
+    format_move_context_line,
+    format_watchlist_move_label,
+    format_yield_context_line,
+    move_context_from_quote,
+)
+
+
+_VIX_TOKENS: frozenset[str] = frozenset({"VIX", "^VIX", "UVXY", "SVXY"})
+_COMMODITY_TOKENS: frozenset[str] = frozenset({
+    "GOLD", "GLD", "GC", "OIL", "WTI", "CRUDE", "CL", "NG",
+    "SILVER", "SLV", "SI", "COPPER", "HG", "PLATINUM", "NATGAS",
+})
+_FX_TOKENS: frozenset[str] = frozenset({
+    "DXY", "USDX", "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
+    "USDCHF", "USDCAD", "DOLLAR INDEX",
+})
+
+
+def _asset_type_for_quote(q) -> str:
+    """Infer the move_context asset type from a QuoteData symbol/display_name."""
+    sym = (q.symbol or "").upper()
+    name = (q.display_name or "").upper()
+    key = f"{sym} {name}"
+    if any(t in key for t in _VIX_TOKENS) or "VIX" in key:
+        return ASSET_TYPE_VOLATILITY_INDEX
+    if any(t in key for t in _COMMODITY_TOKENS):
+        return ASSET_TYPE_COMMODITY
+    if any(t in key for t in _FX_TOKENS):
+        return ASSET_TYPE_FX
+    return ASSET_TYPE_EQUITY_INDEX
 
 
 class TelegramFormatter:
@@ -404,10 +440,14 @@ class TelegramFormatter:
         lines = [f"<b>{section_name}</b>"]
         local_date = briefing.generated_at.astimezone(self.local_tz).date()
 
+        session_mode = briefing.session_mode
+
         # Index quotes
         for q in briefing.market_setup.index_quotes:
             name = self._friendly_instrument_label(q.display_name or q.symbol, q.symbol)
-            line = format_price_line(name, q.current_price, q.change, q.change_percent)
+            asset_type = _asset_type_for_quote(q)
+            ctx = move_context_from_quote(q, asset_type=asset_type, label=name, session_mode=session_mode)
+            line = format_move_context_line(ctx)
             ex = exchange_for_symbol(q.symbol)
             if ex:
                 closed, reason = is_exchange_closed(ex, local_date)
@@ -421,16 +461,34 @@ class TelegramFormatter:
         # Macro instruments (gold, oil, USD, BTC)
         for q in briefing.market_setup.macro_quotes:
             name = self._friendly_instrument_label(q.display_name or q.symbol, q.symbol)
-            lines.append(format_price_line(name, q.current_price, q.change, q.change_percent))
+            asset_type = _asset_type_for_quote(q)
+            ctx = move_context_from_quote(q, asset_type=asset_type, label=name, session_mode=session_mode)
+            lines.append(format_move_context_line(ctx))
 
-        # Treasury yields from FRED
+        # Treasury yields from FRED — shown in basis points, never % change of yield
         setup = briefing.market_setup
         if setup.treasury_10y:
-            chg = f" {format_change(setup.treasury_10y.change or 0, 0)}" if setup.treasury_10y.change else ""
-            lines.append(f"US 10Y: {setup.treasury_10y.value:.3f}%{chg}")
+            y = setup.treasury_10y
+            ctx = compute_yield_context(
+                symbol="US10Y",
+                label="US 10Y",
+                current_yield=float(y.value),
+                change_yield=float(y.change or 0.0),
+                prev_yield=float(y.previous_value or 0.0),
+                session_mode=session_mode,
+            )
+            lines.append(format_yield_context_line(ctx))
         if setup.treasury_2y:
-            chg = f" {format_change(setup.treasury_2y.change or 0, 0)}" if setup.treasury_2y.change else ""
-            lines.append(f"US 2Y: {setup.treasury_2y.value:.3f}%{chg}")
+            y = setup.treasury_2y
+            ctx = compute_yield_context(
+                symbol="US2Y",
+                label="US 2Y",
+                current_yield=float(y.value),
+                change_yield=float(y.change or 0.0),
+                prev_yield=float(y.previous_value or 0.0),
+                session_mode=session_mode,
+            )
+            lines.append(format_yield_context_line(ctx))
 
         # Sector breadth (up/down count from SPDR ETFs)
         breadth_rows = briefing.market_setup.market_breadth
@@ -807,8 +865,15 @@ class TelegramFormatter:
 
         # Watchlist quotes
         if quotes:
-            q_lines = [format_compact_price(q.display_name or q.symbol, q.change_percent)
-                       for q in quotes[:10]]
+            q_lines = []
+            for q in quotes[:10]:
+                ctx = move_context_from_quote(
+                    q,
+                    asset_type=_asset_type_for_quote(q),
+                    session_mode=session_mode,
+                )
+                label = format_watchlist_move_label(ctx)
+                q_lines.append(f"{q.display_name or q.symbol} {label}")
             parts.append(" | ".join(q_lines))
             summary = self._watchlist_summary_line(
                 quotes,
