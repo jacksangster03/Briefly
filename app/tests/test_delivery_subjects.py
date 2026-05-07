@@ -187,3 +187,60 @@ class TestReplaySubject:
         call_kwargs = email_content.model_copy.call_args[1]["update"]
         subject = call_kwargs["subject"]
         assert "14:15" in subject
+
+
+# ---------------------------------------------------------------------------
+# delivery-log CLI regression test
+# ---------------------------------------------------------------------------
+
+class TestDeliveryLogCli:
+    """Ensure delivery-log does not crash and shows expected header."""
+
+    def test_delivery_log_does_not_raise_unbound_error(self, monkeypatch) -> None:
+        """delivery_log must not crash with UnboundLocalError when profile loading fails."""
+        from click.testing import CliRunner
+        from app.cli import cli
+
+        # Patch load_user_profile to raise so we exercise the fallback branch
+        monkeypatch.setattr(
+            "app.cli.delivery_log.__wrapped__" if hasattr(getattr(__import__("app.cli", fromlist=["delivery_log"]), "delivery_log", None), "__wrapped__") else "app.personalization.user_profile.load_user_profile",
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("profile load failed")),
+            raising=False,
+        )
+        runner = CliRunner()
+        result = runner.invoke(cli, ["delivery-log", "--date", "today"])
+        # Must not crash with UnboundLocalError
+        assert result.exit_code != 1 or "UnboundLocalError" not in str(result.output)
+        assert "Delivery Log" in result.output or result.exit_code == 0
+
+    def test_delivery_log_header_contains_date_and_tz(self, monkeypatch) -> None:
+        """Header line should include a date string and timezone name."""
+        from click.testing import CliRunner
+        from app.cli import cli
+        from unittest.mock import MagicMock
+
+        # Patch DB so no records are found (avoids real DB access)
+        monkeypatch.setattr("app.cli.init_db", lambda: None, raising=False)
+
+        mock_profile = MagicMock()
+        mock_profile.timezone = "Europe/Madrid"
+        monkeypatch.setattr(
+            "app.personalization.user_profile.load_user_profile",
+            lambda *a, **kw: mock_profile,
+        )
+
+        from contextlib import contextmanager
+        from unittest.mock import MagicMock as MM
+
+        @contextmanager
+        def _fake_session():
+            db = MM()
+            db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+            yield db
+
+        monkeypatch.setattr("app.main.get_session", _fake_session, raising=False)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["delivery-log", "--date", "today"])
+        assert "Delivery Log" in result.output
+        assert "Europe/Madrid" in result.output

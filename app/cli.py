@@ -1707,11 +1707,13 @@ def delivery_log(ctx, target_date: str, profile_name: str) -> None:
     settings = ctx.obj["settings"]
     init_db()
 
+    tz_name = settings.timezone or "Europe/Madrid"
     try:
         profile = load_user_profile(settings, profile_name)
-        tz = ZoneInfo(profile.timezone or "Europe/Madrid")
+        tz_name = profile.timezone or tz_name
     except Exception:
-        tz = ZoneInfo("Europe/Madrid")
+        pass
+    tz = ZoneInfo(tz_name)
 
     now_local = _dt.now(tz)
     if target_date.lower() == "today":
@@ -1722,7 +1724,7 @@ def delivery_log(ctx, target_date: str, profile_name: str) -> None:
         target = _date.fromisoformat(target_date)
 
     date_str = target.strftime("%A %d %b %Y")
-    print(f"\nDelivery Log — {date_str} ({profile.timezone or 'Europe/Madrid'})\n")
+    print(f"\nDelivery Log — {date_str} ({tz_name})\n")
 
     with get_session() as db:
         rows = (
