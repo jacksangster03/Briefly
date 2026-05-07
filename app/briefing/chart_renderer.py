@@ -511,9 +511,11 @@ class ChartRenderer:
 
         ax.axhline(100, color=GRID, linewidth=1.0, alpha=0.78, linestyle="--")
 
-        # Set x-axis ticks to relative session labels
+        # Set x-axis ticks to relative session labels, always rendering each point in the 5D window.
         if label_rows:
-            n_pts = max(len(line.get_xdata()) for line in ax.lines) if ax.lines else 5
+            n_pts = len(series[0].get("x_5d") or []) if series else 0
+            if n_pts <= 0:
+                n_pts = max(len(line.get_xdata()) for line in ax.lines) if ax.lines else 5
             tick_positions = list(range(n_pts))
             tick_labels = [f"T-{n_pts - 1 - i}" if i < n_pts - 1 else "Today" for i in range(n_pts)]
             ax.set_xticks(tick_positions)
@@ -524,7 +526,7 @@ class ChartRenderer:
             ax.text(
                 0.01,
                 0.03,
-                f"5D rebased to 100 · spread {spread:.2f} pts · leader vs laggard",
+                f"5D rebased to 100 · spread {spread:.1f} pts · leader vs laggard",
                 transform=ax.transAxes,
                 color=MUTED,
                 fontsize=8.4,
@@ -1385,6 +1387,7 @@ class ChartRenderer:
         if not rows:
             return None
         tenors = [int(row["tenor"]) for row in rows]
+        tenor_labels = [f"{tenor}Y" for tenor in tenors]
         today_vals = [float(row["today"]) for row in rows]
         week_ago_vals = [float(row["week_ago"]) if row.get("week_ago") is not None else None for row in rows]
 
@@ -1398,7 +1401,9 @@ class ChartRenderer:
 
         ax.axhline(0, color=GRID, linewidth=0.8, alpha=0.6)
         ax.set_xticks(tenors)
-        ax.set_xticklabels([f"{tenor}Y" for tenor in tenors], color=MUTED, fontsize=9)
+        ax.set_xticklabels(tenor_labels, color=MUTED, fontsize=9)
+        if tenors:
+            ax.set_xlim(min(tenors) - 0.5, max(tenors) + 0.5)
         y_min = min(today_vals + [v for v in week_ago_vals if v is not None])
         y_max = max(today_vals + [v for v in week_ago_vals if v is not None])
         pad = max(0.12, (y_max - y_min) * 0.25)
@@ -1412,13 +1417,23 @@ class ChartRenderer:
             ax.text(tenor, val + max(0.03, (y_max - y_min) * 0.08),
                     label, ha="center", va="bottom", fontsize=8.2, color=ACCENT, weight="bold", zorder=5)
 
-        shape = str((spec.get("meta") or {}).get("shape") or "")
+        meta = dict(spec.get("meta") or {})
+        shape = str(meta.get("shape") or "")
         ax.legend(frameon=False, labelcolor=MUTED, fontsize=8.5)
         self._style_axes(ax, title="",
-                         xlabel="Tenor", ylabel="Yield (%)", grid_axis="y")
+                         xlabel="Tenor", ylabel="Yield (%)", grid_axis="y", lock_x_ticks=True)
         ax.text(0.01, 0.04, f"Shape: {shape.upper()}" if shape else "",
                 transform=ax.transAxes, color=MUTED, fontsize=8.2, weight="bold")
-        fig.subplots_adjust(left=0.10, right=0.96, top=0.86, bottom=0.18)
+        if bool(meta.get("weekend_basis")):
+            ax.text(
+                0.01,
+                0.00,
+                "Data basis: latest available official rates",
+                transform=ax.transAxes,
+                color=MUTED,
+                fontsize=7.8,
+            )
+        fig.subplots_adjust(left=0.10, right=0.96, top=0.86, bottom=0.20)
         return self._to_asset(fig, key="yield_curve_shape",
                               title=str(spec.get("title") or "Yield Curve Shape"),
                               caption=str(spec.get("caption") or ""), filename="yield-curve.png")

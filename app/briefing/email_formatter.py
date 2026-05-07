@@ -477,7 +477,13 @@ class EmailFormatter:
         if key == "setup_confirmation_card":
             return "This checks whether the session is confirming or fading the original setup across regions, rates, volatility, and breadth."
         if key == "yield_curve_shape":
-            return "A higher 10Y usually increases discount-rate pressure for growth equities and duration-sensitive assets."
+            lower = base.lower()
+            if "10y move lower" in lower or re.search(r"10y move .*?\(-\d+(?:\.\d+)?\s*bp\)", lower):
+                return (
+                    "Lower long-end yields can ease discount-rate pressure for growth and duration assets, "
+                    "but declines can also reflect weaker growth expectations or a defensive shift."
+                )
+            return "Higher long-end yields usually increase discount-rate pressure for growth equities and duration-sensitive assets."
         if key == "volatility_regime_card":
             return "A rising VIX below 20 signals caution and fragility, but not full panic by itself."
         if key == "breadth_leadership_panel":
@@ -536,6 +542,9 @@ class EmailFormatter:
         if key == "setup_confirmation_card":
             return "If setup confirmation weakens, treat intraday strength as lower quality until breadth and rates stabilise."
         if key == "yield_curve_shape":
+            lower = base.lower()
+            if "10y move lower" in lower or re.search(r"10y move .*?\(-\d+(?:\.\d+)?\s*bp\)", lower):
+                return "Watch BND/IEF/LQD for duration sensitivity and QQQ/growth sleeves for discount-rate effects."
             return "Watch BND/IEF/LQD for duration drag and QQQ/growth sleeves if yields keep rising."
         if key == "volatility_regime_card":
             return "Watch whether volatility confirms the regional/rates pressure before reducing risk."

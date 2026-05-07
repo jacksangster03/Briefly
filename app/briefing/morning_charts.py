@@ -347,6 +347,7 @@ def _build_candidates(
             spec=_global_relative_spec(
                 index_quotes=briefing.market_setup.index_quotes,
                 market_data_service=market_data_service,
+                generated_at=briefing.generated_at,
             ),
             reason="Cross-region leadership and path divergence.",
         )
@@ -526,6 +527,7 @@ def _build_candidates(
                     yield_curve_points or [],
                     market_data_service,
                     briefing.canonical_prices or {},
+                    briefing.generated_at,
                 ),
                 reason="Yield curve shape and week-over-week shift in one glance.",
             )
@@ -1045,7 +1047,12 @@ def _bundle_summary(normalized: dict[str, Any], regime_tags: list[str]) -> str:
     )
 
 
-def _global_relative_spec(*, index_quotes: list[QuoteData], market_data_service: Any) -> dict[str, Any]:
+def _global_relative_spec(
+    *,
+    index_quotes: list[QuoteData],
+    market_data_service: Any,
+    generated_at: datetime | None = None,
+) -> dict[str, Any]:
     selected = [quote for quote in index_quotes if "vix" not in (quote.display_name or quote.symbol).lower()][:10]
     series: list[dict[str, Any]] = []
     missing: list[str] = []
@@ -1074,13 +1081,17 @@ def _global_relative_spec(*, index_quotes: list[QuoteData], market_data_service:
         )
     series = _limit_global_series(series)
     available = bool(series)
+    is_weekend = bool(generated_at and generated_at.weekday() >= 5)
+    read = _global_read_line(series)
+    if is_weekend and available:
+        read = f"{read} Data basis: latest completed 5D window."
     return {
         "chart_key": "global_relative_performance",
         "variant": "5d_rebased",
         "available": available,
         "reason_if_hidden": None if available else "History unavailable for global index comparison.",
         "title": "Global Equity Leadership",
-        "caption": _global_read_line(series),
+        "caption": read,
         "series": series,
         "annotations": [],
         "meta": {
@@ -1661,6 +1672,7 @@ def _yield_curve_spec(
     yield_curve_points: list[MacroDataPoint],
     market_data_service: Any,
     canonical_prices: dict[str, Any] | None = None,
+    generated_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Yield curve shape from deterministic macro series only (no yfinance fallback)."""
     TENOR_ORDER = {"DGS2": 2, "DGS5": 5, "DGS10": 10, "DGS30": 30}
@@ -1679,8 +1691,6 @@ def _yield_curve_spec(
         })
     today_rows.sort(key=lambda r: r["tenor"])
     available = len(today_rows) >= 2
-    inversion = (today_rows[0]["today"] > today_rows[-1]["today"]) if available else False
-    shape = "inverted" if inversion else "normal"
     row_map = {int(row["tenor"]): row for row in today_rows}
     canon = dict(canonical_prices or {})
     canon_ten = dict(canon.get("US10Y") or {}).get("value")
@@ -1690,13 +1700,18 @@ def _yield_curve_spec(
     ten = row_map.get(10, {}).get("today")
     thirty = row_map.get(30, {}).get("today")
     spread_10_2 = ((ten - two) * 100.0) if (ten is not None and two is not None) else None
+    shape = _classify_curve_shape(today_rows)
     if available and two is not None and ten is not None:
-        read = (
-            f"{'Inverted' if inversion else 'Normal'} curve: 2Y {two:.2f}%, 10Y {ten:.2f}%"
-            + (f", 30Y {thirty:.2f}%" if thirty is not None else "")
-        )
+        tenor_bits = [f"{int(row['tenor'])}Y {float(row['today']):.2f}%" for row in today_rows]
+        read = f"{shape.replace('_', ' ').title()} curve: " + ", ".join(tenor_bits)
         if spread_10_2 is not None:
             read += f"; 10Y-2Y spread {spread_10_2:+.0f} bp."
+        ten_change_bps = row_map.get(10, {}).get("change_bps")
+        if ten_change_bps is not None:
+            direction = "higher" if float(ten_change_bps) > 0 else ("lower" if float(ten_change_bps) < 0 else "unchanged")
+            read += f" 10Y move {direction} ({float(ten_change_bps):+.0f} bp)."
+        if generated_at and generated_at.weekday() >= 5:
+            read += " Data basis: latest available official rates."
     else:
         read = "Yield curve data unavailable."
     return {
@@ -1707,10 +1722,34 @@ def _yield_curve_spec(
         "title": "Yield Curve Shape",
         "caption": read,
         "series": today_rows,
-        "annotations": [{"label": "inversion", "value": inversion}],
-        "meta": {"shape": shape, "spread_10_2_bps": spread_10_2, "two": two, "ten": ten, "thirty": thirty},
+        "annotations": [{"label": "inversion", "value": shape in {"inverted", "partly_inverted"}}],
+        "meta": {
+            "shape": shape,
+            "spread_10_2_bps": spread_10_2,
+            "two": two,
+            "ten": ten,
+            "thirty": thirty,
+            "tenors": [int(row["tenor"]) for row in today_rows],
+            "weekend_basis": bool(generated_at and generated_at.weekday() >= 5),
+        },
         "email_dimensions": {"width": 1000, "height": 520},
     }
+
+
+def _classify_curve_shape(rows: list[dict[str, Any]]) -> str:
+    if len(rows) < 2:
+        return "unavailable"
+    ordered = sorted(rows, key=lambda row: int(row["tenor"]))
+    vals = [float(row["today"]) for row in ordered]
+    strictly_up = all(vals[i + 1] > vals[i] for i in range(len(vals) - 1))
+    strictly_down = all(vals[i + 1] < vals[i] for i in range(len(vals) - 1))
+    if strictly_up:
+        return "normal"
+    if strictly_down:
+        return "inverted"
+    if len(vals) >= 2 and vals[-1] < vals[0]:
+        return "partly_inverted"
+    return "mixed"
 
 
 def _vix_term_structure_spec(macro_quotes: list[QuoteData], market_data_service: Any) -> dict[str, Any]:

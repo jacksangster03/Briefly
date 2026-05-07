@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+import re
 
 import pytest
 pytest.importorskip("httpx")
@@ -14,6 +15,7 @@ from PIL import Image
 
 from app.briefing.chart_builder import MorningChartBuilder
 from app.briefing.chart_renderer import ChartRenderer
+from app.briefing.email_formatter import EmailFormatter
 from app.briefing.morning_charts import build_morning_chart_bundle, selected_chart_specs
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MarketSetup, MorningBriefing
@@ -263,12 +265,132 @@ def test_chart_renderer_global_shows_full_x_axis_labels_and_avoids_clipped_text(
     monkeypatch.setattr(ChartRenderer, "_to_asset", _capture, raising=False)
     asset = ChartRenderer().render_global_relative_from_spec(spec)
     assert asset is not None
-    assert any(label == "Today" for label in captured["labels"])
-    assert len([label for label in captured["labels"] if label]) >= 5
+    assert captured["labels"] == ["T-4", "T-3", "T-2", "T-1", "Today"]
     joined = " | ".join(captured["texts"])
     assert "Nasdaq" in joined or "NASDAQ" in joined
     endpoint_labels = [text for text in captured["texts"] if "%" in text and "(" in text]
     assert len(endpoint_labels) >= 2
+
+
+def test_chart_renderer_yield_curve_forces_all_tenor_labels(monkeypatch):
+    yield_points = [
+        MacroDataPoint(series_id="DGS2", name="US 2Y Treasury Yield", value=3.93, previous_value=3.96),
+        MacroDataPoint(series_id="DGS10", name="US 10Y Treasury Yield", value=4.36, previous_value=4.38),
+        MacroDataPoint(series_id="DGS30", name="US 30Y Treasury Yield", value=4.98, previous_value=4.99),
+    ]
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=_sample_briefing(),
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+        yield_curve_points=yield_points,
+    )
+    chart_map = {row["chart_key"]: row for row in (bundle.get("charts") or [])}
+    spec = chart_map["yield_curve_shape"]
+    captured: dict = {}
+
+    def _capture(self, fig, *, key: str, title: str, caption: str, filename: str):
+        ax = fig.axes[0]
+        captured["labels"] = [tick.get_text() for tick in ax.get_xticklabels()]
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        return ChartAsset(
+            key=key,
+            title=title,
+            caption=caption,
+            filename=filename,
+            content_type="image/png",
+            content_id="test-cid",
+            content=buf.getvalue(),
+        )
+
+    monkeypatch.setattr(ChartRenderer, "_to_asset", _capture, raising=False)
+    asset = ChartRenderer().render_yield_curve_from_spec(spec)
+    assert asset is not None
+    assert captured["labels"] == ["2Y", "10Y", "30Y"]
+
+
+def test_yield_curve_caption_spread_math_and_inversion_label():
+    briefing = _sample_briefing()
+    briefing.macro_context = [
+        MacroDataPoint(series_id="DGS2", name="US 2Y Treasury Yield", value=4.25, previous_value=4.20),
+        MacroDataPoint(series_id="DGS10", name="US 10Y Treasury Yield", value=3.90, previous_value=4.02),
+        MacroDataPoint(series_id="DGS30", name="US 30Y Treasury Yield", value=3.80, previous_value=3.92),
+    ]
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=briefing,
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+        yield_curve_points=briefing.macro_context,
+    )
+    chart_map = {row["chart_key"]: row for row in (bundle.get("charts") or [])}
+    spec = chart_map["yield_curve_shape"]
+    caption = str(spec.get("caption") or "")
+    assert "Inverted curve" in caption
+    assert "10Y-2Y spread -35 bp" in caption
+    assert float((spec.get("meta") or {}).get("spread_10_2_bps") or 0.0) == pytest.approx(-35.0, abs=0.1)
+
+
+def test_yield_curve_copy_is_conditional_when_10y_move_is_negative():
+    caption = "Mixed curve: 2Y 3.93%, 10Y 4.36%, 30Y 4.98%; 10Y-2Y spread +43 bp. 10Y move lower (-2 bp)."
+    read, why, lens = EmailFormatter("Europe/Madrid")._chart_copy_triplet("yield_curve_shape", caption)
+    assert "if yields keep rising" not in lens.lower()
+    assert "lower long-end yields" in why.lower()
+
+
+def test_weekend_chart_basis_notes_present_for_yield_and_global():
+    briefing = _sample_briefing()
+    briefing.generated_at = datetime(2026, 5, 9, 8, 0, tzinfo=timezone.utc)  # Saturday
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=briefing,
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+        yield_curve_points=[
+            MacroDataPoint(series_id="DGS2", name="US 2Y Treasury Yield", value=3.93, previous_value=3.96),
+            MacroDataPoint(series_id="DGS10", name="US 10Y Treasury Yield", value=4.36, previous_value=4.38),
+            MacroDataPoint(series_id="DGS30", name="US 30Y Treasury Yield", value=4.98, previous_value=4.99),
+        ],
+    )
+    chart_map = {row["chart_key"]: row for row in (bundle.get("charts") or [])}
+    assert "latest completed 5D window" in str((chart_map["global_relative_performance"] or {}).get("caption") or "")
+    assert "latest available official rates" in str((chart_map["yield_curve_shape"] or {}).get("caption") or "")
+
+
+def test_global_read_spread_matches_footer_methodology(monkeypatch):
+    bundle, _selected = build_morning_chart_bundle(
+        briefing=_sample_briefing(),
+        profile=_sample_profile(),
+        market_data_service=_StubMarketData(with_history=True),
+    )
+    chart_map = {row["chart_key"]: row for row in (bundle.get("charts") or [])}
+    spec = chart_map["global_relative_performance"]
+    caption = str(spec.get("caption") or "")
+    m = re.search(r"by\s+([0-9]+(?:\.[0-9])?)\s+rebased points", caption)
+    assert m is not None
+    read_spread = float(m.group(1))
+    captured: dict = {}
+
+    def _capture(self, fig, *, key: str, title: str, caption: str, filename: str):
+        ax = fig.axes[0]
+        captured["footer"] = " ".join(text.get_text() for text in ax.texts if "leader vs laggard" in text.get_text())
+        buf = BytesIO()
+        fig.savefig(buf, format="png")
+        return ChartAsset(
+            key=key,
+            title=title,
+            caption=caption,
+            filename=filename,
+            content_type="image/png",
+            content_id="test-cid",
+            content=buf.getvalue(),
+        )
+
+    monkeypatch.setattr(ChartRenderer, "_to_asset", _capture, raising=False)
+    asset = ChartRenderer().render_global_relative_from_spec(spec)
+    assert asset is not None
+    fm = re.search(r"spread\s+([0-9]+(?:\.[0-9])?)\s+pts", str(captured.get("footer") or ""))
+    assert fm is not None
+    footer_spread = float(fm.group(1))
+    assert footer_spread == pytest.approx(read_spread, abs=0.1)
 
 
 def test_chart_renderer_breadth_separates_breadth_pct_from_factor_axis(monkeypatch):

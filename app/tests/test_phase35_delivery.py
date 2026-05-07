@@ -291,3 +291,27 @@ def test_telegram_messenger_send_photo_uses_send_photo(mock_post):
     url = mock_post.call_args.args[0]
     assert url.endswith("/sendPhoto")
     assert "files" in mock_post.call_args.kwargs
+
+
+def test_email_formatter_global_leadership_title_not_duplicated_and_no_takeaway_dup():
+    formatter = EmailFormatter("Europe/Madrid")
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 4, 12, 8, 45, tzinfo=timezone.utc),
+        session_mode="weekday",
+        chart_assets=[
+            ChartAsset(
+                key="global_relative_performance",
+                title="Global Equity Leadership",
+                caption="Nasdaq Composite leads the weakest tracked index by 1.6 rebased points over the 5D window.",
+                filename="global-relative-performance.png",
+                content_type="image/png",
+                content_id="global-relative-performance-cid",
+                content=b"\x89PNG\r\n\x1a\nfake",
+            )
+        ],
+        morning_chart_selection=[{"chart_key": "global_relative_performance", "role": "hero", "reason": "test"}],
+        morning_chart_bundle={"regime_tags": ["regional_split"], "meta": {"data_confidence": "high"}},
+    )
+    rendered = formatter.format_morning_briefing(briefing)
+    assert rendered.html_body.count(">Global Equity Leadership<") == 1
+    assert "Takeaway:" not in rendered.html_body
