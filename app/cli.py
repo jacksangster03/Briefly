@@ -1801,8 +1801,9 @@ def version_cmd(ctx, **kwargs) -> None:
     print(f"  Branch:  {branch}")
     print(f"  Commit:  {commit}  ({commit_date})")
 
-    # Check scheduler lock file
-    lock_path = "/tmp/briefly_scheduler.lock"
+    # Check scheduler lock file (same path as app/scheduler.py)
+    settings = ctx.obj["settings"]
+    lock_path = os.path.join(settings.data_dir, "state", "scheduler.lock")
     if os.path.exists(lock_path):
         try:
             import fcntl
