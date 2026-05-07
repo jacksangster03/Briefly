@@ -53,12 +53,32 @@ def build_market_clock_context(profile, now_local: datetime, session_template_it
         elif s == "opening_next":
             opening_next.append(name)
 
+    open_now_values = open_now[:4]
+    open_now_source = "computed"
+    if not open_now_values:
+        open_now_values = [session_template_item.open_now_hint] if session_template_item.open_now_hint else []
+        open_now_source = "fallback"
+
+    recently_closed_values = recently_closed[:4]
+    recently_closed_source = "computed"
+    if not recently_closed_values:
+        recently_closed_values = [session_template_item.recently_closed_hint] if session_template_item.recently_closed_hint else []
+        recently_closed_source = "fallback"
+
+    opening_next_values = opening_next[:4]
+    opening_next_source = "computed"
+    if not opening_next_values:
+        opening_next_values = [session_template_item.opening_next_hint] if session_template_item.opening_next_hint else []
+        opening_next_source = "fallback"
+
     return {
-        "open_now": open_now[:4] or ([session_template_item.open_now_hint] if session_template_item.open_now_hint else []),
-        "recently_closed": recently_closed[:4] or ([session_template_item.recently_closed_hint] if session_template_item.recently_closed_hint else []),
-        "opening_next": opening_next[:4] or ([session_template_item.opening_next_hint] if session_template_item.opening_next_hint else []),
+        "open_now": open_now_values,
+        "recently_closed": recently_closed_values,
+        "opening_next": opening_next_values,
+        "open_now_source": open_now_source,
+        "recently_closed_source": recently_closed_source,
+        "opening_next_source": opening_next_source,
         "focus": session_template_item.focus,
         "timezone": tz_name,
         "local_time": now.strftime("%Y-%m-%d %H:%M"),
     }
-

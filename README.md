@@ -44,6 +44,14 @@ Available templates:
 
 For backward compatibility, `default_user` remains `Europe/Madrid` + `emea_global`, and the canonical EMEA session keys remain unchanged.
 
+Location/timezone determine defaults, but market focus can override them:
+
+- `market_focus_region` can steer template choice (for example, a Spain-based user choosing Americas cadence).
+- `session_template_override` has highest priority and forces the active template.
+- `primary_markets` / `secondary_markets` allow users to express market focus explicitly without changing home timezone.
+
+In short: location sets your default schedule; market focus can override it.
+
 ---
 
 ## EMEA default schedule
@@ -73,6 +81,18 @@ Each session now includes a deterministic market-clock block in Telegram and ema
 - Session focus
 
 This is powered by static major exchange hours and profile local time. Briefly avoids over-claiming uncertain exchange state.
+When a row is computed from exchange hours, labels are direct (`Open now`, `Recently closed`, `Opening next`).
+When computed data is unavailable for that row, Briefly falls back to a session-context hint and labels it as context
+(`Open now context`, `Recently closed context`, `Opening next context`).
+
+Current limitations:
+
+- No exchange holiday calendar integration yet.
+- No half-day/special-close handling yet.
+- No Asia lunch-break modeling yet.
+- Futures/pre-market states are simplified context labels, not full market microstructure.
+
+APAC/Americas templates are available now for profile-level routing and rendering compatibility; treat them as template-ready while full multi-user scheduler orchestration is still being hardened.
 
 ---
 

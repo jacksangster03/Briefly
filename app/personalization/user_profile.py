@@ -46,6 +46,8 @@ class UserProfile:
         session_intensity: str | None = None,
         primary_markets: list[str] | None = None,
         secondary_markets: list[str] | None = None,
+        market_focus_region: str | None = None,
+        session_template_override: str | None = None,
     ):
         self.name = name
         self.timezone = timezone
@@ -73,6 +75,8 @@ class UserProfile:
         self.session_intensity = session_intensity or "standard"
         self.primary_markets = primary_markets or []
         self.secondary_markets = secondary_markets or []
+        self.market_focus_region = market_focus_region or ""
+        self.session_template_override = session_template_override or ""
 
     @property
     def all_watchlist_tickers(self) -> list[str]:
@@ -275,6 +279,8 @@ def load_user_profile(settings: Settings) -> UserProfile:
         session_intensity=user_data.get("session_intensity", "standard"),
         primary_markets=user_data.get("primary_markets", []),
         secondary_markets=user_data.get("secondary_markets", []),
+        market_focus_region=user_data.get("market_focus_region", ""),
+        session_template_override=user_data.get("session_template_override", ""),
     )
 
     inferred = infer_market_profile(profile.country, profile.timezone)
@@ -288,6 +294,8 @@ def load_user_profile(settings: Settings) -> UserProfile:
         profile.session_template = inferred.session_template
     if not profile.session_intensity:
         profile.session_intensity = inferred.session_intensity
+    if profile.session_template_override:
+        profile.session_template = profile.session_template_override
 
     # Merge watchlist
     watchlist_path = configs_dir / "watchlists.yaml"
@@ -467,6 +475,14 @@ def _load_profile_overrides(profile: UserProfile) -> None:
         if key.startswith("healthcare."):
             pref_key = key.replace("healthcare.", "", 1)
             profile.healthcare[pref_key] = value
+            continue
+        if key == "market.market_focus_region":
+            profile.market_focus_region = str(value).strip()
+            continue
+        if key == "market.session_template_override":
+            profile.session_template_override = str(value).strip()
+            if profile.session_template_override:
+                profile.session_template = profile.session_template_override
 
 
 def _load_portfolio_context(profile: UserProfile, configs_dir: Path) -> None:

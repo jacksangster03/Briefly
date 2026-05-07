@@ -29,12 +29,12 @@ class SessionTemplateItem:
 
 SESSION_TEMPLATES: dict[str, tuple[SessionTemplateItem, ...]] = {
     "emea_global": (
-        SessionTemplateItem("morning", "Morning Briefing", time(6, 0), time(10, 30), "Asia overnight + Europe open + US prior close", "Europe cash + UK cash + US futures", "US cash + Asia cash", "US cash", "standard"),
+        SessionTemplateItem("morning", "Morning Briefing", time(6, 0), time(10, 30), "Asia overnight + Europe open + US prior close", "Europe cash and US futures context", "US prior session", "US cash later today", "standard"),
         SessionTemplateItem("europe_midday", "Europe Midday Check", time(10, 30), time(13, 30), "Europe session + US pre-market build", "Europe cash + UK cash", "Asia cash", "US pre-market", "standard"),
         SessionTemplateItem("us_pre_open", "US Pre-Open Setup", time(13, 30), time(15, 30), "US setup + Europe handoff", "Europe cash + US futures", "Asia cash", "US cash", "standard"),
         SessionTemplateItem("us_intraday_risk", "US Intraday Risk Check", time(15, 30), time(17, 30), "US open reaction + Europe/US overlap", "US cash + Europe cash", "Asia cash", "Europe close", "active"),
         SessionTemplateItem("into_close", "Into Close Update", time(17, 30), time(22, 0), "Late US session + Europe close", "US cash", "Europe cash", "US close", "active"),
-        SessionTemplateItem("closing_wrap", "Closing Wrap / Next-Day Setup", time(22, 0), time(23, 59), "US close + next-day setup", "After-hours futures", "US cash", "APAC cash", "light"),
+        SessionTemplateItem("closing_wrap", "Closing Wrap / Next-Day Setup", time(22, 0), time(23, 59), "US close + next-day setup", "After-hours / futures context", "US cash prior session", "APAC cash next session", "light"),
     ),
     "americas_global": (
         SessionTemplateItem("americas_morning", "Morning Global Setup", time(6, 0), time(8, 30), "Asia close + Europe live + US pre-market", "Europe cash + US futures", "Asia cash", "US pre-market", "standard"),
@@ -65,7 +65,20 @@ def get_template_items(template_name: str) -> tuple[SessionTemplateItem, ...]:
 
 
 def get_session_template_for_profile(profile: "UserProfile") -> tuple[str, tuple[SessionTemplateItem, ...]]:
-    name = (getattr(profile, "session_template", "") or "emea_global").strip().lower()
+    override = (getattr(profile, "session_template_override", "") or "").strip().lower()
+    if override:
+        name = override
+    else:
+        focus_region = (getattr(profile, "market_focus_region", "") or "").strip().lower()
+        if focus_region in {"americas", "us", "north_america"}:
+            name = "americas_global"
+        elif focus_region in {"apac", "asia"}:
+            au_nz = (getattr(profile, "sub_region", "") or "").strip().lower() in {"australia/nz", "australia", "new zealand"}
+            name = "apac_australia" if au_nz else "apac_global"
+        elif focus_region in {"emea", "europe", "middle_east", "africa"}:
+            name = "emea_global"
+        else:
+            name = (getattr(profile, "session_template", "") or "emea_global").strip().lower()
     if name not in SESSION_TEMPLATES:
         name = "emea_global"
     return name, SESSION_TEMPLATES[name]

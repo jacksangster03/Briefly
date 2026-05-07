@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from app.briefing.market_regions import MarketRegion, infer_market_profile
+from app.briefing.session_templates import get_session_template_for_profile
+from app.personalization.user_profile import UserProfile
 
 
 def test_spain_profile_maps_to_emea() -> None:
@@ -33,3 +35,44 @@ def test_australia_profile_maps_to_apac_australia_template() -> None:
     assert p.sub_region == "Australia/NZ"
     assert p.session_template == "apac_australia"
     assert p.timezone == "Australia/Sydney"
+
+
+def test_unknown_country_with_europe_timezone_defaults_to_emea() -> None:
+    p = infer_market_profile(None, "Europe/Madrid")
+    assert p.market_region == MarketRegion.EMEA
+    assert p.session_template == "emea_global"
+
+
+def test_spain_no_override_uses_emea_template() -> None:
+    profile = UserProfile(country="Spain", timezone="Europe/Madrid", session_template="emea_global")
+    name, _ = get_session_template_for_profile(profile)
+    assert name == "emea_global"
+
+
+def test_spain_override_can_use_americas_template() -> None:
+    profile = UserProfile(
+        country="Spain",
+        timezone="Europe/Madrid",
+        session_template="emea_global",
+        session_template_override="americas_global",
+    )
+    name, _ = get_session_template_for_profile(profile)
+    assert name == "americas_global"
+
+
+def test_us_no_override_uses_americas_template() -> None:
+    profile = UserProfile(country="US", timezone="America/New_York", session_template="americas_global")
+    name, _ = get_session_template_for_profile(profile)
+    assert name == "americas_global"
+
+
+def test_japan_no_override_uses_apac_global() -> None:
+    profile = UserProfile(country="Japan", timezone="Asia/Tokyo", session_template="apac_global")
+    name, _ = get_session_template_for_profile(profile)
+    assert name == "apac_global"
+
+
+def test_australia_no_override_uses_apac_australia() -> None:
+    profile = UserProfile(country="Australia", timezone="Australia/Sydney", session_template="apac_australia")
+    name, _ = get_session_template_for_profile(profile)
+    assert name == "apac_australia"

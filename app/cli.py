@@ -1172,7 +1172,9 @@ def schedule_status(ctx, profile_name: str):
     click.echo(f"  Timezone:         {profile.timezone or settings.timezone}")
     click.echo(f"  Market region:    {getattr(profile, 'market_region', '') or 'EMEA'}")
     click.echo(f"  Sub-region:       {getattr(profile, 'sub_region', '') or 'Eurozone'}")
+    click.echo(f"  Market focus:     {getattr(profile, 'market_focus_region', '') or '(inferred from location)'}")
     click.echo(f"  Template:         {template_name}")
+    click.echo(f"  Template override:{(' ' + profile.session_template_override) if getattr(profile, 'session_template_override', '') else ' (none)'}")
     click.echo(f"  Local time:       {local_now.strftime('%Y-%m-%d %H:%M')}")
     click.echo(f"  Current session:  {current_window.key}")
     click.echo(f"    Label:          {current_meta.label if current_meta else current_window.title}")
@@ -1230,7 +1232,11 @@ def schedule_status(ctx, profile_name: str):
             if row is None:
                 state_str = "(not attempted)"
             elif row.success:
-                sent_at = row.sent_at.strftime("%H:%M") if row.sent_at else "?"
+                if row.sent_at:
+                    sent_utc = row.sent_at.replace(tzinfo=_dt.timezone.utc)
+                    sent_at = sent_utc.astimezone(tz).strftime("%H:%M")
+                else:
+                    sent_at = "?"
                 state_str = f"sent at {sent_at}"
             elif row.in_progress:
                 state_str = "in progress"

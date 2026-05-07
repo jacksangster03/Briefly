@@ -266,14 +266,20 @@ class TelegramFormatter:
         open_now = ctx.get("open_now") or []
         recently_closed = ctx.get("recently_closed") or []
         opening_next = ctx.get("opening_next") or []
+        open_src = str(ctx.get("open_now_source") or "computed")
+        closed_src = str(ctx.get("recently_closed_source") or "computed")
+        next_src = str(ctx.get("opening_next_source") or "computed")
         focus = (ctx.get("focus") or "").strip()
         lines = ["<b>MARKET CLOCK</b>"]
         if open_now:
-            lines.append(f"Open now: {', '.join(str(x) for x in open_now[:4])}")
+            label = "Open now" if open_src == "computed" else "Open now context"
+            lines.append(f"{label}: {', '.join(str(x) for x in open_now[:4])}")
         if recently_closed:
-            lines.append(f"Recently closed: {', '.join(str(x) for x in recently_closed[:4])}")
+            label = "Recently closed" if closed_src == "computed" else "Recently closed context"
+            lines.append(f"{label}: {', '.join(str(x) for x in recently_closed[:4])}")
         if opening_next:
-            lines.append(f"Opening next: {', '.join(str(x) for x in opening_next[:4])}")
+            label = "Opening next" if next_src == "computed" else "Opening next context"
+            lines.append(f"{label}: {', '.join(str(x) for x in opening_next[:4])}")
         if focus:
             lines.append(f"Session focus: {focus}")
         return "\n".join(lines)
