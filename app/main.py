@@ -26,6 +26,7 @@ from app.briefing.formatter import TelegramFormatter
 from app.briefing.breaking_generator import BreakingAlertGenerator
 from app.briefing.llm_email_renderer import LLMEmailRenderer
 from app.briefing.morning_generator import MorningBriefingGenerator
+from app.briefing.market_clock import build_market_clock_context
 from app.briefing.session_delivery import (
     SessionDeliveryContext,
     canonical_session_message_key,
@@ -35,6 +36,7 @@ from app.briefing.session_delivery import (
 from app.schemas.delivery import EmailRenderResult
 from app.briefing.session_materiality import compute_materiality
 from app.briefing.session_routing import SESSION_WINDOWS, next_session_window, resolve_session_window, session_window_for_key
+from app.briefing.session_templates import get_session_template_for_profile
 from app.briefing.session_snapshot import load_previous_snapshot, persist_snapshot, snapshot_metrics
 from app.cadence.engine import DecisionEngine
 from app.cadence.state_store import (
@@ -802,7 +804,11 @@ def run_morning_briefing(
     logger.info("Starting session briefing pipeline...")
     profile = load_user_profile(settings)
     now_utc = datetime.now(timezone.utc)
-    session_window = resolve_session_window(now=now_utc, timezone_name=profile.timezone or settings.timezone)
+    session_window = resolve_session_window(
+        now=now_utc,
+        timezone_name=profile.timezone or settings.timezone,
+        session_template=getattr(profile, "session_template", None),
+    )
     session_key = "morning"
     session_title = "Morning Briefing"
     if session_override:
@@ -854,6 +860,15 @@ def run_morning_briefing(
     )
 
     briefing = generator.generate(session_key=session_key, session_title=session_title)
+    _template_name, _template_items = get_session_template_for_profile(profile)
+    _template_map = {item.key: item for item in _template_items}
+    _clock_item = _template_map.get(briefing.session_key)
+    if _clock_item is not None:
+        briefing.market_clock_context = build_market_clock_context(
+            profile=profile,
+            now_local=briefing.generated_at.astimezone(ZoneInfo(profile.timezone or settings.timezone)),
+            session_template_item=_clock_item,
+        )
     _apply_morning_section_preferences(briefing, profile)
     previous_ts, previous_snapshot = load_previous_snapshot(
         profile_name=profile.name,
@@ -881,6 +896,7 @@ def run_morning_briefing(
                 next_window = next_session_window(
                     now=briefing.generated_at,
                     timezone_name=profile.timezone or settings.timezone,
+                    session_template=getattr(profile, "session_template", None),
                 )
                 logger.info(
                     "Cadence decision (session): %s | session=%s next_eligible_session=%s",
@@ -1216,13 +1232,15 @@ def run_daily_summary(
     Returns:
         Multi-line plain-text summary string.
     """
-    from app.briefing.session_metadata import ALL_SESSIONS, ASIA_COVERAGE_NOTE
+    from app.briefing.session_metadata import ASIA_COVERAGE_NOTE, sessions_for_profile
+    from app.briefing.session_templates import get_session_template_for_profile
     from app.briefing.session_snapshot_service import list_session_snapshots
 
     settings = settings or get_settings()
     init_db()
     from app.personalization.user_profile import load_user_profile
     profile_obj = load_user_profile(settings)
+    template_name, profile_sessions = get_session_template_for_profile(profile_obj)
     tz = ZoneInfo(profile_obj.timezone or settings.timezone)
     now_utc = datetime.now(timezone.utc)
     local_now = now_utc.astimezone(tz)
@@ -1274,7 +1292,7 @@ def run_daily_summary(
     failures = 0
     archived = 0
 
-    for meta in ALL_SESSIONS:
+    for meta in profile_sessions:
         sk = meta.key
         window_started = current_local_tod is None or meta.window_start <= current_local_tod
 
@@ -1331,9 +1349,10 @@ def run_daily_summary(
         )
 
     lines.append(f"Failures:          {failures}")
-    lines.append(f"Archived snapshots: {archived}/{len(ALL_SESSIONS)}")
+    lines.append(f"Archived snapshots: {archived}/{len(profile_sessions)}")
     lines.append(f"Breaking alerts:   {breaking_count} (today)")
     lines.append("")
+    lines.append(f"Template: {template_name} | Region: {getattr(profile_obj, 'market_region', '') or 'EMEA'} | Sub-region: {getattr(profile_obj, 'sub_region', '') or 'Eurozone'}")
     lines.append(f"Note: {ASIA_COVERAGE_NOTE}")
 
     return "\n".join(lines)

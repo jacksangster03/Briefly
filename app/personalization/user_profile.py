@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from app.logger import get_logger
+from app.briefing.market_regions import infer_market_profile
 from app.schemas.portfolio import PortfolioHolding
 from app.settings import Settings
 
@@ -38,6 +39,13 @@ class UserProfile:
         morning_section_flags: dict[str, bool] | None = None,
         preference_overrides: dict[str, Any] | None = None,
         healthcare: dict[str, Any] | None = None,
+        country: str | None = None,
+        market_region: str | None = None,
+        sub_region: str | None = None,
+        session_template: str | None = None,
+        session_intensity: str | None = None,
+        primary_markets: list[str] | None = None,
+        secondary_markets: list[str] | None = None,
     ):
         self.name = name
         self.timezone = timezone
@@ -58,6 +66,13 @@ class UserProfile:
         self.morning_section_flags = morning_section_flags or {}
         self.preference_overrides = preference_overrides or {}
         self.healthcare = healthcare or {}
+        self.country = country or ""
+        self.market_region = market_region or ""
+        self.sub_region = sub_region or ""
+        self.session_template = session_template or ""
+        self.session_intensity = session_intensity or "standard"
+        self.primary_markets = primary_markets or []
+        self.secondary_markets = secondary_markets or []
 
     @property
     def all_watchlist_tickers(self) -> list[str]:
@@ -253,7 +268,26 @@ def load_user_profile(settings: Settings) -> UserProfile:
         delivery=data.get("delivery", {}),
         style=data.get("style", {}),
         healthcare=_load_healthcare_preferences(configs_dir),
+        country=user_data.get("country", ""),
+        market_region=user_data.get("market_region", ""),
+        sub_region=user_data.get("sub_region", ""),
+        session_template=user_data.get("session_template", ""),
+        session_intensity=user_data.get("session_intensity", "standard"),
+        primary_markets=user_data.get("primary_markets", []),
+        secondary_markets=user_data.get("secondary_markets", []),
     )
+
+    inferred = infer_market_profile(profile.country, profile.timezone)
+    if not profile.timezone:
+        profile.timezone = inferred.timezone
+    if not profile.market_region:
+        profile.market_region = inferred.market_region
+    if not profile.sub_region:
+        profile.sub_region = inferred.sub_region
+    if not profile.session_template:
+        profile.session_template = inferred.session_template
+    if not profile.session_intensity:
+        profile.session_intensity = inferred.session_intensity
 
     # Merge watchlist
     watchlist_path = configs_dir / "watchlists.yaml"

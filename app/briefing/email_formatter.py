@@ -143,6 +143,7 @@ class EmailFormatter:
         desk_read = self._top_desk_read(briefing)
         trigger_lines = self._trigger_lines(briefing)
         change_lines = self._what_changed_lines(briefing)
+        market_clock_lines = self._market_clock_lines(briefing)
 
         # Regime banner: deterministic session quality accent takes precedence.
         primary_tag = next((t for t in regime_tags if t in _REGIME_STYLES), "mixed")
@@ -226,6 +227,14 @@ class EmailFormatter:
                 + "<br>".join(html.escape(line) for line in trigger_lines)
                 + "</div></td></tr>"
             )
+        if market_clock_lines:
+            parts.append(
+                f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:8px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
+                f"<div style=\"font-size:10px;line-height:1.4;color:{_TEXT_MUTED};letter-spacing:0.05em;font-weight:800;\">MARKET CLOCK</div>"
+                f"<div style=\"margin-top:4px;font-size:11.5px;line-height:1.4;color:{_TEXT_SECONDARY};\">"
+                + "<br>".join(html.escape(line) for line in market_clock_lines)
+                + "</div></td></tr>"
+            )
         if change_lines:
             parts.append(
                 f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:8px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
@@ -255,6 +264,24 @@ class EmailFormatter:
         parts.extend(["</table>", "</td></tr></table>", "</body></html>"])
         self._move_shading_baselines = {}
         return "".join(parts)
+
+    @staticmethod
+    def _market_clock_lines(briefing: MorningBriefing) -> list[str]:
+        ctx = briefing.market_clock_context or {}
+        lines: list[str] = []
+        open_now = ctx.get("open_now") or []
+        recently_closed = ctx.get("recently_closed") or []
+        opening_next = ctx.get("opening_next") or []
+        focus = (ctx.get("focus") or "").strip()
+        if open_now:
+            lines.append(f"Open now: {', '.join(str(x) for x in open_now[:4])}")
+        if recently_closed:
+            lines.append(f"Recently closed: {', '.join(str(x) for x in recently_closed[:4])}")
+        if opening_next:
+            lines.append(f"Opening next: {', '.join(str(x) for x in opening_next[:4])}")
+        if focus:
+            lines.append(f"Session focus: {focus}")
+        return lines
 
     @staticmethod
     def _nav_row() -> str:

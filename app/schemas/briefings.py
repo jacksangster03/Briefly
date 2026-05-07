@@ -90,6 +90,7 @@ class MorningBriefing(BaseModel):
     data_freshness: dict[str, str] = Field(default_factory=dict)
     quote_freshness: dict[str, dict] = Field(default_factory=dict)
     data_basis_lines: list[str] = Field(default_factory=list)
+    market_clock_context: dict[str, object] = Field(default_factory=dict)
     what_changed_header: str = "WHAT CHANGED"
     what_changed_lines: list[str] = Field(default_factory=list)
     healthcare_intelligence: HealthcareBriefingSection | None = None

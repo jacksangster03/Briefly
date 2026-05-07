@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import time
 
+from app.briefing.session_templates import get_session_template_for_profile, get_template_items
+
 
 @dataclass(frozen=True)
 class SessionMeta:
@@ -28,49 +30,16 @@ class SessionMeta:
 # Canonical session list (ordered chronologically)
 # ---------------------------------------------------------------------------
 
-ALL_SESSIONS: tuple[SessionMeta, ...] = (
+_EMEA_ITEMS = get_template_items("emea_global")
+ALL_SESSIONS: tuple[SessionMeta, ...] = tuple(
     SessionMeta(
-        key="morning",
-        label="Morning Briefing",
-        focus="Asia overnight + Europe open + US prior close",
-        window_start=time(6, 0),
-        window_end=time(10, 30),
-    ),
-    SessionMeta(
-        key="europe_midday",
-        label="Europe Midday Check",
-        focus="Europe session",
-        window_start=time(10, 30),
-        window_end=time(13, 30),
-    ),
-    SessionMeta(
-        key="us_pre_open",
-        label="US Pre-Open Setup",
-        focus="US setup",
-        window_start=time(13, 30),
-        window_end=time(15, 30),
-    ),
-    SessionMeta(
-        key="us_intraday_risk",
-        label="US Intraday Risk Check",
-        focus="US session",
-        window_start=time(15, 30),
-        window_end=time(17, 30),
-    ),
-    SessionMeta(
-        key="into_close",
-        label="Into Close Update",
-        focus="Late US session",
-        window_start=time(17, 30),
-        window_end=time(22, 0),
-    ),
-    SessionMeta(
-        key="closing_wrap",
-        label="Closing Wrap / Next-Day Setup",
-        focus="US close + next-day setup",
-        window_start=time(22, 0),
-        window_end=time(23, 59),
-    ),
+        key=item.key,
+        label=item.label,
+        focus=item.focus,
+        window_start=item.window_start,
+        window_end=item.window_end,
+    )
+    for item in _EMEA_ITEMS
 )
 
 _BY_KEY: dict[str, SessionMeta] = {s.key: s for s in ALL_SESSIONS}
@@ -107,3 +76,18 @@ def focus_for(key: str) -> str:
     """Focus line for a session key. Falls back to empty string."""
     meta = get_session_meta(key)
     return meta.focus if meta else ""
+
+
+def sessions_for_profile(profile) -> tuple[SessionMeta, ...]:
+    """Session metadata for a profile-selected template."""
+    _, items = get_session_template_for_profile(profile)
+    return tuple(
+        SessionMeta(
+            key=item.key,
+            label=item.label,
+            focus=item.focus,
+            window_start=item.window_start,
+            window_end=item.window_end,
+        )
+        for item in items
+    )

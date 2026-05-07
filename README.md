@@ -26,7 +26,27 @@ Briefly is a local-first portfolio intelligence platform. It generates structure
 
 ---
 
-## Six-session schedule
+## Regional session templates
+
+Briefly now supports region-aware session templates. A profile can set `country`, and Briefly infers:
+
+- timezone
+- market region (`APAC`, `EMEA`, `Americas`)
+- sub-region
+- session template
+
+Available templates:
+
+- `emea_global` (default, current Madrid behavior)
+- `americas_global`
+- `apac_global`
+- `apac_australia`
+
+For backward compatibility, `default_user` remains `Europe/Madrid` + `emea_global`, and the canonical EMEA session keys remain unchanged.
+
+---
+
+## EMEA default schedule
 
 All times are Europe/Madrid local time.
 
@@ -39,7 +59,20 @@ All times are Europe/Madrid local time.
 | `into_close` | Into Close Update | 17:30-22:00 | Late US session |
 | `closing_wrap` | Closing Wrap / Next-Day Setup | 22:00-23:59 | US close + next-day setup |
 
-Asia is covered inside Morning Briefing (Asia overnight + Europe open + US prior close). A dedicated Asia-open session can be added later if needed.
+Asia is covered inside Morning Briefing (Asia overnight + Europe open + US prior close). Australia is implemented as an APAC variant (`apac_australia`), not a separate top-level region.
+
+---
+
+## Market clock context
+
+Each session now includes a deterministic market-clock block in Telegram and email:
+
+- Open now
+- Recently closed
+- Opening next
+- Session focus
+
+This is powered by static major exchange hours and profile local time. Briefly avoids over-claiming uncertain exchange state.
 
 ---
 

@@ -153,6 +153,9 @@ class TelegramFormatter:
         if briefing.data_basis_lines:
             basis_lines = [f"- {line}" for line in briefing.data_basis_lines[:5]]
             sections.append("\n".join(["<b>DATA BASIS</b>"] + basis_lines))
+        clock_block = self._format_market_clock(briefing.market_clock_context or {})
+        if clock_block:
+            sections.append(clock_block)
 
         setup = self._format_market_setup(briefing) if (is_morning or is_preopen or is_closing) else self._format_session_snapshot(briefing)
         if setup:
@@ -256,6 +259,24 @@ class TelegramFormatter:
 
         full_text = "\n\n".join(sections)
         return self._split_message(full_text)
+
+    def _format_market_clock(self, ctx: dict) -> str:
+        if not ctx:
+            return ""
+        open_now = ctx.get("open_now") or []
+        recently_closed = ctx.get("recently_closed") or []
+        opening_next = ctx.get("opening_next") or []
+        focus = (ctx.get("focus") or "").strip()
+        lines = ["<b>MARKET CLOCK</b>"]
+        if open_now:
+            lines.append(f"Open now: {', '.join(str(x) for x in open_now[:4])}")
+        if recently_closed:
+            lines.append(f"Recently closed: {', '.join(str(x) for x in recently_closed[:4])}")
+        if opening_next:
+            lines.append(f"Opening next: {', '.join(str(x) for x in opening_next[:4])}")
+        if focus:
+            lines.append(f"Session focus: {focus}")
+        return "\n".join(lines)
 
     @staticmethod
     def _format_what_changed(lines: list[str], header: str = "WHAT CHANGED") -> str:

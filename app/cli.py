@@ -1129,8 +1129,16 @@ def schedule_status(ctx, profile_name: str):
     local_now = now_utc.astimezone(tz)
     today = local_now.date()
 
-    current_window = resolve_session_window(now=now_utc, timezone_name=profile.timezone or settings.timezone)
-    next_window = next_session_window(now=now_utc, timezone_name=profile.timezone or settings.timezone)
+    current_window = resolve_session_window(
+        now=now_utc,
+        timezone_name=profile.timezone or settings.timezone,
+        session_template=getattr(profile, "session_template", None),
+    )
+    next_window = next_session_window(
+        now=now_utc,
+        timezone_name=profile.timezone or settings.timezone,
+        session_template=getattr(profile, "session_template", None),
+    )
 
     # Scheduler lock status
     lock_path = _Path(settings.data_dir) / "state" / "scheduler.lock"
@@ -1153,13 +1161,18 @@ def schedule_status(ctx, profile_name: str):
     except Exception as exc:
         lock_status_msg = f"unable to probe ({exc})"
 
-    from app.briefing.session_metadata import ALL_SESSIONS, ASIA_COVERAGE_NOTE, get_session_meta
+    from app.briefing.session_metadata import ASIA_COVERAGE_NOTE, get_session_meta, sessions_for_profile
+    from app.briefing.session_templates import get_session_template_for_profile
+    template_name, profile_sessions = get_session_template_for_profile(profile)
 
     current_meta = get_session_meta(current_window.key)
     next_meta = get_session_meta(next_window.key)
 
     click.echo("Briefly schedule status")
     click.echo(f"  Timezone:         {profile.timezone or settings.timezone}")
+    click.echo(f"  Market region:    {getattr(profile, 'market_region', '') or 'EMEA'}")
+    click.echo(f"  Sub-region:       {getattr(profile, 'sub_region', '') or 'Eurozone'}")
+    click.echo(f"  Template:         {template_name}")
     click.echo(f"  Local time:       {local_now.strftime('%Y-%m-%d %H:%M')}")
     click.echo(f"  Current session:  {current_window.key}")
     click.echo(f"    Label:          {current_meta.label if current_meta else current_window.title}")
@@ -1178,7 +1191,7 @@ def schedule_status(ctx, profile_name: str):
     click.echo("  Session schedule (all times local)")
     click.echo(f"  {'Key':<22} {'Label':<32} {'Window':<14} {'Focus'}")
     click.echo(f"  {'-'*22} {'-'*32} {'-'*14} {'-'*40}")
-    for meta in ALL_SESSIONS:
+    for meta in profile_sessions:
         click.echo(f"  {meta.key:<22} {meta.label:<32} {meta.window_str:<14} {meta.focus}")
     click.echo("")
     click.echo(f"  Note: {ASIA_COVERAGE_NOTE}")
@@ -1210,7 +1223,7 @@ def schedule_status(ctx, profile_name: str):
         (r.session_key, r.channel): r for r in rows
     }
 
-    for meta in ALL_SESSIONS:
+    for meta in profile_sessions:
         sk = meta.key
         for ch in channels:
             row = state_map.get((sk, ch))
