@@ -716,6 +716,52 @@ Practical interpretation:
 
 ---
 
+## Interactive Watchlist Chart Explorer
+
+Briefly now includes a dedicated interactive explorer at:
+
+- `/ui/briefing/charts/watchlist?profile=default_user`
+
+Design intent:
+
+- **Web UI is interactive** (Plotly): hover tooltips, zoom/pan, legend toggles, period/mode/benchmark controls.
+- **Email is static** by design: Outlook and most email clients do not reliably support JavaScript chart interactivity.
+
+Email behavior:
+
+- Morning Briefing includes a static PNG **Watchlist Performance Snapshot** by default.
+- Other sessions stay compact and do not include the full snapshot chart by default.
+- Email includes deep links back to the web explorer for interactive analysis.
+
+Supported periods:
+
+- `1D`, `5D`, `1M`, `3M`, `YTD`, `1Y`, `5Y`, `MAX`
+
+Supported modes:
+
+- `price`
+- `rebased` (all series start at 100 from first valid aligned point)
+- `return` (cumulative return % from start)
+- `relative` (return minus selected benchmark return)
+
+Benchmarks:
+
+- `none`, `SPY`, `QQQ`, `ACWI`, plus deterministic sector ETF options when configured.
+
+Data quality semantics:
+
+- Explorer output includes a deterministic data-basis line and warnings for missing/partial history.
+- Freshness labels are explicit (`live`, `near_real_time`, `prior_close`, `stale`, `unavailable`, `mixed`).
+
+Deep-link examples:
+
+- `/ui/briefing/charts/watchlist?profile=default_user&period=1D&mode=rebased`
+- `/ui/briefing/charts/watchlist?profile=default_user&period=1M&mode=rebased`
+- `/ui/briefing/charts/watchlist?profile=default_user&period=1Y&mode=relative&benchmark=SPY`
+- `/ui/briefing/charts/watchlist?profile=default_user&period=5Y&mode=rebased`
+
+---
+
 ## License
 
 MIT

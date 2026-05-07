@@ -258,12 +258,28 @@ class EmailFormatter:
             parts.append(breadth_row)
 
         parts.append(f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:0 16px 16px 16px;background:{_SECTION_BG};background-color:{_SECTION_BG};\">")
+        if (briefing.session_key or "morning").lower() != "morning":
+            base = self._web_public_base_url()
+            profile = str(((briefing.morning_chart_bundle or {}).get("meta") or {}).get("profile_name") or "default_user")
+            parts.append(
+                f"<div style=\"font-size:11px;line-height:1.4;color:{_TEXT_SECONDARY};padding:0 0 10px 0;\">"
+                f"<a href=\"{html.escape(base + '/ui/briefing/charts/watchlist?profile=' + profile)}\" "
+                f"style=\"color:{_TEXT_SECONDARY};text-decoration:none;border-bottom:1px dotted {_TEXT_MUTED};\">Open Watchlist Explorer</a>"
+                "</div>"
+            )
         parts.append(self._brief_modules(full_html))
         parts.append("</td></tr>")
 
         parts.extend(["</table>", "</td></tr></table>", "</body></html>"])
         self._move_shading_baselines = {}
         return "".join(parts)
+
+    @staticmethod
+    def _web_public_base_url() -> str:
+        base = str(os.getenv("WEB_PUBLIC_BASE_URL", "")).strip().rstrip("/")
+        if base:
+            return base
+        return "http://127.0.0.1:8080"
 
     @staticmethod
     def _market_clock_lines(briefing: MorningBriefing) -> list[str]:
@@ -394,6 +410,29 @@ class EmailFormatter:
             modules.append(
                 f"<div style=\"font-size:12px;line-height:1.45;color:{_TEXT_PRIMARY};padding:6px 0 0 0;\"><span style=\"color:{_TEXT_MUTED};font-size:10px;letter-spacing:0.04em;font-weight:800;\">PORTFOLIO LENS</span> {html.escape(lens_line)}</div>"
             )
+            if str(asset.key or "").strip().lower() == "watchlist_performance_snapshot":
+                base = self._web_public_base_url()
+                profile = str(((briefing.morning_chart_bundle or {}).get("meta") or {}).get("profile_name") or "default_user")
+                links = [
+                    ("Open 1D", f"{base}/ui/briefing/charts/watchlist?profile={profile}&period=1D&mode=rebased"),
+                    ("Open 1M", f"{base}/ui/briefing/charts/watchlist?profile={profile}&period=1M&mode=rebased"),
+                    ("Open 1Y", f"{base}/ui/briefing/charts/watchlist?profile={profile}&period=1Y&mode=rebased"),
+                    ("Open 5Y", f"{base}/ui/briefing/charts/watchlist?profile={profile}&period=5Y&mode=rebased"),
+                    ("Full explorer", f"{base}/ui/briefing/charts/watchlist?profile={profile}"),
+                ]
+                modules.append(
+                    f"<div style=\"font-size:11px;line-height:1.35;color:{_TEXT_SECONDARY};padding:6px 0 0 0;\">"
+                    "Open interactive explorer for 1D, 1M, 1Y, 5Y, zoom and hover."
+                    "</div>"
+                )
+                modules.append(
+                    f"<div style=\"font-size:11px;line-height:1.35;color:{_TEXT_SECONDARY};padding:4px 0 0 0;\">"
+                    + " · ".join(
+                        f"<a href=\"{html.escape(url)}\" style=\"color:{_TEXT_SECONDARY};text-decoration:none;border-bottom:1px dotted {_TEXT_MUTED};\">{html.escape(label)}</a>"
+                        for label, url in links
+                    )
+                    + "</div>"
+                )
             modules.append("</td></tr>")
         modules.append("</table>")
         return "".join(modules)
@@ -484,6 +523,8 @@ class EmailFormatter:
                     "but declines can also reflect weaker growth expectations or a defensive shift."
                 )
             return "Higher long-end yields usually increase discount-rate pressure for growth equities and duration-sensitive assets."
+        if key == "watchlist_performance_snapshot":
+            return "Static email snapshot for quick context; use the web explorer for interactive period and benchmark comparisons."
         if key == "volatility_regime_card":
             return "A rising VIX below 20 signals caution and fragility, but not full panic by itself."
         if key == "breadth_leadership_panel":
@@ -546,6 +587,8 @@ class EmailFormatter:
             if "10y move lower" in lower or re.search(r"10y move .*?\(-\d+(?:\.\d+)?\s*bp\)", lower):
                 return "Watch BND/IEF/LQD for duration sensitivity and QQQ/growth sleeves for discount-rate effects."
             return "Watch BND/IEF/LQD for duration drag and QQQ/growth sleeves if yields keep rising."
+        if key == "watchlist_performance_snapshot":
+            return "Use the interactive explorer to check whether watchlist strength is broad or concentrated."
         if key == "volatility_regime_card":
             return "Watch whether volatility confirms the regional/rates pressure before reducing risk."
         if key == "breadth_leadership_panel":

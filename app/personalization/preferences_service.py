@@ -24,6 +24,7 @@ ALLOWED_MORNING_SECTIONS = {
     "portfolio_focus",
     "sector_scan",
     "watchlist",
+    "watchlist_snapshot",
 }
 ALLOWED_HOME_REGIONS = {
     "us",
@@ -260,6 +261,7 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "sections.morning.portfolio_focus": _normalize_bool,
     "sections.morning.sector_scan": _normalize_bool,
     "sections.morning.watchlist": _normalize_bool,
+    "sections.morning.watchlist_snapshot": _normalize_bool,
     "sections.global_news": _normalize_bool,
     "healthcare.enabled": _normalize_bool,
     "healthcare.max_items_morning": _normalize_positive_int,

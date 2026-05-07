@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Watchlist Chart Explorer — Briefly</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root {
+      --bg: #030A12;
+      --canvas: #06111F;
+      --panel: #081A2B;
+      --chart: #03101D;
+      --divider: #153047;
+      --text: #EAF2FF;
+      --sub: #A9B8C8;
+      --muted: #7F93A8;
+      --accent: #FF7A00;
+      --pos: #00C2A8;
+      --neg: #FF5C64;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 20px; }
+    .card { background: var(--canvas); border: 1px solid var(--divider); border-radius: 12px; padding: 14px; }
+    .title { font-size: 24px; font-weight: 800; margin: 0 0 8px 0; }
+    .sub { color: var(--sub); margin: 0 0 14px 0; }
+    .controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .controls label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 5px; }
+    .controls select, .controls input {
+      width: 100%; background: var(--panel); color: var(--text); border: 1px solid var(--divider); border-radius: 8px; padding: 8px;
+    }
+    .symbols { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .sym { border: 1px solid var(--divider); border-radius: 999px; padding: 5px 9px; font-size: 12px; color: var(--sub); background: var(--panel); }
+    .actions { margin-top: 12px; display: flex; gap: 8px; }
+    .btn {
+      background: var(--accent); color: #111; border: 0; border-radius: 8px; padding: 8px 12px; font-weight: 700; cursor: pointer;
+    }
+    .btn.secondary { background: transparent; color: var(--sub); border: 1px solid var(--divider); }
+    .grid { margin-top: 12px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+    .kpi { background: var(--panel); border: 1px solid var(--divider); border-radius: 10px; padding: 10px; }
+    .kpi .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .kpi .v { margin-top: 4px; font-size: 18px; font-weight: 800; }
+    #chart { margin-top: 12px; min-height: 520px; background: var(--chart); border: 1px solid var(--divider); border-radius: 12px; }
+    #basis, #warnings { margin-top: 10px; color: var(--sub); font-size: 13px; }
+    #warnings { color: #f5b37a; }
+    .links { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .links a { color: var(--sub); text-decoration: none; border-bottom: 1px dotted var(--sub); }
+    @media (max-width: 980px) {
+      .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1 class="title">Watchlist Chart Explorer</h1>
+      <p class="sub">Interactive comparison for watchlist and portfolio names. Web only: hover, zoom, pan, legend toggle.</p>
+      <div class="controls">
+        <div>
+          <label for="period">Period</label>
+          <select id="period">
+            <option>1D</option><option>5D</option><option selected>1M</option><option>3M</option>
+            <option>YTD</option><option>1Y</option><option>5Y</option><option>MAX</option>
+          </select>
+        </div>
+        <div>
+          <label for="mode">Mode</label>
+          <select id="mode">
+            <option value="price">Price</option>
+            <option value="rebased" selected>Rebased to 100</option>
+            <option value="return">Return %</option>
+            <option value="relative">Relative vs benchmark</option>
+          </select>
+        </div>
+        <div>
+          <label for="benchmark">Benchmark</label>
+          <select id="benchmark">
+            <option value="none" selected>none</option>
+            <option value="SPY">SPY</option>
+            <option value="QQQ">QQQ</option>
+            <option value="ACWI">ACWI</option>
+            <option value="XLK">XLK</option>
+            <option value="XLF">XLF</option>
+            <option value="XLE">XLE</option>
+            <option value="XLV">XLV</option>
+          </select>
+        </div>
+        <div>
+          <label for="symbols">Symbols (comma separated)</label>
+          <input id="symbols" placeholder="NVDA,MSFT,AAPL" />
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="reload">Update chart</button>
+        <button class="btn secondary" id="defaults">Use watchlist defaults</button>
+        <label style="display:flex;align-items:center;gap:6px;color:var(--sub);font-size:12px;">
+          <input type="checkbox" id="include-events" />
+          Include event markers
+        </label>
+      </div>
+      <div id="symbol-chips" class="symbols"></div>
+      <div class="grid">
+        <div class="kpi"><div class="k">Best performer</div><div class="v" id="kpi-best">-</div></div>
+        <div class="kpi"><div class="k">Worst performer</div><div class="v" id="kpi-worst">-</div></div>
+        <div class="kpi"><div class="k">Dispersion</div><div class="v" id="kpi-dispersion">-</div></div>
+        <div class="kpi"><div class="k">Beating benchmark</div><div class="v" id="kpi-beating">-</div></div>
+        <div class="kpi"><div class="k">Availability</div><div class="v" id="kpi-availability">-</div></div>
+      </div>
+      <div id="chart"></div>
+      <div id="basis"></div>
+      <div id="warnings"></div>
+      <div class="links">
+        <a href="/ui/briefing?profile={{ profile }}">Back to Briefing</a>
+        <a href="/ui/briefing/morning/charts?profile={{ profile }}">Morning Charts</a>
+        <a href="/ui/briefing/watchlists?profile={{ profile }}">Watchlists & Coverage</a>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      const profile = "{{ profile }}";
+      const periodSel = document.getElementById("period");
+      const modeSel = document.getElementById("mode");
+      const benchmarkSel = document.getElementById("benchmark");
+      const symbolsInput = document.getElementById("symbols");
+      const includeEvents = document.getElementById("include-events");
+      const symbolChips = document.getElementById("symbol-chips");
+      const chartEl = document.getElementById("chart");
+      const basisEl = document.getElementById("basis");
+      const warningsEl = document.getElementById("warnings");
+
+      function qSymbols() {
+        return (symbolsInput.value || "").split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+      }
+
+      function updateKpis(summary, availableCount, totalCount) {
+        const best = summary.best_performer || null;
+        const worst = summary.worst_performer || null;
+        document.getElementById("kpi-best").textContent = best ? `${best.symbol} ${best.return_pct.toFixed(2)}%` : "-";
+        document.getElementById("kpi-worst").textContent = worst ? `${worst.symbol} ${worst.return_pct.toFixed(2)}%` : "-";
+        document.getElementById("kpi-dispersion").textContent = `${Number(summary.dispersion || 0).toFixed(2)}%`;
+        document.getElementById("kpi-beating").textContent = String(summary.count_beating_benchmark || 0);
+        document.getElementById("kpi-availability").textContent = `${availableCount}/${totalCount}`;
+      }
+
+      function renderSeriesChips(symbols) {
+        symbolChips.innerHTML = "";
+        symbols.forEach((s) => {
+          const span = document.createElement("span");
+          span.className = "sym";
+          span.textContent = s;
+          symbolChips.appendChild(span);
+        });
+      }
+
+      async function loadData(useDefaults = false) {
+        if (useDefaults) {
+          symbolsInput.value = "";
+        }
+        const params = new URLSearchParams();
+        params.set("period", periodSel.value);
+        params.set("mode", modeSel.value);
+        params.set("benchmark", benchmarkSel.value);
+        params.set("include_events", includeEvents.checked ? "true" : "false");
+        const symbols = qSymbols();
+        if (symbols.length) params.set("symbols", symbols.join(","));
+        const url = `/api/v1/profile/${encodeURIComponent(profile)}/briefing/charts/watchlist?${params.toString()}`;
+        const res = await fetch(url, { headers: { "Accept": "application/json" } });
+        const payload = await res.json();
+        const series = (payload.series || []).filter((row) => row.available && (row.points || []).length > 0);
+        renderSeriesChips(payload.symbols || []);
+
+        const traces = series.map((row) => ({
+          x: (row.points || []).map((p) => p.date),
+          y: (row.points || []).map((p) => Number(p.value || 0)),
+          mode: "lines",
+          type: "scatter",
+          name: row.symbol,
+          hovertemplate: "%{x}<br>%{fullData.name}: %{y:.2f}<extra></extra>",
+        }));
+        Plotly.newPlot(
+          chartEl,
+          traces,
+          {
+            paper_bgcolor: "#03101D",
+            plot_bgcolor: "#03101D",
+            font: { color: "#EAF2FF" },
+            xaxis: { gridcolor: "#153047", title: "Date" },
+            yaxis: { gridcolor: "#153047", title: modeSel.value === "price" ? "Price" : (modeSel.value === "rebased" ? "Rebased (100)" : "Return (%)") },
+            hovermode: "x unified",
+            margin: { l: 60, r: 20, t: 26, b: 40 },
+            legend: { orientation: "h", y: -0.2 },
+          },
+          { responsive: true, displaylogo: false }
+        );
+        basisEl.textContent = (payload.data_basis || {}).line || "";
+        warningsEl.textContent = (payload.warnings || []).join(" · ");
+        updateKpis(payload.summary || {}, Number((payload.data_basis || {}).available_count || 0), (payload.series || []).length);
+      }
+
+      document.getElementById("reload").addEventListener("click", () => loadData(false));
+      document.getElementById("defaults").addEventListener("click", () => loadData(true));
+
+      periodSel.value = "{{ default_period }}";
+      modeSel.value = "{{ default_mode }}";
+      benchmarkSel.value = "{{ default_benchmark }}";
+      symbolsInput.value = "{{ default_symbols | join(',') }}";
+      includeEvents.checked = {{ "true" if default_include_events else "false" }};
+      loadData(false);
+    })();
+  </script>
+</body>
+</html>
+

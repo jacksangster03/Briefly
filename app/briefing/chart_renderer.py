@@ -189,7 +189,11 @@ class ChartRenderer:
 
     def render_from_spec(self, spec: dict) -> ChartAsset | None:
         key = str(spec.get("chart_key") or "").strip().lower()
-        if not key or not bool(spec.get("available")):
+        if not key:
+            return None
+        if key == "watchlist_performance_snapshot":
+            return self.render_watchlist_snapshot_from_spec(spec)
+        if not bool(spec.get("available")):
             return None
         if key == "global_relative_performance":
             return self.render_global_relative_from_spec(spec)
@@ -234,6 +238,74 @@ class ChartRenderer:
         if key == "what_changed_card":
             return self.render_what_changed_from_spec(spec)
         return None
+
+    def render_watchlist_snapshot_from_spec(self, spec: dict) -> ChartAsset | None:
+        rows = list(spec.get("series") or [])
+        meta = dict(spec.get("meta") or {})
+        title = str(spec.get("title") or "Watchlist Performance Snapshot")
+        caption = str(spec.get("caption") or "")
+        if not rows:
+            fig, ax = self._figure(8.8, 4.0)
+            ax.axis("off")
+            ax.text(0.02, 0.70, title, transform=ax.transAxes, color=TEXT, fontsize=14, fontweight="bold")
+            ax.text(
+                0.02,
+                0.52,
+                str(spec.get("reason_if_hidden") or "Watchlist Performance Snapshot unavailable: insufficient price history."),
+                transform=ax.transAxes,
+                color=MUTED,
+                fontsize=10.5,
+            )
+            self._style_axes(ax, lock_x_ticks=True, lock_y_ticks=True)
+            fig.subplots_adjust(left=0.04, right=0.96, top=0.92, bottom=0.12)
+            return self._to_asset(
+                fig,
+                key="watchlist_performance_snapshot",
+                title=title,
+                caption=caption,
+                filename="watchlist-performance-snapshot.png",
+            )
+
+        fig, ax = self._figure(9.2, 5.2)
+        latest_rows: list[tuple[str, float]] = []
+        for idx, row in enumerate(rows):
+            symbol = str(row.get("symbol") or "")
+            points = list(row.get("points") or [])
+            if not symbol or not points:
+                continue
+            xs = [p.get("date") for p in points if p.get("date")]
+            ys = [float(p.get("rebased_100") or 0.0) for p in points if p.get("date")]
+            if not xs or not ys:
+                continue
+            color = self._series_color({"family": "other", "change_pct": ys[-1] - ys[0]}, idx)
+            ax.plot(xs, ys, color=color, linewidth=2.0 if idx < 4 else 1.5, alpha=0.9, label=symbol)
+            latest_rows.append((symbol, float(ys[-1])))
+
+        ax.axhline(100, color=GRID, linewidth=1.0, alpha=0.75, linestyle="--")
+        if len(rows) <= 10:
+            ax.legend(frameon=False, labelcolor=MUTED, fontsize=7.5, ncol=2, loc="upper left")
+
+        self._style_axes(
+            ax,
+            title="",
+            xlabel="Date",
+            ylabel="Rebased to 100",
+            grid_axis="y",
+            lock_x_ticks=False,
+            lock_y_ticks=False,
+        )
+        ax.tick_params(axis="x", labelrotation=0)
+        basis_line = str((meta.get("data_basis") or {}).get("line") or "")
+        if basis_line:
+            ax.text(0.01, 0.02, basis_line, transform=ax.transAxes, color=MUTED, fontsize=8)
+        fig.subplots_adjust(left=0.10, right=0.98, top=0.90, bottom=0.18)
+        return self._to_asset(
+            fig,
+            key="watchlist_performance_snapshot",
+            title=title,
+            caption=caption,
+            filename="watchlist-performance-snapshot.png",
+        )
 
     def render_market_snapshot(self, quotes: list[QuoteData]) -> ChartAsset | None:
         if not quotes:

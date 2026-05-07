@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     delivery_channel: str = "all"
     web_host: str = "127.0.0.1"
     web_port: int = 8080
+    web_public_base_url: str = ""
     breaking_followup_delay_minutes: int = 10
     breaking_storyline_cooldown_minutes: int = 45
     breaking_max_alerts_per_hour: int = 3

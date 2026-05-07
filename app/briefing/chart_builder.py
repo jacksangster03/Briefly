@@ -6,6 +6,7 @@ from typing import Any
 
 from app.briefing.chart_renderer import ChartRenderer
 from app.briefing.morning_charts import build_morning_chart_bundle, selected_chart_specs
+from app.briefing.watchlist_chart_service import build_watchlist_snapshot_spec
 from app.data_sources.market_data import MarketDataService
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MorningBriefing
@@ -59,6 +60,45 @@ class MorningChartBuilder:
             if legacy_macro:
                 rendered.append(legacy_macro)
 
+        # Morning-only static watchlist snapshot (email-safe PNG).
+        if (briefing.session_key or "morning").lower() == "morning" and self.profile.morning_section_enabled("watchlist_snapshot"):
+            try:
+                snapshot_spec = build_watchlist_snapshot_spec(
+                    profile=self.profile,
+                    period="1M",
+                    mode="rebased",
+                    top_n=10,
+                    benchmark="none",
+                    market_data_service=self.market_svc,
+                    generated_at=briefing.generated_at,
+                )
+                snapshot_asset = self.renderer.render_from_spec(snapshot_spec)
+                if snapshot_asset is not None:
+                    rendered.append(snapshot_asset)
+                    if not any(str(row.get("chart_key") or "") == "watchlist_performance_snapshot" for row in briefing.morning_chart_selection):
+                        briefing.morning_chart_selection.append(
+                            {
+                                "chart_key": "watchlist_performance_snapshot",
+                                "role": "support",
+                                "reason": "Morning-only static watchlist snapshot.",
+                            }
+                        )
+            except Exception:
+                # Must never block briefing generation.
+                snapshot_spec = {
+                    "chart_key": "watchlist_performance_snapshot",
+                    "available": False,
+                    "reason_if_hidden": "Watchlist Performance Snapshot unavailable: insufficient price history.",
+                    "title": "Watchlist Performance Snapshot",
+                    "caption": "Watchlist Performance Snapshot unavailable: insufficient price history.",
+                    "series": [],
+                    "annotations": [],
+                    "meta": {},
+                }
+                snapshot_asset = self.renderer.render_from_spec(snapshot_spec)
+                if snapshot_asset is not None:
+                    rendered.append(snapshot_asset)
+
         default_mode = "full" if (briefing.session_key or "morning") == "morning" else "desk"
         density = str(self.profile.delivery.get("email_density_mode", "auto")).strip().lower()
         if density in {"", "auto"}:
@@ -69,4 +109,6 @@ class MorningChartBuilder:
             cap = 5
         else:
             cap = 9
+        if (briefing.session_key or "morning").lower() == "morning" and self.profile.morning_section_enabled("watchlist_snapshot"):
+            cap += 1
         return rendered[:cap]

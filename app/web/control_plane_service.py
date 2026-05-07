@@ -456,6 +456,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
                 "portfolio_focus": profile.morning_section_enabled("portfolio_focus"),
                 "sector_scan": profile.morning_section_enabled("sector_scan"),
                 "watchlist": profile.morning_section_enabled("watchlist"),
+                "watchlist_snapshot": profile.morning_section_enabled("watchlist_snapshot"),
             },
         },
         "overrides": overrides,

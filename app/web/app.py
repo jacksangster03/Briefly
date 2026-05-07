@@ -18,6 +18,7 @@ from app.db.session import init_db
 from app.logger import get_logger
 from app.settings import Settings, get_settings
 from app.briefing.chart_builder import MorningChartBuilder
+from app.briefing.watchlist_chart_service import build_watchlist_chart_spec
 from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
 from app.risk.tearsheet import build_tearsheet_html
@@ -410,6 +411,31 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             page_key="briefing_morning_charts",
             state=state,
             extra_context={"morning_chart_preview": preview},
+        )
+
+    @app.get("/ui/briefing/charts/watchlist", response_class=HTMLResponse, include_in_schema=False)
+    def ui_briefing_watchlist_charts(
+        request: Request,
+        profile: str = Query(default="default_user"),
+        period: str = Query(default="1M"),
+        mode: str = Query(default="rebased"),
+        benchmark: str = Query(default="none"),
+        symbols: str = Query(default=""),
+        include_events: bool = Query(default=False),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        selected_symbols = [token.strip().upper() for token in symbols.split(",") if token.strip()]
+        return templates.TemplateResponse(
+            "watchlist_chart_explorer.html",
+            {
+                "request": request,
+                "profile": normalized_profile,
+                "default_period": period,
+                "default_mode": mode,
+                "default_benchmark": benchmark,
+                "default_symbols": selected_symbols,
+                "default_include_events": bool(include_events),
+            },
         )
 
     # ── Phase 9.4: Briefing history UI ──────────────────────────────────────
@@ -1995,6 +2021,30 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             profile=normalized_profile,
         )
 
+    @app.get("/api/v1/profile/{profile}/briefing/charts/watchlist")
+    def api_watchlist_charts(
+        profile: str,
+        period: str = Query(default="1M"),
+        mode: str = Query(default="rebased"),
+        benchmark: str = Query(default="none"),
+        symbols: str = Query(default=""),
+        include_events: bool = Query(default=False),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        settings = _settings_from_app(app)
+        user_profile = _load_profile_defaults(settings, normalized_profile)
+        market_svc = MarketDataService(settings)
+        symbol_list = [token.strip().upper() for token in symbols.split(",") if token.strip()]
+        return build_watchlist_chart_spec(
+            profile=user_profile,
+            period=period,
+            mode=mode,
+            benchmark=benchmark,
+            symbols=symbol_list or None,
+            include_events=include_events,
+            market_data_service=market_svc,
+        )
+
     @app.post("/api/v1/profile/{profile}/simulation/run")
     def api_run_simulation(profile: str, payload: SimulationRunRequest):
         from app.simulation.service import parse_simulation_config, run_simulation
@@ -2497,6 +2547,7 @@ def _section_updates_from_form(form) -> dict[str, Any]:
         "portfolio_focus",
         "sector_scan",
         "watchlist",
+        "watchlist_snapshot",
     )
     updates: dict[str, Any] = {}
     for section in section_keys:
