@@ -6,6 +6,7 @@ from app.briefing.session_freshness import (
     FRESHNESS_NEAR_REAL_TIME,
     FRESHNESS_PRIOR_CLOSE,
     FRESHNESS_STALE,
+    build_data_basis_lines,
     build_freshness_map,
     classify_quote_freshness,
 )
@@ -73,3 +74,16 @@ def test_build_freshness_map_contains_symbol_keys():
     )
     assert "AMD" in fmap
 
+
+def test_preopen_data_basis_labels_us_equities_prior_close():
+    generated = datetime(2026, 5, 7, 11, 30, tzinfo=timezone.utc)
+    quote_ts = datetime(2026, 5, 6, 20, 0, tzinfo=timezone.utc)
+    lines = build_data_basis_lines(
+        session_key="us_pre_open",
+        generated_at=generated,
+        timezone_name="Europe/Madrid",
+        index_quotes=[],
+        macro_quotes=[],
+        watchlist_quotes=[_q("AMD", "AMD", quote_ts, 18.61)],
+    )
+    assert any("prior close" in line.lower() for line in lines)

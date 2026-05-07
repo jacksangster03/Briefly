@@ -96,6 +96,30 @@ APAC/Americas templates are available now for profile-level routing and renderin
 
 ---
 
+## Freshness and incremental updates
+
+Morning Briefing is the broad context pass. Later sessions are incremental by design:
+
+- Europe Midday compares against Morning.
+- US Pre-Open compares against Europe Midday.
+- US Intraday compares against US Pre-Open.
+- Into Close compares against US Intraday.
+- Closing Wrap compares against Into Close (and can still summarize the full day).
+
+Briefly classifies quote freshness deterministically (`live`, `near_real_time`, `delayed`, `prior_close`, `stale`, `carried_forward`, `unavailable`) and surfaces this through Data Basis lines and compact row labels.
+
+Repeated stories are suppressed in non-morning sessions unless materially updated or intentionally carried forward as context. When no meaningful new headlines are found, the briefing explicitly states that there were no material new headlines since the previous comparable session.
+
+Use:
+
+```bash
+python -m app.cli session-audit --date today
+```
+
+to inspect prior-session linkage, new/repeated/carried counts, quote freshness basis, and section-mode diagnostics per session.
+
+---
+
 ## How delivery works
 
 Each session produces one Telegram message and/or one styled HTML email per configured profile. All six sessions use the same premium HTML email renderer; non-morning sessions produce more compact output.

@@ -23,6 +23,7 @@ class SessionDelta:
     carried_forward_items: list[NormalisedEvent]
     stale_numbers: list[str]
     what_changed_header: str
+    inclusion_reason: str = ""
 
 
 def previous_session_context(
@@ -78,15 +79,11 @@ def split_news_since_previous(
             carried_forward_items=[],
             stale_numbers=[],
             what_changed_header="WHAT CHANGED",
+            inclusion_reason="no_previous_session",
         )
 
     snapshot = get_session_snapshot(profile_name, local_date, prev_key)
-    seen_ids: set[str] = set()
-    if snapshot:
-        for row in snapshot.get("portfolio_summary", []) or []:
-            title = str((row or {}).get("title") or "").strip().lower()
-            if title:
-                seen_ids.add(f"title:{title}")
+    seen_ids = _seen_title_keys_from_snapshot(snapshot)
 
     new_items: list[NormalisedEvent] = []
     repeated_items: list[NormalisedEvent] = []
@@ -111,7 +108,42 @@ def split_news_since_previous(
         carried_forward_items=carried[:2],
         stale_numbers=[],
         what_changed_header=header,
+        inclusion_reason="incremental_split",
     )
+
+
+def split_events_against_previous_snapshot(
+    *,
+    profile_name: str,
+    session_key: str,
+    local_date,
+    timezone_name: str,
+    events: list[NormalisedEvent],
+) -> tuple[list[NormalisedEvent], list[NormalisedEvent], list[NormalisedEvent], str]:
+    """Split arbitrary event sections (themes/watchlist/etc.) against prior session snapshot."""
+    prev_key, prev_label, _prev_sent = previous_session_context(
+        profile_name=profile_name,
+        session_key=session_key,
+        local_date=local_date,
+        timezone_name=timezone_name,
+    )
+    if not prev_key:
+        return list(events), [], [], ""
+
+    snapshot = get_session_snapshot(profile_name, local_date, prev_key)
+    seen_ids = _seen_title_keys_from_snapshot(snapshot)
+    new_items: list[NormalisedEvent] = []
+    repeated: list[NormalisedEvent] = []
+    carried: list[NormalisedEvent] = []
+    for evt in events:
+        tkey = f"title:{(evt.title or '').strip().lower()}"
+        if tkey in seen_ids:
+            repeated.append(evt)
+            if int(evt.cluster_size or 1) >= 8:
+                carried.append(evt)
+            continue
+        new_items.append(evt)
+    return new_items, repeated, carried[:2], prev_label
 
 
 def _previous_session_key(session_key: str) -> str | None:
@@ -126,6 +158,26 @@ def _previous_session_key(session_key: str) -> str | None:
     return mapping.get(key)
 
 
+def _seen_title_keys_from_snapshot(snapshot: dict | None) -> set[str]:
+    seen_ids: set[str] = set()
+    if not snapshot:
+        return seen_ids
+    for row in snapshot.get("portfolio_summary", []) or []:
+        title = str((row or {}).get("title") or "").strip().lower()
+        if title:
+            seen_ids.add(f"title:{title}")
+    text = str(snapshot.get("telegram_text") or "")
+    for line in text.splitlines():
+        raw = line.strip()
+        if not raw:
+            continue
+        raw = raw.lstrip("-•").strip()
+        if len(raw) < 16:
+            continue
+        seen_ids.add(f"title:{raw.lower()}")
+    return seen_ids
+
+
 def _as_local(dt: datetime, timezone_name: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -133,4 +185,3 @@ def _as_local(dt: datetime, timezone_name: str) -> datetime:
         return dt.astimezone(ZoneInfo(timezone_name))
     except Exception:
         return dt.astimezone(timezone.utc)
-

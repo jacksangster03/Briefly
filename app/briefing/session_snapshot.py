@@ -210,6 +210,9 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
         cur = float(cur_raw)
         prv = float(prv_raw)
         d = (cur - prv) * scale
+        if abs(d) < 0.005 and abs(cur) < 0.005 and abs(prv) < 0.005:
+            # Avoid noisy fake precision lines such as +0.00% -> +0.00%.
+            return
 
         if is_rate:
             bp = round(d * 100)

@@ -17,7 +17,7 @@ from app.briefing.market_setup_interpreter import interpret_market_setup
 from app.briefing.portfolio_impact import build_portfolio_impact
 from app.briefing.regime_context import build_regime_context, compute_geo_risk_level
 from app.briefing.regime_tracker import classify_regime, persist_regime_snapshot
-from app.briefing.session_delta import split_news_since_previous
+from app.briefing.session_delta import split_events_against_previous_snapshot, split_news_since_previous
 from app.briefing.session_freshness import build_data_basis_lines, build_freshness_map
 from app.briefing.session_quality import compute_session_quality
 from app.briefing.session_snapshot import build_what_changed_lines, load_previous_snapshot, snapshot_metrics
@@ -518,7 +518,53 @@ class MorningBriefingGenerator:
                     briefing.global_news = delta.new_news_items[:MAX_GLOBAL_NEWS]
                 elif delta.carried_forward_items:
                     briefing.global_news = delta.carried_forward_items[:2]
+                    briefing.data_basis_lines.append(
+                        f"Global news: carried forward from {delta.previous_session_label or 'previous session'} (no material new headlines)"
+                    )
+                else:
+                    briefing.global_news = []
+                    if delta.previous_session_label:
+                        briefing.data_basis_lines.append(
+                            f"Global news: no material new headlines since {delta.previous_session_label}"
+                        )
                 briefing.what_changed_header = delta.what_changed_header
+
+                # Apply the same deterministic split to other event-heavy sections.
+                new_themes, _rep_themes, carried_themes, prev_label = split_events_against_previous_snapshot(
+                    profile_name=self.profile.name,
+                    session_key=briefing.session_key,
+                    local_date=local_date,
+                    timezone_name=self.profile.timezone,
+                    events=briefing.top_themes,
+                )
+                briefing.top_themes = (new_themes or carried_themes)[:3]
+
+                new_watch, _rep_watch, carried_watch, prev_label_watch = split_events_against_previous_snapshot(
+                    profile_name=self.profile.name,
+                    session_key=briefing.session_key,
+                    local_date=local_date,
+                    timezone_name=self.profile.timezone,
+                    events=briefing.watchlist_events,
+                )
+                briefing.watchlist_events = (new_watch or carried_watch)[:4]
+
+                new_pf, _rep_pf, carried_pf, _prev_pf = split_events_against_previous_snapshot(
+                    profile_name=self.profile.name,
+                    session_key=briefing.session_key,
+                    local_date=local_date,
+                    timezone_name=self.profile.timezone,
+                    events=briefing.portfolio_focus,
+                )
+                briefing.portfolio_focus = (new_pf or carried_pf)[:4]
+
+                if not briefing.top_themes and prev_label:
+                    briefing.data_basis_lines.append(
+                        f"Top themes: no material new items since {prev_label}"
+                    )
+                if not briefing.watchlist_events and prev_label_watch:
+                    briefing.data_basis_lines.append(
+                        f"Watchlist events: no material new items since {prev_label_watch}"
+                    )
         except Exception:
             logger.debug("session delta comparison failed; falling back to full section set", exc_info=True)
         active_setup = self._active_market_setup_view(briefing)
@@ -611,7 +657,7 @@ class MorningBriefingGenerator:
                 session_key=briefing.session_key,
                 timezone_name=self.profile.timezone,
             )
-            briefing.data_basis_lines = build_data_basis_lines(
+            computed_basis = build_data_basis_lines(
                 session_key=briefing.session_key,
                 generated_at=briefing.generated_at,
                 timezone_name=self.profile.timezone,
@@ -619,6 +665,10 @@ class MorningBriefingGenerator:
                 macro_quotes=list(briefing.market_setup.macro_quotes),
                 watchlist_quotes=list(briefing.watchlist_quotes),
             )
+            # Preserve any incremental notes we already appended above.
+            briefing.data_basis_lines = computed_basis + [
+                line for line in briefing.data_basis_lines if line not in computed_basis
+            ]
             if briefing.data_basis_lines:
                 briefing.data_freshness["Data basis"] = " | ".join(briefing.data_basis_lines)
         except Exception:

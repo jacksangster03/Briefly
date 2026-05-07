@@ -205,6 +205,16 @@ class TelegramFormatter:
             global_news = self._format_global_news(briefing.global_news)
             if global_news:
                 sections.append(global_news)
+        elif not briefing.global_news:
+            since = self._since_label_from_header(briefing.what_changed_header)
+            sections.append(
+                "\n".join(
+                    [
+                        f"<b>{SECTION_HEADERS['global_news']}</b>",
+                        f"No material new headlines since {since}." if since else "No material new headlines this session.",
+                    ]
+                )
+            )
 
         themes = self._format_themes_for_mode(briefing.top_themes, briefing.session_mode)
         if themes and (is_morning or is_preopen or is_closing):
@@ -283,6 +293,14 @@ class TelegramFormatter:
         if focus:
             lines.append(f"Session focus: {focus}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _since_label_from_header(header: str) -> str:
+        text = (header or "").strip()
+        token = "WHAT CHANGED SINCE "
+        if text.upper().startswith(token):
+            return text[len(token):].strip().title()
+        return ""
 
     @staticmethod
     def _format_what_changed(lines: list[str], header: str = "WHAT CHANGED") -> str:

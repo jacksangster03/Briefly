@@ -37,6 +37,7 @@ from app.schemas.delivery import EmailRenderResult
 from app.briefing.session_materiality import compute_materiality
 from app.briefing.session_routing import SESSION_WINDOWS, next_session_window, resolve_session_window, session_window_for_key
 from app.briefing.session_templates import get_session_template_for_profile
+from app.briefing.session_delta import split_events_against_previous_snapshot, split_news_since_previous
 from app.briefing.session_snapshot import load_previous_snapshot, persist_snapshot, snapshot_metrics
 from app.cadence.engine import DecisionEngine
 from app.cadence.state_store import (
@@ -1373,6 +1374,97 @@ def _session_send_status_summary(
     if any(r.in_progress for r in rows):
         return "in progress"
     return "failed"
+
+
+def run_session_audit(
+    settings: Settings | None = None,
+    *,
+    target_date_str: str = "today",
+    profile_name: str = "default_user",
+) -> str:
+    """Deterministic session audit for freshness + incremental behavior."""
+    settings = settings or get_settings()
+    init_db()
+    profile = load_user_profile(settings)
+    tz = ZoneInfo(profile.timezone or settings.timezone)
+    now_utc = datetime.now(timezone.utc)
+    now_local = now_utc.astimezone(tz)
+    if target_date_str in ("today", ""):
+        target_date = now_local.date()
+    elif target_date_str == "yesterday":
+        target_date = (now_local - timedelta(days=1)).date()
+    else:
+        from datetime import date as _date
+        target_date = _date.fromisoformat(target_date_str)
+
+    universe = load_sector_universe(settings)
+    market_svc, news_svc, macro_svc = _build_services(settings)
+    generator = MorningBriefingGenerator(
+        settings=settings,
+        profile=profile,
+        universe=universe,
+        market_data=market_svc,
+        news_data=news_svc,
+        macro_data=macro_svc,
+    )
+    template_name, sessions = get_session_template_for_profile(profile)
+    lines: list[str] = [
+        f"SESSION AUDIT | {target_date.isoformat()} | profile={profile_name} | tz={profile.timezone}",
+        f"template={template_name}",
+        "",
+    ]
+    for item in sessions:
+        if target_date == now_local.date() and now_local.time() < item.window_start:
+            continue
+        briefing = generator.generate(session_key=item.key, session_title=item.label)
+        local_date = target_date
+        delta = split_news_since_previous(
+            profile_name=profile.name,
+            session_key=item.key,
+            local_date=local_date,
+            timezone_name=profile.timezone,
+            events=briefing.global_news,
+        )
+        new_themes, repeated_themes, carried_themes, prev_label = split_events_against_previous_snapshot(
+            profile_name=profile.name,
+            session_key=item.key,
+            local_date=local_date,
+            timezone_name=profile.timezone,
+            events=briefing.top_themes,
+        )
+        freshness_states = [str((briefing.quote_freshness or {}).get(k, {}).get("freshness_state", "")) for k in (briefing.quote_freshness or {}).keys()]
+        freshness_counts: dict[str, int] = {}
+        for state in freshness_states:
+            if not state:
+                continue
+            freshness_counts[state] = freshness_counts.get(state, 0) + 1
+        warnings: list[str] = []
+        if freshness_counts.get("stale", 0) and not any("stale" in line.lower() for line in (briefing.data_basis_lines or [])):
+            warnings.append("stale_data_without_basis_label")
+        section_mode = {
+            "what_changed": "incremental only" if item.key != "morning" else "full context by design",
+            "market_snapshot": "mixed",
+            "global_news": "incremental only" if item.key != "morning" else "full context by design",
+            "top_themes": "incremental only" if item.key != "morning" else "full context by design",
+            "sector_scan": "full context by design" if item.key in {"morning", "closing_wrap"} else "incremental only",
+            "watchlist": "mixed",
+            "portfolio_impact": "mixed",
+            "earnings_calendar": "mixed",
+        }
+        lines.append(f"[{item.key}] {item.label} ({item.window_str})")
+        lines.append(f"  previous_session={delta.previous_session_key or 'none'} ({delta.previous_session_label or '-'})")
+        lines.append(
+            f"  news: new={len(delta.new_news_items)} repeated={len(delta.repeated_news_items)} carried={len(delta.carried_forward_items)}"
+        )
+        lines.append(
+            f"  themes: new={len(new_themes)} repeated={len(repeated_themes)} carried={len(carried_themes)} prev={prev_label or '-'}"
+        )
+        lines.append(f"  quote_basis={freshness_counts or {'unavailable': 0}}")
+        lines.append(f"  sections={section_mode}")
+        if warnings:
+            lines.append(f"  warnings={warnings}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 # -- Catch-up -----------------------------------------------------------------

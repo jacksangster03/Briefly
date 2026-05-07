@@ -1280,6 +1280,21 @@ def daily_summary(ctx, target_date: str, profile_name: str):
     click.echo(summary)
 
 
+@cli.command("session-audit")
+@click.option("--date", "target_date", default="today", show_default=True, help="Date: today | yesterday | YYYY-MM-DD.")
+@click.option("--profile", "profile_name", default="default_user", show_default=True, help="Profile name.")
+@click.pass_context
+def session_audit(ctx, target_date: str, profile_name: str):
+    """Audit incremental session behavior, freshness basis, and section modes."""
+    from app.main import run_session_audit
+    report = run_session_audit(
+        ctx.obj["settings"],
+        target_date_str=target_date,
+        profile_name=profile_name,
+    )
+    click.echo(report)
+
+
 @cli.group("snapshots")
 def snapshots_group():
     """Read and manage live session archive snapshots (Phase 8.9 Lite)."""
