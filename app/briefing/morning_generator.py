@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 import re
+from zoneinfo import ZoneInfo
 
 from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
@@ -16,6 +17,8 @@ from app.briefing.market_setup_interpreter import interpret_market_setup
 from app.briefing.portfolio_impact import build_portfolio_impact
 from app.briefing.regime_context import build_regime_context, compute_geo_risk_level
 from app.briefing.regime_tracker import classify_regime, persist_regime_snapshot
+from app.briefing.session_delta import split_news_since_previous
+from app.briefing.session_freshness import build_data_basis_lines, build_freshness_map
 from app.briefing.session_quality import compute_session_quality
 from app.briefing.session_snapshot import build_what_changed_lines, load_previous_snapshot, snapshot_metrics
 from app.briefing.trust_contract import (
@@ -499,6 +502,25 @@ class MorningBriefingGenerator:
             verbose_when_empty=False,
         )
         self._apply_session_profile(briefing)
+        # Incremental non-morning content: prioritize new developments since prior session.
+        try:
+            if (briefing.session_key or "morning").lower() != "morning":
+                tz = ZoneInfo(self.profile.timezone or self.settings.timezone or "Europe/Madrid")
+                local_date = briefing.generated_at.astimezone(tz).date()
+                delta = split_news_since_previous(
+                    profile_name=self.profile.name,
+                    session_key=briefing.session_key,
+                    local_date=local_date,
+                    timezone_name=self.profile.timezone,
+                    events=briefing.global_news,
+                )
+                if delta.new_news_items:
+                    briefing.global_news = delta.new_news_items[:MAX_GLOBAL_NEWS]
+                elif delta.carried_forward_items:
+                    briefing.global_news = delta.carried_forward_items[:2]
+                briefing.what_changed_header = delta.what_changed_header
+        except Exception:
+            logger.debug("session delta comparison failed; falling back to full section set", exc_info=True)
         active_setup = self._active_market_setup_view(briefing)
         setup_interpretation = interpret_market_setup(
             active_setup,
@@ -575,6 +597,32 @@ class MorningBriefingGenerator:
             briefing,
             timezone_name=self.profile.timezone,
         )
+        # Deterministic freshness metadata for rows/watchlist and session data-basis banner.
+        try:
+            all_quotes = (
+                list(briefing.market_setup.index_quotes)
+                + list(briefing.market_setup.macro_quotes)
+                + list(briefing.watchlist_quotes)
+                + list(briefing.portfolio_quotes)
+            )
+            briefing.quote_freshness = build_freshness_map(
+                quotes=all_quotes,
+                generated_at=briefing.generated_at,
+                session_key=briefing.session_key,
+                timezone_name=self.profile.timezone,
+            )
+            briefing.data_basis_lines = build_data_basis_lines(
+                session_key=briefing.session_key,
+                generated_at=briefing.generated_at,
+                timezone_name=self.profile.timezone,
+                index_quotes=list(briefing.market_setup.index_quotes),
+                macro_quotes=list(briefing.market_setup.macro_quotes),
+                watchlist_quotes=list(briefing.watchlist_quotes),
+            )
+            if briefing.data_basis_lines:
+                briefing.data_freshness["Data basis"] = " | ".join(briefing.data_basis_lines)
+        except Exception:
+            logger.debug("session freshness classification failed; keeping default freshness block", exc_info=True)
         current_snapshot = snapshot_metrics(briefing)
         _prev_ts, previous_snapshot = load_previous_snapshot(
             profile_name=self.profile.name,

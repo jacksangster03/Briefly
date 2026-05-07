@@ -599,6 +599,36 @@ See [docs/roadmap.md](docs/roadmap.md) for the full phase-by-phase development h
 
 ---
 
+## Freshness and Session Updates
+
+Briefly now treats **data freshness** and **session deltas** as first-class deterministic logic:
+
+- Morning includes broad context (Asia overnight, Europe session, US prior close context when relevant).
+- Before US open, US single-name and index rows may legitimately be **prior close** unless pre-market/live data is available.
+- US intraday / into-close sessions prefer **live or near-real-time** quotes when provider timestamps support it.
+- If data is delayed, stale, carried forward, or unavailable, Briefly labels that state explicitly instead of implying live values.
+
+Session cadence is incremental:
+
+- Non-morning sessions prioritize **what changed since the previous sent session**.
+- Repeated stories are suppressed unless they expanded materially or remain dominant.
+- Carried-forward context is allowed, but is explicitly marked as carried forward.
+- `WHAT CHANGED` headings are session-aware (for example, `WHAT CHANGED SINCE US PRE-OPEN SETUP`).
+
+Local snapshot memory powers deterministic deltas:
+
+- Session-to-session comparison reads local snapshot/archive state and delivery records.
+- No external provider calls are made by the delta comparison itself.
+- If no prior comparable snapshot exists, Briefly falls back safely and continues generation.
+
+Practical interpretation:
+
+- Seeing `AMD +18.61%` in pre-open can be valid **prior-close context**.
+- Seeing `AMD +1.12%` later intraday can be valid **live session move**.
+- The output should now label this distinction directly in market/watchlist rows and session data-basis lines.
+
+---
+
 ## License
 
 MIT

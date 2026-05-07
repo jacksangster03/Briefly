@@ -199,7 +199,9 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
         if cur_raw is None and prv_raw is None:
             return
         if cur_raw is None:
-            lines.append(f"{name}: unavailable")
+            # Suppress unavailable noise for non-primary series.
+            if key in {"vix_level", "wti_pct", "us10y", "breadth_up_pct", "us_avg_pct"}:
+                lines.append(f"{name}: unavailable")
             return
         if prv_raw is None:
             cur = float(cur_raw)
@@ -218,10 +220,7 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
                 qualifier = "little changed"
             else:
                 qualifier = f"{bp:+d} bp"
-            if abs_bp < 1:
-                lines.append(f"{name}: {cur:.2f}% ({qualifier})")
-            else:
-                lines.append(f"{name}: {cur:.2f}% ({qualifier})")
+            lines.append(f"{name}: {prv:.2f}% -> {cur:.2f}% ({qualifier})")
             magnitudes.append(abs_bp / 100)
             return
 
@@ -236,10 +235,7 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
             qualifier = f"{'sharply higher' if d > 0 else 'sharply lower'} ({d:+.2f}{suffix})"
 
         magnitudes.append(abs_d)
-        if abs_d < 0.05:
-            lines.append(f"{name}: {cur:.2f}{suffix} ({qualifier})")
-        else:
-            lines.append(f"{name}: {cur:.2f}{suffix} ({qualifier})")
+        lines.append(f"{name}: {prv:.2f}{suffix} -> {cur:.2f}{suffix} ({qualifier})")
 
     _delta("VIX", "vix_level", "")
     _delta("WTI", "wti_pct", "%")
@@ -249,7 +245,13 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
     _delta("Sector breadth up", "breadth_up_pct", "%")
     _delta("US avg", "us_avg_pct", "%")
     _delta("Europe avg", "eu_avg_pct", "%")
+    # Asia often remains unchanged during Europe/US sessions; only include on material delta.
+    before_lines = len(lines)
     _delta("Asia avg", "asia_avg_pct", "%")
+    if len(lines) > before_lines:
+        last = lines[-1]
+        if "(flat)" in last or "(little changed" in last:
+            lines.pop()
     _delta("Portfolio contribution", "portfolio_contrib_pct", "%")
     if "watchlist_leader_pct" in current and "watchlist_laggard_pct" in current:
         cur_leader = float(current.get("watchlist_leader_pct"))

@@ -88,6 +88,9 @@ class MorningBriefing(BaseModel):
     session_quality_label: str = ""
     section_confidence: dict[str, str] = Field(default_factory=dict)
     data_freshness: dict[str, str] = Field(default_factory=dict)
+    quote_freshness: dict[str, dict] = Field(default_factory=dict)
+    data_basis_lines: list[str] = Field(default_factory=list)
+    what_changed_header: str = "WHAT CHANGED"
     what_changed_lines: list[str] = Field(default_factory=list)
     healthcare_intelligence: HealthcareBriefingSection | None = None
     contract_warnings: list[str] = Field(default_factory=list)

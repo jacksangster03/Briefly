@@ -144,9 +144,15 @@ class TelegramFormatter:
             sections.append("\n".join(["<b>CONFIRMED DRIVERS</b>", "- " + driver_line]))
 
         if not is_morning:
-            what_changed = self._format_what_changed(briefing.what_changed_lines)
+            what_changed = self._format_what_changed(
+                briefing.what_changed_lines,
+                header=briefing.what_changed_header or "WHAT CHANGED",
+            )
             if what_changed:
                 sections.append(what_changed)
+        if briefing.data_basis_lines:
+            basis_lines = [f"- {line}" for line in briefing.data_basis_lines[:5]]
+            sections.append("\n".join(["<b>DATA BASIS</b>"] + basis_lines))
 
         setup = self._format_market_setup(briefing) if (is_morning or is_preopen or is_closing) else self._format_session_snapshot(briefing)
         if setup:
@@ -225,6 +231,7 @@ class TelegramFormatter:
 
         # Watchlist
         watchlist = self._format_watchlist(
+            briefing,
             briefing.watchlist_events,
             briefing.watchlist_quotes,
             briefing.session_mode,
@@ -251,11 +258,12 @@ class TelegramFormatter:
         return self._split_message(full_text)
 
     @staticmethod
-    def _format_what_changed(lines: list[str]) -> str:
+    def _format_what_changed(lines: list[str], header: str = "WHAT CHANGED") -> str:
         compact = [str(line).strip() for line in (lines or []) if str(line).strip()]
         if not compact:
             return ""
-        return "\n".join([f"<b>WHAT CHANGED</b>"] + [f"- {line}" for line in compact[:6]])
+        title = (header or "WHAT CHANGED").strip()
+        return "\n".join([f"<b>{title}</b>"] + [f"- {line}" for line in compact[:6]])
 
     def _format_watch_triggers(self, briefing: MorningBriefing) -> str:
         session_key = (briefing.session_key or "morning").lower()
@@ -462,6 +470,9 @@ class TelegramFormatter:
             asset_type = _asset_type_for_quote(q)
             ctx = move_context_from_quote(q, asset_type=asset_type, label=name, session_mode=session_mode)
             line = format_move_context_line(ctx)
+            freshness_suffix = self._freshness_suffix(briefing, q)
+            if freshness_suffix:
+                line += freshness_suffix
             ex = exchange_for_symbol(q.symbol)
             if ex:
                 closed, reason = is_exchange_closed(ex, local_date)
@@ -479,7 +490,11 @@ class TelegramFormatter:
             name = self._friendly_instrument_label(q.display_name or q.symbol, q.symbol)
             asset_type = _asset_type_for_quote(q)
             ctx = move_context_from_quote(q, asset_type=asset_type, label=name, session_mode=session_mode)
-            lines.append(format_move_context_line(ctx))
+            line = format_move_context_line(ctx)
+            freshness_suffix = self._freshness_suffix(briefing, q)
+            if freshness_suffix:
+                line += freshness_suffix
+            lines.append(line)
 
         # Treasury yields from FRED — shown in basis points, never % change of yield
         setup = briefing.market_setup
@@ -870,6 +885,7 @@ class TelegramFormatter:
 
     def _format_watchlist(
         self,
+        briefing: MorningBriefing,
         events: list[NormalisedEvent],
         quotes: list[QuoteData],
         session_mode: str = "weekday",
@@ -889,7 +905,9 @@ class TelegramFormatter:
                     session_mode=session_mode,
                 )
                 label = format_watchlist_move_label(ctx)
-                q_lines.append(f"{q.display_name or q.symbol} {label}")
+                freshness_short = self._freshness_short_label(quote=q, briefing=briefing)
+                suffix = f" {freshness_short}" if freshness_short else ""
+                q_lines.append(f"{q.display_name or q.symbol} {label}{suffix}")
             parts.append(" | ".join(q_lines))
             summary = self._watchlist_summary_line(
                 quotes,
@@ -1124,6 +1142,41 @@ class TelegramFormatter:
         source = (quote.source or "unknown").lower()
         reference = "vs Friday close" if session_mode in {"saturday", "sunday"} else "vs prior close"
         return f"As of {local_label} via {source} | {reference}"
+
+    def _freshness_meta(self, briefing: MorningBriefing, quote: QuoteData) -> dict:
+        key = (quote.symbol or "").upper().strip()
+        return dict((briefing.quote_freshness or {}).get(key) or {})
+
+    def _freshness_suffix(self, briefing: MorningBriefing, quote: QuoteData) -> str:
+        meta = self._freshness_meta(briefing, quote)
+        if not meta:
+            return ""
+        state = str(meta.get("freshness_state") or "")
+        label = str(meta.get("freshness_label") or "").strip()
+        if state in {"near_real_time", "live"}:
+            return ""
+        if not label:
+            return ""
+        return f" | {label}"
+
+    def _freshness_short_label(self, *, quote: QuoteData, briefing: MorningBriefing) -> str:
+        meta = self._freshness_meta(briefing, quote)
+        if not meta:
+            return ""
+        state = str(meta.get("freshness_state") or "")
+        if state in {"near_real_time", "live"}:
+            return "live"
+        if state == "prior_close":
+            return "prior close"
+        if state == "delayed":
+            return "delayed"
+        if state == "stale":
+            return "stale"
+        if state == "carried_forward":
+            return "carried forward"
+        if state == "unavailable":
+            return "unavailable"
+        return ""
 
     @staticmethod
     def _coerce_utc_ts(dt: datetime) -> datetime:
