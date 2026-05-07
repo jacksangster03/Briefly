@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any
@@ -16,7 +17,22 @@ from app.logger import get_logger
 
 logger = get_logger("providers")
 
-_SECRET_QUERY_KEYS = {"api_key", "apikey", "access_key", "token", "key", "authorization"}
+_SECRET_QUERY_KEYS = {
+    "api_key",
+    "apikey",
+    "api-token",
+    "api_token",
+    "apitoken",
+    "access_key",
+    "access-token",
+    "access_token",
+    "token",
+    "key",
+    "authorization",
+}
+_SECRET_KV_PATTERN = re.compile(
+    r"(?i)\b(api_key|apikey|api-token|api_token|apiToken|access_key|access-token|access_token|token|key|authorization)=([^&\s]+)"
+)
 
 
 def redact_url_secrets(url: str) -> str:
@@ -42,6 +58,15 @@ def redact_url_secrets(url: str) -> str:
         )
     except Exception:
         return url
+
+
+def redact_secret_tokens(text: str) -> str:
+    if not text:
+        return text
+    try:
+        return _SECRET_KV_PATTERN.sub(lambda m: f"{m.group(1)}=***", text)
+    except Exception:
+        return text
 
 
 class ProviderError(Exception):
@@ -209,16 +234,18 @@ class BaseProvider(ABC):
 
             except requests.exceptions.RequestException as exc:
                 latency_ms = int((time.monotonic() - start) * 1000)
+                safe_exc = redact_secret_tokens(str(exc))
                 logger.warning(
                     "%s error on %s: %s (attempt %d/%d)",
-                    self.name, redacted_url, exc, attempt, self.max_retries,
+                    self.name, redacted_url, safe_exc, attempt, self.max_retries,
                 )
-                self._log_health(redacted_url, latency_ms, status_code, False, str(exc)[:500])
+                self._log_health(redacted_url, latency_ms, status_code, False, safe_exc[:500])
                 last_exc = exc
 
         _ProviderCircuitBreaker.record_failure(self.name)
+        safe_last_exc = redact_secret_tokens(str(last_exc)) if last_exc else last_exc
         raise ProviderError(
-            f"{self.name} failed after {self.max_retries} attempts on {redacted_url}: {last_exc}"
+            f"{self.name} failed after {self.max_retries} attempts on {redacted_url}: {safe_last_exc}"
         )
 
     def _log_health(
