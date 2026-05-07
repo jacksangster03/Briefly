@@ -243,6 +243,26 @@ The Healthcare/Biotech vertical is optional (default off). When enabled, it adds
 
 The entire system is deterministic and rule-based. No custom ML models are used in the intelligence pipeline at this stage.
 
+### Healthcare keys (simple setup)
+
+Use these free/public research sources first:
+
+- SEC EDGAR filings (no API key): [SEC EDGAR](https://www.sec.gov/edgar/searchedgar/companysearch)
+- FDA openFDA API (free; key optional): [openFDA APIs](https://open.fda.gov/apis/)
+- ClinicalTrials.gov API v2 (free; no key): [ClinicalTrials.gov API](https://clinicaltrials.gov/data-api/about-api)
+- EMA medicines portal (public source): [EMA Medicines](https://www.ema.europa.eu/en/medicines)
+
+Where to put them:
+
+- `.env.example` and `.env` now include a **HEALTHCARE / BIOTECH INTELLIGENCE** block with:
+  - `FDA_OPENFDA_BASE_URL`
+  - `FDA_OPENFDA_API_KEY` (optional)
+  - `CLINICALTRIALS_BASE_URL`
+  - `EMA_MEDICINES_BASE_URL`
+
+Note:
+- Healthcare enable/filter settings remain in `configs/healthcare.yaml` (`healthcare.enabled`, themes, tickers, severity thresholds).
+
 ---
 
 ## Diagnostics and operational commands
@@ -761,6 +781,326 @@ Deep-link examples:
 - `/ui/briefing/charts/watchlist?profile=default_user&period=1M&mode=rebased`
 - `/ui/briefing/charts/watchlist?profile=default_user&period=1Y&mode=relative&benchmark=SPY`
 - `/ui/briefing/charts/watchlist?profile=default_user&period=5Y&mode=rebased`
+
+---
+
+## Complete Session Contract (In Depth)
+
+This section defines exactly what each session is expected to do so behavior is explicit, testable, and auditable.
+
+### Morning Briefing (`morning`)
+
+Primary question:
+- What is today’s setup?
+
+Expected output:
+- Full context
+- Broad market setup (multi-region)
+- Regime and risk posture
+- Macro and cross-asset framing
+- Portfolio-aware lens
+- Calendar/watchlist relevance
+
+Allowed to include:
+- Prior close context where relevant (clearly labeled)
+- Overnight developments
+- Broader educational context
+
+### Europe Midday Check (`europe_midday`)
+
+Primary question:
+- Did Europe confirm or change the morning setup?
+
+Expected output:
+- Incremental update since Morning
+- Europe/rates/oil update
+- Risk posture update
+- Concise portfolio check
+- US handoff watch
+
+Should avoid by default:
+- Full weekly calendar repetition
+- Full morning-style setup blocks
+
+### US Pre-Open Setup (`us_pre_open`)
+
+Primary question:
+- What matters into the US open?
+
+Expected output:
+- Europe-to-US handoff
+- US setup and opening triggers
+- Watchlist movers and rates/volatility checks
+- Next-24h earnings relevance
+
+Data handling rule:
+- If US pre-market quotes are unavailable, use prior close and label clearly.
+
+### US Intraday Risk Check (`us_intraday_risk`)
+
+Primary question:
+- Is the US session confirming or fading the setup?
+
+Expected output:
+- What changed since US Pre-Open
+- Setup confirmation/fade assessment
+- Risk posture + live P&L framing
+- Watch-into-close triggers
+
+Should avoid by default:
+- Full macro blocks
+- Full earnings calendar
+- Repeated morning prose
+
+### Into Close Update (`into_close`)
+
+Primary question:
+- What needs attention into the close?
+
+Expected output:
+- Final-hour risk posture
+- Breadth/reversal checks
+- Key thresholds
+- Portfolio impact and watchlist drivers
+
+### Closing Wrap / Next-Day Setup (`closing_wrap`)
+
+Primary question:
+- What happened today and what matters tomorrow?
+
+Expected output:
+- Day verdict
+- Confirmed drivers
+- Final snapshot and portfolio attribution
+- Tomorrow setup and next catalysts
+
+Formatting note:
+- Should not use “Watch Into Close” framing after the close.
+
+---
+
+## Complete Data Freshness Contract
+
+Every number should communicate both value and basis.
+
+Freshness states:
+- `live`
+- `near_real_time`
+- `delayed`
+- `prior_close`
+- `stale`
+- `carried_forward`
+- `unavailable`
+
+Display principles:
+- Never imply live if timestamp evidence is missing.
+- Never treat missing values as `0.00`.
+- If older context is repeated intentionally, label as carried forward.
+- If session basis changes (for example prior-close -> live intraday), say so explicitly in “What Changed”.
+
+Data Basis line (compact, session top):
+- US equities: prior close / pre-market / near-real-time
+- Europe: live/delayed as applicable
+- Commodities: latest available (often updates outside cash equity hours)
+- Macro/rates: latest official or latest provider snapshot
+- News scan timestamp basis
+
+---
+
+## Deterministic Charting Contract
+
+Briefly’s chart layer is deterministic by design: no LLM decides chart values, chart inclusion, or math.
+
+### Chart Selection
+
+Selector inputs:
+- Session key
+- Regime tags
+- Density mode (`desk` vs `full`)
+- Required coverage rules
+
+Hard rules:
+- Required regime tags must be represented by a chart or compact substitute.
+- Portfolio relevance must remain visible (attribution plus risk/concentration lens as session-appropriate).
+- Non-morning sessions stay concise by default.
+
+### Chart Read/Why/Lens
+
+For each chart:
+- `READ` states what happened (facts and values).
+- `WHY IT MATTERS` states market interpretation.
+- `PORTFOLIO LENS` maps the signal to holdings/sleeves.
+
+Quality expectations:
+- No contradictory labels
+- No placeholder text
+- No generic filler when chart-specific copy is available
+
+---
+
+## Provider and Reliability Model
+
+Briefly is built to continue producing useful output even with partial provider degradation.
+
+Core resilience behaviors:
+- Retry with bounded attempts
+- Rate-limit handling
+- Unauthorized handling with cooldown/circuit behavior
+- Optional-provider failure isolation
+- Redacted provider logging for secret-like URL query values
+
+Provider failures should:
+- Be visible in audit/log context
+- Not pollute user-facing prose with raw technical errors
+- Not block entire briefing delivery when optional data is missing
+
+Operational guidance:
+- If provider credentials are invalid (401), fix credentials and restart scheduler.
+- If rate-limited, reduce polling intensity or rely on alternate providers.
+- If any key appears in logs/chat, rotate immediately.
+
+---
+
+## Delivery, Idempotency, and Replay Safety
+
+### Live delivery safety
+
+Live session sends are deduplicated by canonical session/date/channel keys for each profile.
+
+Implications:
+- Re-running the same live session send should skip if already successful.
+- Different session keys on the same date must not block each other.
+
+### Replay/backfill safety
+
+Day replay and snapshot replay are intentionally isolated from live idempotency.
+
+Safety expectations:
+- Replay/test sends must be clearly labeled.
+- Replay/test sends must not mark live sessions as already sent.
+- Replay snapshots, if persisted, should remain namespaced from live snapshots.
+
+---
+
+## Operational Runbooks
+
+### “I only received Morning”
+
+1. Run `python -m app.cli schedule-status`
+2. Confirm scheduler lock/process health.
+3. Verify `delivery.session_mode`, `always_send_sessions`, and materiality gating.
+4. Run `python -m app.cli daily-summary` and `python -m app.cli delivery-log --date today`.
+5. If needed, run `catch-up --today` with desired channel flags.
+
+### “I think there were duplicates”
+
+1. Check `delivery-log` first (authoritative).
+2. Check session send state by session key/channel/date.
+3. If sender and recipient Gmail addresses are identical, Gmail threading can show Sent + Inbox copies in one conversation.
+4. Use a dedicated sender mailbox for cleaner operational separation.
+
+### “Non-morning output is too long”
+
+1. Confirm session key and density mode.
+2. Validate session-specific shaping behavior.
+3. Inspect session-audit output for incremental vs full-context sections.
+4. Check for forced/full overrides in profile or command flags.
+
+### “What Changed looks wrong”
+
+1. Verify comparable prior snapshot exists.
+2. Confirm prior/current data basis are both visible.
+3. Ensure missing data is not being treated as zero.
+4. Confirm stale/closed-session markets are labeled as carried/previous session.
+
+---
+
+## CLI Reference (Practical)
+
+Run all commands with `python -m app.cli ...`.
+
+High-frequency commands:
+- `brief` -> auto-route to current session
+- `morning`, `intraday`, `breaking` -> explicit commands
+- `scheduler` -> run live scheduler loop
+- `schedule-status` -> operational status snapshot
+- `daily-summary` -> session send summary
+- `delivery-log` -> detailed per-send records
+
+Quality and diagnosis:
+- `preflight` -> config and channel readiness checks
+- `status` -> environment and service readiness
+- `session-audit --date today` -> local-only incremental/freshness audit
+- `session-audit --date today --live-check` -> regeneration-backed audit
+
+Recovery/catch-up:
+- `catch-up --today` -> send eligible missing sessions for today
+- `backfill --date YYYY-MM-DD` -> historical labeled backfill
+- `day-replay ...` -> multi-session test harness
+- `snapshots replay --date ... --session ...` -> resend exact archived output
+
+Portfolio workbench:
+- Use `/ui/portfolio/*` routes for holdings/policy/allocation/risk/CMA/rebalancing/attribution/simulation/bonds/reports/ESG/FX.
+
+Tip:
+- For command-specific flags and options, run `python -m app.cli <command> --help`.
+
+---
+
+## Database and State (High-Level)
+
+Primary local store:
+- SQLite at `data/state/market_briefing.db` (default).
+
+State categories:
+- Delivery/idempotency state
+- Session snapshots/history
+- Provider health logs
+- Portfolio and policy configuration
+- Analytics snapshots (risk/simulation/attribution/etc.)
+- Preference overrides and profile-derived settings
+
+Persistence philosophy:
+- Deterministic local-first state
+- Append-only where historical audits matter
+- Replay/testing isolation to avoid contaminating live operational records
+
+---
+
+## Security and Secret Hygiene
+
+Secret management expectations:
+- Keep secrets in `.env` or host secret manager.
+- Never commit real keys.
+- Redaction is defense-in-depth, not permission to expose keys.
+
+If exposure occurs:
+1. Rotate the credential.
+2. Replace in `.env` / deployment secret store.
+3. Restart impacted process(es).
+4. Verify no new leaked key appears in logs.
+
+---
+
+## Known Limitations (Current)
+
+- Exchange holidays and half-days are not fully modeled in market clock logic yet.
+- Some optional providers can degrade due to rate limits or plan restrictions.
+- Historical point-in-time replay fidelity depends on stored snapshots and available data history.
+- Non-core data paths may still need periodic copy/shaping tuning as new modules are added.
+
+These are expected and tracked; the system is designed to degrade gracefully.
+
+---
+
+## Recommended “Gold Path” Daily Operation
+
+1. Keep scheduler running on an always-on host.
+2. Check `schedule-status` once per day.
+3. Review `daily-summary` and `delivery-log` for confirmation and anomaly spotting.
+4. Use `session-audit` for incremental/freshness diagnosis without burning provider budget.
+5. Use `day-replay` for manual end-to-end QA before major prompt/stack changes.
+6. Keep snapshots enabled with sensible retention for operational forensics.
 
 ---
 
