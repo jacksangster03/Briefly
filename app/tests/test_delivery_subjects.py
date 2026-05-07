@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
+from app.db.models import SentMessage, SessionSendState
+from app.db.session import get_session
 
 
 def _make_briefing(
@@ -244,3 +246,45 @@ class TestDeliveryLogCli:
         result = runner.invoke(cli, ["delivery-log", "--date", "today"])
         assert "Delivery Log" in result.output
         assert "Europe/Madrid" in result.output
+
+
+def test_delivery_log_includes_subject_and_hash_columns(validation_isolated_db):
+    from click.testing import CliRunner
+    from app.cli import cli
+
+    sent_at = datetime(2026, 5, 7, 14, 25, tzinfo=timezone.utc)
+    with get_session() as db:
+        db.add(
+            SessionSendState(
+                profile_name="default_user",
+                channel="email",
+                session_key="us_intraday_risk",
+                local_date=date(2026, 5, 7),
+                replay_namespace="",
+                message_type="session_brief:us_intraday_risk",
+                idempotency_key="k",
+                success=True,
+                in_progress=False,
+                command_source="scheduler",
+                sent_at=sent_at,
+                updated_at=sent_at,
+            )
+        )
+        db.add(
+            SentMessage(
+                message_type="session_brief:us_intraday_risk",
+                channel="email",
+                content_preview="US Intraday Risk Check\nBody",
+                content_hash="abc123def4567890",
+                sent_at=sent_at,
+                success=True,
+            )
+        )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["delivery-log", "--date", "2026-05-07"])
+    assert result.exit_code == 0, result.output
+    assert "Subject" in result.output
+    assert "Hash" in result.output
+    assert "US Intraday Risk Check" in result.output
+    assert "abc123def4567890" in result.output

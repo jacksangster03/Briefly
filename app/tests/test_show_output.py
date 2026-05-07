@@ -264,3 +264,23 @@ def test_preflight_flags_missing_openai_key_when_llm_enabled(monkeypatch):
     assert result.exit_code == 0, result.output
     assert "[FAIL] OpenAI key" in result.output
     assert "result: FAIL" in result.output
+
+
+def test_preflight_warns_when_sender_equals_recipient(monkeypatch):
+    from app import cli as cli_module
+
+    real_get_settings = cli_module.get_settings
+
+    def _fake_get_settings():
+        settings = real_get_settings()
+        settings.email_user = "same@gmail.com"
+        settings.email_to = "same@gmail.com"
+        settings.email_password = "x"
+        settings.dry_run = False
+        return settings
+
+    monkeypatch.setattr(cli_module, "get_settings", _fake_get_settings)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["preflight"])
+    assert result.exit_code == 0, result.output
+    assert "Gmail may show Sent + Inbox copies in one thread" in result.output

@@ -696,12 +696,25 @@ def preflight(ctx):
         click.echo(f"  [{status}] {label}: {detail}")
 
     warnings: list[str] = []
+    sender_addr = (settings.email_user or "").strip().lower()
+    recipients = {
+        addr.strip().lower()
+        for addr in (settings.email_to or "").replace(";", ",").split(",")
+        if addr.strip()
+    }
     if llm_enabled and not settings.llm_render_shadow_mode and not settings.dry_run:
         warnings.append("LLM live mode is enabled. Use shadow mode first for 3-5 inspected runs.")
     if settings.normalized_delivery_channel == "telegram" and llm_enabled:
         warnings.append("LLM render is email-first; telegram-only runs will not exercise LLM output.")
     if settings.normalized_delivery_channel == "email" and not settings.email_configured and not settings.dry_run:
         warnings.append("Email-only live delivery requested but email credentials are not configured.")
+    if sender_addr and sender_addr in recipients:
+        warnings.append(
+            "Gmail may show Sent + Inbox copies in one thread; this is not necessarily a duplicate send."
+        )
+        warnings.append(
+            "Recommendation: use a dedicated sender account (for example briefly.bot@gmail.com)."
+        )
 
     if warnings:
         click.echo("")
@@ -1696,13 +1709,14 @@ def llm_usage_list(profile_name: str, days: int, limit: int):
 @click.option("--profile", "profile_name", default="default_user", help="Profile name")
 @click.pass_context
 def delivery_log(ctx, target_date: str, profile_name: str) -> None:
-    """Show delivery history for a date: session, channel, source, times, success."""
+    """Show delivery history for a date: session, channel, subject, source, sent time, hash, success."""
     from app.main import get_session
-    from app.db.models import SessionSendState
+    from app.db.models import SentMessage, SessionSendState
     from app.personalization.user_profile import load_user_profile
     from datetime import date as _date, datetime as _dt, timedelta
     from datetime import timezone
     from zoneinfo import ZoneInfo
+    import re
 
     settings = ctx.obj["settings"]
     init_db()
@@ -1736,26 +1750,76 @@ def delivery_log(ctx, target_date: str, profile_name: str) -> None:
             .order_by(SessionSendState.sent_at)
             .all()
         )
+        sent_rows = (
+            db.query(SentMessage)
+            .filter(
+                SentMessage.message_type.like("session_brief:%"),
+                SentMessage.sent_at.isnot(None),
+            )
+            .order_by(SentMessage.sent_at.asc())
+            .all()
+        )
 
     if not rows:
         print("  No delivery records found for this date.")
         return
 
     from app.briefing.session_metadata import label_for
+    html_re = re.compile(r"<[^>]+>")
 
-    print(f"  {'Session':<28} {'Channel':<10} {'Source':<12} {'Sent at':<8} {'OK':<5} {'Namespace'}")
-    print("  " + "-" * 80)
+    # Build a lightweight lookup between session_send_state and sent_messages.
+    # We match by channel + canonical message_type + close send timestamps.
+    sent_lookup: dict[int, SentMessage] = {}
+    for row in rows:
+        if row.sent_at is None:
+            continue
+        best: SentMessage | None = None
+        best_delta: float | None = None
+        for sent in sent_rows:
+            if sent.channel != row.channel:
+                continue
+            if sent.message_type != row.message_type:
+                continue
+            if sent.sent_at is None:
+                continue
+            delta = abs((sent.sent_at - row.sent_at).total_seconds())
+            if delta > 180:
+                continue
+            if best is None or (best_delta is not None and delta < best_delta):
+                best = sent
+                best_delta = delta
+        if best is not None:
+            sent_lookup[row.id] = best
+    print(
+        f"  {'Session':<24} {'Channel':<8} {'Subject':<38} {'Source':<10} "
+        f"{'Sent at local':<18} {'Hash':<16} {'OK':<5}"
+    )
+    print("  " + "-" * 132)
     for r in rows:
         label = label_for(r.session_key)
+        session_label = f"{label} ({r.session_key})"
         sent_str = ""
         if r.sent_at:
             sent_utc = r.sent_at.replace(tzinfo=timezone.utc)
             sent_local = sent_utc.astimezone(tz)
-            sent_str = sent_local.strftime("%H:%M")
+            sent_str = sent_local.strftime("%Y-%m-%d %H:%M")
         ok = "✓" if r.success else "✗"
-        ns = r.replay_namespace or "live"
         src = r.command_source or "?"
-        print(f"  {label:<28} {r.channel:<10} {src:<12} {sent_str:<8} {ok:<5} {ns}")
+        sent_row = sent_lookup.get(r.id)
+        content_hash = (sent_row.content_hash if sent_row else "") or "-"
+        subject = "-"
+        if sent_row and sent_row.content_preview:
+            stripped = html_re.sub("", sent_row.content_preview)
+            first_line = next((line.strip() for line in stripped.splitlines() if line.strip()), "")
+            subject = first_line or "-"
+        if subject == "-":
+            subject = label
+        if len(subject) > 38:
+            subject = subject[:35] + "..."
+        print(
+            f"  {session_label:<24} {r.channel:<8} {subject:<38} {src:<10} "
+            f"{sent_str:<18} {content_hash:<16} {ok:<5}"
+        )
     print()
 
 

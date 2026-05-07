@@ -585,7 +585,7 @@ See [docs/roadmap.md](docs/roadmap.md) for the full phase-by-phase development h
 
 ## Troubleshooting
 
-**Multiple emails arriving close together.** The most likely causes are: `day-replay` sent one message per session in quick succession, or `catch-up`/`backfill` sent several sessions at once. Check `delivery-log` to see the source (`cli:day-replay`, `cli:catch-up`, etc.). Gmail may also thread similar messages into one conversation.
+**Multiple emails arriving close together.** The most likely causes are: `day-replay` sent one message per session in quick succession, or `catch-up`/`backfill` sent several sessions at once. Check `delivery-log` to see the source (`cli:day-replay`, `cli:catch-up`, etc.). If SMTP sender and recipient are the same Gmail account, Gmail can show both the Sent copy and received Inbox copy in one conversation thread. This is not necessarily a duplicate send. If possible, use a dedicated sender mailbox (for example `briefly.bot@gmail.com`) and a separate recipient mailbox for operational clarity.
 
 **Missed a session.** Run `schedule-status` to confirm the scheduler is running and check its lock status. Run `daily-summary` to see what was and was not sent. Run `delivery-log` for exact records. Check `logs/` for scheduler errors.
 

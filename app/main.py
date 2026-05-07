@@ -962,7 +962,18 @@ def run_morning_briefing(
         _send_telegram_chart_preview(messenger, briefing.chart_assets, settings)
     canonical_session_key = briefing.session_key or session_key
     delivery_msg_type = canonical_session_message_key(canonical_session_key)
-    idempotency_date = backfill_context.session_date if backfill_context is not None else local_now.date()
+    if backfill_context is not None:
+        idempotency_date = backfill_context.session_date
+    else:
+        tz_name = profile.timezone or settings.timezone or "Europe/Madrid"
+        try:
+            local_tz = ZoneInfo(tz_name)
+        except Exception:
+            local_tz = ZoneInfo("Europe/Madrid")
+        generated_at = briefing.generated_at
+        if generated_at.tzinfo is None:
+            generated_at = generated_at.replace(tzinfo=timezone.utc)
+        idempotency_date = generated_at.astimezone(local_tz).date()
     session_delivery_context = SessionDeliveryContext(
         profile_name=profile.name,
         session_key=canonical_session_key,
