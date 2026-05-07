@@ -1114,7 +1114,7 @@ def schedule_status(ctx, profile_name: str):
     from zoneinfo import ZoneInfo
 
     from app.briefing.session_routing import next_session_window, resolve_session_window
-    from app.db.models import SessionSendState
+    from app.db.models import ProviderHealthLog, SessionSendState
     from app.db.session import get_session, init_db
     from app.main import _allowed_sessions_for_mode
     from app.personalization.user_profile import load_user_profile
@@ -1189,6 +1189,32 @@ def schedule_status(ctx, profile_name: str):
         click.echo("  WARNING: Do not also run CLI brief/morning manually or start a second")
         click.echo("           service instance — duplicate sends can occur if two processes")
         click.echo("           race the idempotency window. Use --force only for recovery.")
+    click.echo("")
+    click.echo("  Provider health (latest)")
+    provider_names = ["fmp_news", "mediastack", "gdelt", "finnhub", "fred", "newsapi"]
+    with get_session() as db_sess:
+        for provider in provider_names:
+            row = (
+                db_sess.query(ProviderHealthLog)
+                .filter(ProviderHealthLog.provider == provider)
+                .order_by(ProviderHealthLog.timestamp.desc())
+                .first()
+            )
+            if row is None:
+                click.echo(f"    {provider}: no recent data")
+                continue
+            status = "ok" if row.success else "degraded"
+            detail = (row.error_message or "").lower()
+            if "unauthorized" in detail or row.status_code == 401:
+                status = "unauthorized / disabled"
+            elif "rate_limited" in detail or row.status_code == 429:
+                status = "rate-limited / budget exhausted"
+            elif "circuit breaker open" in detail:
+                status = "circuit open"
+            elif "timeout" in detail:
+                status = "timeout"
+            click.echo(f"    {provider}: {status}")
+
     click.echo("")
     click.echo("  Session schedule (all times local)")
     click.echo(f"  {'Key':<22} {'Label':<32} {'Window':<14} {'Focus'}")
@@ -1283,14 +1309,21 @@ def daily_summary(ctx, target_date: str, profile_name: str):
 @cli.command("session-audit")
 @click.option("--date", "target_date", default="today", show_default=True, help="Date: today | yesterday | YYYY-MM-DD.")
 @click.option("--profile", "profile_name", default="default_user", show_default=True, help="Profile name.")
+@click.option(
+    "--live-check",
+    is_flag=True,
+    default=False,
+    help="Regenerate provider-backed diagnostics (may call market/news providers).",
+)
 @click.pass_context
-def session_audit(ctx, target_date: str, profile_name: str):
+def session_audit(ctx, target_date: str, profile_name: str, live_check: bool):
     """Audit incremental session behavior, freshness basis, and section modes."""
     from app.main import run_session_audit
     report = run_session_audit(
         ctx.obj["settings"],
         target_date_str=target_date,
         profile_name=profile_name,
+        live_check=live_check,
     )
     click.echo(report)
 

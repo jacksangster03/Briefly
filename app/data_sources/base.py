@@ -6,6 +6,7 @@ import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 import requests
 
@@ -14,6 +15,33 @@ from app.db.models import ProviderHealthLog
 from app.logger import get_logger
 
 logger = get_logger("providers")
+
+_SECRET_QUERY_KEYS = {"api_key", "apikey", "access_key", "token", "key", "authorization"}
+
+
+def redact_url_secrets(url: str) -> str:
+    try:
+        parts = urlsplit(url)
+        if not parts.query:
+            return url
+        pairs = parse_qsl(parts.query, keep_blank_values=True)
+        redacted = []
+        for k, v in pairs:
+            if k.lower() in _SECRET_QUERY_KEYS:
+                redacted.append((k, "***"))
+            else:
+                redacted.append((k, v))
+        return urlunsplit(
+            (
+                parts.scheme,
+                parts.netloc,
+                parts.path,
+                urlencode(redacted, quote_via=quote, safe="*"),
+                parts.fragment,
+            )
+        )
+    except Exception:
+        return url
 
 
 class ProviderError(Exception):
@@ -72,6 +100,10 @@ class _ProviderCircuitBreaker:
         cls._state.pop(name, None)
 
     @classmethod
+    def record_unauthorized(cls, name: str) -> None:
+        cls._state[name] = (time.monotonic(), cls.TRIP_AFTER_FAILURES)
+
+    @classmethod
     def reset(cls, name: str | None = None) -> None:
         if name is None:
             cls._state.clear()
@@ -116,13 +148,14 @@ class BaseProvider(ABC):
         json: dict | None = None,
         **kwargs,
     ) -> Any:
+        redacted_url = redact_url_secrets(url)
         if _ProviderCircuitBreaker.is_open(self.name):
             logger.info(
                 "%s circuit breaker open; skipping %s without network call",
-                self.name, url,
+                self.name, redacted_url,
             )
             raise ProviderError(
-                f"{self.name} circuit breaker open; skipping {url}"
+                f"{self.name} circuit breaker open; skipping {redacted_url}"
             )
 
         last_exc = None
@@ -145,14 +178,23 @@ class BaseProvider(ABC):
                     wait = min(2 ** attempt, 10)
                     logger.warning(
                         "%s rate-limited on %s, waiting %ds (attempt %d/%d)",
-                        self.name, url, wait, attempt, self.max_retries,
+                        self.name, redacted_url, wait, attempt, self.max_retries,
                     )
-                    self._log_health(url, latency_ms, status_code, False, "rate_limited")
+                    self._log_health(redacted_url, latency_ms, status_code, False, "rate_limited")
                     time.sleep(wait)
                     continue
 
+                if resp.status_code == 401:
+                    logger.warning(
+                        "%s unauthorized on %s; disabling provider for cooldown window",
+                        self.name, redacted_url,
+                    )
+                    self._log_health(redacted_url, latency_ms, status_code, False, "unauthorized")
+                    _ProviderCircuitBreaker.record_unauthorized(self.name)
+                    raise ProviderError(f"{self.name} unauthorized on {redacted_url}")
+
                 resp.raise_for_status()
-                self._log_health(url, latency_ms, status_code, True)
+                self._log_health(redacted_url, latency_ms, status_code, True)
                 _ProviderCircuitBreaker.record_success(self.name)
                 return resp.json()
 
@@ -160,23 +202,23 @@ class BaseProvider(ABC):
                 latency_ms = int((time.monotonic() - start) * 1000)
                 logger.warning(
                     "%s timeout on %s (attempt %d/%d)",
-                    self.name, url, attempt, self.max_retries,
+                    self.name, redacted_url, attempt, self.max_retries,
                 )
-                self._log_health(url, latency_ms, status_code, False, "timeout")
+                self._log_health(redacted_url, latency_ms, status_code, False, "timeout")
                 last_exc = exc
 
             except requests.exceptions.RequestException as exc:
                 latency_ms = int((time.monotonic() - start) * 1000)
                 logger.warning(
                     "%s error on %s: %s (attempt %d/%d)",
-                    self.name, url, exc, attempt, self.max_retries,
+                    self.name, redacted_url, exc, attempt, self.max_retries,
                 )
-                self._log_health(url, latency_ms, status_code, False, str(exc)[:500])
+                self._log_health(redacted_url, latency_ms, status_code, False, str(exc)[:500])
                 last_exc = exc
 
         _ProviderCircuitBreaker.record_failure(self.name)
         raise ProviderError(
-            f"{self.name} failed after {self.max_retries} attempts on {url}: {last_exc}"
+            f"{self.name} failed after {self.max_retries} attempts on {redacted_url}: {last_exc}"
         )
 
     def _log_health(

@@ -37,7 +37,8 @@ from app.schemas.delivery import EmailRenderResult
 from app.briefing.session_materiality import compute_materiality
 from app.briefing.session_routing import SESSION_WINDOWS, next_session_window, resolve_session_window, session_window_for_key
 from app.briefing.session_templates import get_session_template_for_profile
-from app.briefing.session_delta import split_events_against_previous_snapshot, split_news_since_previous
+from app.briefing.session_delta import previous_session_context, split_events_against_previous_snapshot, split_news_since_previous
+from app.briefing.session_snapshot_service import get_session_snapshot
 from app.briefing.session_snapshot import load_previous_snapshot, persist_snapshot, snapshot_metrics
 from app.cadence.engine import DecisionEngine
 from app.cadence.state_store import (
@@ -830,7 +831,12 @@ def run_morning_briefing(
         local_timezone=profile.timezone or settings.timezone,
     )
     local_now = decision_engine.cadence.now_local()
-    session_marker = _session_marker_key(session_key, local_now)
+    marker_date = _effective_session_local_date(
+        session_key=session_key,
+        generated_at=local_now.astimezone(timezone.utc),
+        timezone_name=profile.timezone or settings.timezone,
+    )
+    session_marker = f"session:{session_key}:{marker_date.isoformat()}"
     if respect_cadence:
         allowed = _allowed_sessions_for_mode(profile.session_mode)
         always_send = set(profile.always_send_sessions)
@@ -990,7 +996,11 @@ def run_morning_briefing(
         generated_at = briefing.generated_at
         if generated_at.tzinfo is None:
             generated_at = generated_at.replace(tzinfo=timezone.utc)
-        idempotency_date = generated_at.astimezone(local_tz).date()
+        idempotency_date = _effective_session_local_date(
+            session_key=canonical_session_key,
+            generated_at=generated_at,
+            timezone_name=str(local_tz.key) if hasattr(local_tz, "key") else (profile.timezone or settings.timezone),
+        )
     session_delivery_context = SessionDeliveryContext(
         profile_name=profile.name,
         session_key=canonical_session_key,
@@ -1069,7 +1079,7 @@ def run_morning_briefing(
             profile_name=profile.name,
             session_key=canonical_session_key,
             session_title=briefing.session_title or session_title,
-            local_date=local_now.date(),
+            local_date=idempotency_date,
             generated_at_str=local_now.strftime("%Y-%m-%d %H:%M"),
             timezone_name=profile.timezone or settings.timezone,
             channel_status=channel_status,
@@ -1082,7 +1092,7 @@ def run_morning_briefing(
             profile_name=profile.name,
             marker_key=session_marker,
             action_type=briefing.session_key,
-            local_date=local_now.date(),
+            local_date=idempotency_date,
             local_timezone=profile.timezone or settings.timezone,
             sent_at_local=local_now,
         )
@@ -1139,7 +1149,7 @@ def run_morning_briefing(
                 profile_name=profile.name,
                 session_key=canonical_session_key,
                 session_title=briefing.session_title or session_title,
-                local_date=local_now.date(),
+                local_date=idempotency_date,
                 generated_at_utc=datetime.now(timezone.utc),
                 timezone_name=profile.timezone or settings.timezone,
                 source_type=source_type_from_command_source(
@@ -1376,11 +1386,26 @@ def _session_send_status_summary(
     return "failed"
 
 
+def _effective_session_local_date(*, session_key: str, generated_at: datetime, timezone_name: str) -> date:
+    """Resolve the session date key used for idempotency and summaries.
+
+    Closing Wrap windows that execute shortly after midnight are attributed to
+    the prior trading/session date so they do not block tonight's 22:00 wrap.
+    """
+    tz = ZoneInfo(timezone_name)
+    local_dt = generated_at.astimezone(tz) if generated_at.tzinfo else generated_at.replace(tzinfo=tz)
+    local_date = local_dt.date()
+    if (session_key or "").strip().lower() == "closing_wrap" and local_dt.time() < time(6, 0):
+        return local_date - timedelta(days=1)
+    return local_date
+
+
 def run_session_audit(
     settings: Settings | None = None,
     *,
     target_date_str: str = "today",
     profile_name: str = "default_user",
+    live_check: bool = False,
 ) -> str:
     """Deterministic session audit for freshness + incremental behavior."""
     settings = settings or get_settings()
@@ -1397,50 +1422,89 @@ def run_session_audit(
         from datetime import date as _date
         target_date = _date.fromisoformat(target_date_str)
 
-    universe = load_sector_universe(settings)
-    market_svc, news_svc, macro_svc = _build_services(settings)
-    generator = MorningBriefingGenerator(
-        settings=settings,
-        profile=profile,
-        universe=universe,
-        market_data=market_svc,
-        news_data=news_svc,
-        macro_data=macro_svc,
-    )
     template_name, sessions = get_session_template_for_profile(profile)
+    mode_label = "provider-backed live-check" if live_check else "local-only | no provider calls"
     lines: list[str] = [
-        f"SESSION AUDIT | {target_date.isoformat()} | profile={profile_name} | tz={profile.timezone}",
+        f"SESSION AUDIT | {mode_label}",
+        f"date={target_date.isoformat()} | profile={profile_name} | tz={profile.timezone}",
         f"template={template_name}",
         "",
     ]
+    with get_session() as db:
+        rows = (
+            db.query(SessionSendState)
+            .filter(
+                SessionSendState.profile_name == profile_name,
+                SessionSendState.local_date == target_date,
+                SessionSendState.replay_namespace == "",
+            )
+            .all()
+        )
+    state_map: dict[tuple[str, str], SessionSendState] = {(r.session_key, r.channel): r for r in rows}
+
+    if live_check:
+        universe = load_sector_universe(settings)
+        market_svc, news_svc, macro_svc = _build_services(settings)
+        generator = MorningBriefingGenerator(
+            settings=settings,
+            profile=profile,
+            universe=universe,
+            market_data=market_svc,
+            news_data=news_svc,
+            macro_data=macro_svc,
+        )
+
     for item in sessions:
         if target_date == now_local.date() and now_local.time() < item.window_start:
             continue
-        briefing = generator.generate(session_key=item.key, session_title=item.label)
-        local_date = target_date
-        delta = split_news_since_previous(
-            profile_name=profile.name,
+        previous_key, previous_label, previous_sent = previous_session_context(
+            profile_name=profile_name,
             session_key=item.key,
-            local_date=local_date,
+            local_date=target_date,
             timezone_name=profile.timezone,
-            events=briefing.global_news,
         )
-        new_themes, repeated_themes, carried_themes, prev_label = split_events_against_previous_snapshot(
-            profile_name=profile.name,
-            session_key=item.key,
-            local_date=local_date,
-            timezone_name=profile.timezone,
-            events=briefing.top_themes,
-        )
-        freshness_states = [str((briefing.quote_freshness or {}).get(k, {}).get("freshness_state", "")) for k in (briefing.quote_freshness or {}).keys()]
-        freshness_counts: dict[str, int] = {}
-        for state in freshness_states:
-            if not state:
-                continue
-            freshness_counts[state] = freshness_counts.get(state, 0) + 1
+        with get_session() as db:
+            snapshot = get_session_snapshot(profile_name, target_date, item.key)
+            previous_snapshot = get_session_snapshot(profile_name, target_date, previous_key) if previous_key else None
+        channel_state = {
+            "telegram": _session_channel_state(state_map.get((item.key, "telegram")), profile.timezone),
+            "email": _session_channel_state(state_map.get((item.key, "email")), profile.timezone),
+        }
+        freshness_counts = _snapshot_freshness_counts(snapshot)
+        news_counts = _snapshot_news_counts(snapshot, previous_snapshot)
         warnings: list[str] = []
-        if freshness_counts.get("stale", 0) and not any("stale" in line.lower() for line in (briefing.data_basis_lines or [])):
+        if not snapshot:
+            warnings.append("No snapshot stored; local-only audit cannot compute freshness/delta details.")
+        if freshness_counts.get("stale", 0) and not _snapshot_has_stale_label(snapshot):
             warnings.append("stale_data_without_basis_label")
+
+        if live_check:
+            briefing = generator.generate(session_key=item.key, session_title=item.label)
+            delta = split_news_since_previous(
+                profile_name=profile.name,
+                session_key=item.key,
+                local_date=target_date,
+                timezone_name=profile.timezone,
+                events=briefing.global_news,
+            )
+            new_themes, repeated_themes, carried_themes, prev_label = split_events_against_previous_snapshot(
+                profile_name=profile.name,
+                session_key=item.key,
+                local_date=target_date,
+                timezone_name=profile.timezone,
+                events=briefing.top_themes,
+            )
+            news_counts = {
+                "new": len(delta.new_news_items),
+                "repeated": len(delta.repeated_news_items),
+                "carried": len(delta.carried_forward_items),
+                "themes_new": len(new_themes),
+                "themes_repeated": len(repeated_themes),
+                "themes_carried": len(carried_themes),
+                "themes_prev": prev_label or "-",
+            }
+            freshness_counts = _freshness_counts_from_briefing(briefing)
+
         section_mode = {
             "what_changed": "incremental only" if item.key != "morning" else "full context by design",
             "market_snapshot": "mixed",
@@ -1452,12 +1516,14 @@ def run_session_audit(
             "earnings_calendar": "mixed",
         }
         lines.append(f"[{item.key}] {item.label} ({item.window_str})")
-        lines.append(f"  previous_session={delta.previous_session_key or 'none'} ({delta.previous_session_label or '-'})")
+        lines.append(f"  previous_session={previous_key or 'none'} ({previous_label or '-'}) sent_at={previous_sent or '-'}")
+        lines.append(f"  send_state={channel_state}")
+        lines.append(f"  snapshot={'yes' if snapshot else 'no'}")
         lines.append(
-            f"  news: new={len(delta.new_news_items)} repeated={len(delta.repeated_news_items)} carried={len(delta.carried_forward_items)}"
+            f"  news: new={news_counts.get('new', 'n/a')} repeated={news_counts.get('repeated', 'n/a')} carried={news_counts.get('carried', 'n/a')}"
         )
         lines.append(
-            f"  themes: new={len(new_themes)} repeated={len(repeated_themes)} carried={len(carried_themes)} prev={prev_label or '-'}"
+            f"  themes: new={news_counts.get('themes_new', 'n/a')} repeated={news_counts.get('themes_repeated', 'n/a')} carried={news_counts.get('themes_carried', 'n/a')} prev={news_counts.get('themes_prev', '-')}"
         )
         lines.append(f"  quote_basis={freshness_counts or {'unavailable': 0}}")
         lines.append(f"  sections={section_mode}")
@@ -1465,6 +1531,73 @@ def run_session_audit(
             lines.append(f"  warnings={warnings}")
         lines.append("")
     return "\n".join(lines)
+
+
+def _session_channel_state(row: SessionSendState | None, timezone_name: str) -> str:
+    if row is None:
+        return "not_attempted"
+    if row.success:
+        if row.sent_at:
+            sent_utc = row.sent_at.replace(tzinfo=timezone.utc)
+            sent_local = sent_utc.astimezone(ZoneInfo(timezone_name)).strftime("%H:%M")
+            return f"sent@{sent_local}"
+        return "sent"
+    if row.in_progress:
+        return "in_progress"
+    return "failed"
+
+
+def _snapshot_freshness_counts(snapshot: dict | None) -> dict[str, int]:
+    # Snapshot currently stores compact summaries, not per-quote freshness map.
+    # Return unknown unless future snapshots include quote freshness directly.
+    if not snapshot:
+        return {}
+    return {"unknown": 1}
+
+
+def _snapshot_news_counts(snapshot: dict | None, previous_snapshot: dict | None) -> dict[str, int | str]:
+    if not snapshot:
+        return {}
+    current_titles = _titles_from_snapshot(snapshot)
+    previous_titles = _titles_from_snapshot(previous_snapshot) if previous_snapshot else set()
+    if not current_titles:
+        return {"new": 0, "repeated": 0, "carried": 0}
+    new = len([t for t in current_titles if t not in previous_titles])
+    repeated = len(current_titles) - new
+    return {"new": new, "repeated": repeated, "carried": 0}
+
+
+def _titles_from_snapshot(snapshot: dict | None) -> set[str]:
+    titles: set[str] = set()
+    if not snapshot:
+        return titles
+    for row in snapshot.get("portfolio_summary", []) or []:
+        title = str((row or {}).get("title") or "").strip().lower()
+        if title:
+            titles.add(title)
+    text = str(snapshot.get("telegram_text") or "")
+    for line in text.splitlines():
+        raw = line.strip().lstrip("-•").strip().lower()
+        if len(raw) >= 16:
+            titles.add(raw)
+    return titles
+
+
+def _snapshot_has_stale_label(snapshot: dict | None) -> bool:
+    if not snapshot:
+        return False
+    text = (snapshot.get("telegram_text") or "").lower()
+    return "stale" in text or "prior close" in text
+
+
+def _freshness_counts_from_briefing(briefing) -> dict[str, int]:
+    freshness_states = [str((briefing.quote_freshness or {}).get(k, {}).get("freshness_state", "")) for k in (briefing.quote_freshness or {}).keys()]
+    counts: dict[str, int] = {}
+    for state in freshness_states:
+        if not state:
+            continue
+        counts[state] = counts.get(state, 0) + 1
+    return counts
 
 
 # -- Catch-up -----------------------------------------------------------------

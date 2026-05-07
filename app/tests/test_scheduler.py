@@ -11,6 +11,7 @@ from app.scheduler import (
     build_scheduler,
 )
 from app.settings import Settings
+from app.main import _effective_session_local_date
 
 
 def test_intraday_run_times_respect_end_minute():
@@ -305,3 +306,23 @@ class TestDuplicateSendGuard:
 
         _, kwargs = mock_cu.call_args
         assert kwargs["force_all"] is False, "startup catch-up must never force-resend already-sent sessions"
+
+
+def test_closing_wrap_2230_belongs_to_same_local_date():
+    dt = datetime(2026, 5, 7, 20, 30, tzinfo=timezone.utc)  # 22:30 CEST
+    d = _effective_session_local_date(
+        session_key="closing_wrap",
+        generated_at=dt,
+        timezone_name="Europe/Madrid",
+    )
+    assert d.isoformat() == "2026-05-07"
+
+
+def test_closing_wrap_0002_belongs_to_previous_local_date():
+    dt = datetime(2026, 5, 7, 22, 2, tzinfo=timezone.utc)  # 00:02 CEST on May 8
+    d = _effective_session_local_date(
+        session_key="closing_wrap",
+        generated_at=dt,
+        timezone_name="Europe/Madrid",
+    )
+    assert d.isoformat() == "2026-05-07"

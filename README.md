@@ -276,7 +276,17 @@ python -m app.cli llm-usage list --days 7 --limit 20
 # Channel and config readiness
 python -m app.cli preflight
 python -m app.cli status
+# Session incremental/freshness audit (local DB only, no provider calls)
+python -m app.cli session-audit --date today
+# Optional live regeneration check (will call providers)
+python -m app.cli session-audit --date today --live-check
 ```
+
+Operational notes:
+
+- `session-audit` is local-only by default. It reads local DB state/snapshots and does not call market/news/macro providers unless `--live-check` is explicitly set.
+- Closing Wrap catch-ups shortly after midnight are assigned to the prior session date to avoid blocking that day’s 22:00 Closing Wrap.
+- Provider URLs in logs are redacted for `api_key`, `apikey`, `access_key`, `token`, `key`, and related secret-like query params.
 
 ---
 
