@@ -72,6 +72,25 @@ def _seed_duplicate_rows():
                 updated_at=now,
             )
         )
+        db.add(
+            NewsClassifierLabel(
+                event_id="evt-dup-c",
+                headline="Labelled duplicate headline story",
+                summary="same",
+                source="newsapi",
+                domain="example.com",
+                deterministic_story_type="macro_policy",
+                deterministic_freshness_state="new",
+                deterministic_update_status="new",
+                deterministic_score=0.82,
+                session_key="us_intraday_risk",
+                local_date=date.today(),
+                manual_story_type="macro_policy",
+                label_source="manual",
+                created_at=now,
+                updated_at=now,
+            )
+        )
 
 
 def test_news_review_and_label_set(validation_isolated_db):
@@ -122,6 +141,16 @@ def test_news_review_dedupe_collapses_duplicates(validation_isolated_db):
     assert "sessions_seen=2" in out_dedupe.output
 
 
+def test_news_review_unlabelled_only(validation_isolated_db):
+    _seed_duplicate_rows()
+    runner = CliRunner()
+    out = runner.invoke(cli, ["news-review", "--date", "today", "--limit", "20", "--dedupe", "--unlabelled-only"])
+    assert out.exit_code == 0
+    assert "unlabelled_only=on" in out.output
+    assert "Duplicate headline story" in out.output
+    assert "Labelled duplicate headline story" not in out.output
+
+
 def test_news_label_quality_summary(validation_isolated_db):
     _seed_row()
     now = datetime.now(timezone.utc)
@@ -157,3 +186,13 @@ def test_news_label_quality_summary(validation_isolated_db):
     assert "stale_reprint_distribution=" in out.output
     assert "breaking_eligible_distribution=" in out.output
     assert "top_disagreement_candidates=1" in out.output
+
+
+def test_news_label_quality_dedupe_mode(validation_isolated_db):
+    _seed_duplicate_rows()
+    runner = CliRunner()
+    out = runner.invoke(cli, ["news-label-quality", "--to", "today", "--dedupe"])
+    assert out.exit_code == 0
+    assert "dedupe=on" in out.output
+    assert "total_rows=3" in out.output
+    assert "deduped_stories=2" in out.output

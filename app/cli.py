@@ -1339,8 +1339,9 @@ def session_audit(ctx, target_date: str, profile_name: str, live_check: bool, cl
 @click.option("--date", "target_date", default="today", show_default=True, help="Date: today | yesterday | YYYY-MM-DD.")
 @click.option("--limit", default=50, show_default=True, type=int, help="Max rows to show.")
 @click.option("--dedupe", is_flag=True, default=False, help="Collapse repeated story/headline rows into one representative row.")
+@click.option("--unlabelled-only", is_flag=True, default=False, help="Show only rows without manual labels.")
 @click.pass_context
-def news_review(ctx, target_date: str, limit: int, dedupe: bool):
+def news_review(ctx, target_date: str, limit: int, dedupe: bool, unlabelled_only: bool):
     """Print local news-classifier label rows for manual review."""
     from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
@@ -1375,9 +1376,25 @@ def news_review(ctx, target_date: str, limit: int, dedupe: bool):
             .all()
         ))
     if dedupe:
-        rows = dedupe_label_rows(rows)[: max(1, int(limit))]
+        rows = dedupe_label_rows(rows)
+    if unlabelled_only:
+        def _is_unlabelled(row) -> bool:
+            return not any(
+                [
+                    bool(getattr(row, "manual_story_type", "")),
+                    bool(getattr(row, "manual_suppression_reason", "")),
+                    getattr(row, "manual_breaking_eligible", None) is not None,
+                    bool(getattr(row, "manual_ticker_mismatch_risk", "")),
+                    bool(getattr(row, "manual_stale_reprint_risk", "")),
+                ]
+            )
+        rows = [r for r in rows if _is_unlabelled(r)]
+    rows = rows[: max(1, int(limit))]
 
-    click.echo(f"NEWS REVIEW | date={d.isoformat()} | rows={len(rows)} | dedupe={'on' if dedupe else 'off'}")
+    click.echo(
+        f"NEWS REVIEW | date={d.isoformat()} | rows={len(rows)} | dedupe={'on' if dedupe else 'off'} "
+        f"| unlabelled_only={'on' if unlabelled_only else 'off'}"
+    )
     if not rows:
         click.echo("No rows found. Run session-audit --live-check first.")
         return
@@ -1506,8 +1523,9 @@ def news_dataset_export(
 @click.option("--from", "from_date", default=None, help="Start date YYYY-MM-DD.")
 @click.option("--to", "to_date", default="today", show_default=True, help="End date: today|yesterday|YYYY-MM-DD.")
 @click.option("--limit-disagreements", default=10, show_default=True, type=int, help="Max disagreement candidates to print.")
+@click.option("--dedupe", is_flag=True, default=False, help="Compute coverage and distributions on deduped stories.")
 @click.pass_context
-def news_label_quality(ctx, from_date: str | None, to_date: str, limit_disagreements: int):
+def news_label_quality(ctx, from_date: str | None, to_date: str, limit_disagreements: int, dedupe: bool):
     """Summarize local ML label quality and coverage."""
     from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
@@ -1544,10 +1562,11 @@ def news_label_quality(ctx, from_date: str | None, to_date: str, limit_disagreem
             q = q.filter(NewsClassifierLabel.local_date <= d_to)
         rows = list(q.order_by(NewsClassifierLabel.updated_at.desc(), NewsClassifierLabel.id.desc()).all())
         deduped = dedupe_label_rows(rows)
+        stats_rows = deduped if dedupe else rows
 
         manual_count = sum(
             1
-            for r in rows
+            for r in stats_rows
             if any(
                 [
                     bool(r.manual_story_type),
@@ -1558,13 +1577,13 @@ def news_label_quality(ctx, from_date: str | None, to_date: str, limit_disagreem
                 ]
             )
         )
-        manual_pct = (manual_count / len(rows) * 100.0) if rows else 0.0
+        manual_pct = (manual_count / len(stats_rows) * 100.0) if stats_rows else 0.0
 
-        class_dist = Counter((r.deterministic_story_type or "unknown") for r in rows)
-        stale_reprint_dist = Counter((r.deterministic_freshness_state or "unknown") for r in rows)
+        class_dist = Counter((r.deterministic_story_type or "unknown") for r in stats_rows)
+        stale_reprint_dist = Counter((r.deterministic_freshness_state or "unknown") for r in stats_rows)
         breaking_dist = Counter(
             "true" if r.deterministic_breaking_eligible is True else ("false" if r.deterministic_breaking_eligible is False else "unknown")
-            for r in rows
+            for r in stats_rows
         )
 
         shadow_q = db.query(NewsClassifierShadowRun).filter(NewsClassifierShadowRun.agreement.is_(False))
@@ -1583,11 +1602,12 @@ def news_label_quality(ctx, from_date: str | None, to_date: str, limit_disagreem
 
     click.echo(
         "LABEL QUALITY SUMMARY | "
-        f"from={d_from.isoformat() if d_from else '-'} to={d_to.isoformat() if d_to else '-'}"
+        f"from={d_from.isoformat() if d_from else '-'} to={d_to.isoformat() if d_to else '-'} "
+        f"| dedupe={'on' if dedupe else 'off'}"
     )
     click.echo(f"total_rows={len(rows)}")
     click.echo(f"deduped_stories={len(deduped)}")
-    click.echo(f"manual_label_coverage={manual_count}/{len(rows)} ({manual_pct:.1f}%)")
+    click.echo(f"manual_label_coverage={manual_count}/{len(stats_rows)} ({manual_pct:.1f}%)")
     click.echo(f"class_distribution={dict(class_dist)}")
     click.echo(f"stale_reprint_distribution={dict(stale_reprint_dist)}")
     click.echo(f"breaking_eligible_distribution={dict(breaking_dist)}")
