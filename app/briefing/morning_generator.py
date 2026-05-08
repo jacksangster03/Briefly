@@ -485,6 +485,10 @@ class MorningBriefingGenerator:
             now=briefing.generated_at.astimezone(timezone.utc),
             breaking_max_age_hours=max(1, int(getattr(self.settings, "news_breaking_max_age_hours", 6))),
         )
+        try:
+            briefing.events_pool = scored  # audit-only visibility hook
+        except Exception:
+            pass
         briefing.events_after_dedup = len(scored)
         eligible = [event for event in scored if not event.already_sent and event.update_status == "new"]
         try:

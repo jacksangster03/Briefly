@@ -38,6 +38,7 @@ from app.briefing.session_materiality import compute_materiality
 from app.briefing.session_routing import SESSION_WINDOWS, next_session_window, resolve_session_window, session_window_for_key
 from app.briefing.session_templates import get_session_template_for_profile
 from app.briefing.session_delta import previous_session_context, split_events_against_previous_snapshot, split_news_since_previous
+from app.briefing.news_audit import build_classifier_audit, format_counts
 from app.briefing.session_snapshot_service import get_session_snapshot
 from app.briefing.session_snapshot import load_previous_snapshot, persist_snapshot, snapshot_metrics
 from app.cadence.engine import DecisionEngine
@@ -1406,6 +1407,7 @@ def run_session_audit(
     target_date_str: str = "today",
     profile_name: str = "default_user",
     live_check: bool = False,
+    classifier_details: bool = False,
 ) -> str:
     """Deterministic session audit for freshness + incremental behavior."""
     settings = settings or get_settings()
@@ -1505,21 +1507,21 @@ def run_session_audit(
             }
             freshness_counts = _freshness_counts_from_briefing(briefing)
             included = briefing.global_news + briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus
-            story_types: dict[str, int] = {}
-            for evt in included:
-                st = str((evt.raw_data or {}).get("news_story_type", "unknown"))
-                story_types[st] = story_types.get(st, 0) + 1
-            suppressed_low_signal = 0
-            rejected_breaking_stale = 0
-            for evt in (briefing.global_news + briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus):
-                reason = str((evt.raw_data or {}).get("news_suppress_reason", ""))
-                if reason:
-                    suppressed_low_signal += 1
-                if str((evt.raw_data or {}).get("breaking_rejected_reason", "")):
-                    rejected_breaking_stale += 1
-            news_counts["story_types"] = ", ".join(f"{k}:{v}" for k, v in sorted(story_types.items())) or "-"
-            news_counts["suppressed_low_signal"] = suppressed_low_signal
-            news_counts["rejected_stale_breaking"] = rejected_breaking_stale
+            candidate = getattr(briefing, "events_pool", None)
+            if not isinstance(candidate, list):
+                candidate = included
+            diagnostics = build_classifier_audit(
+                candidate_events=candidate,
+                included_events=included,
+                max_examples=3,
+            )
+            news_counts["story_type_counts"] = diagnostics.story_type_counts
+            news_counts["freshness_state_counts"] = diagnostics.freshness_state_counts
+            news_counts["update_status_counts"] = diagnostics.update_status_counts
+            news_counts["suppression_reason_counts"] = diagnostics.suppression_reason_counts
+            news_counts["included_examples"] = diagnostics.included_examples
+            news_counts["suppressed_examples"] = diagnostics.suppressed_examples
+            news_counts["breaking_rejected_examples"] = diagnostics.breaking_rejected_examples
 
         section_mode = {
             "what_changed": "incremental only" if item.key != "morning" else "full context by design",
@@ -1541,11 +1543,13 @@ def run_session_audit(
         lines.append(
             f"  themes: new={news_counts.get('themes_new', 'n/a')} repeated={news_counts.get('themes_repeated', 'n/a')} carried={news_counts.get('themes_carried', 'n/a')} prev={news_counts.get('themes_prev', '-')}"
         )
-        if news_counts.get("story_types") is not None:
-            lines.append(f"  story_types={news_counts.get('story_types')}")
-            lines.append(
-                f"  suppressed_low_signal={news_counts.get('suppressed_low_signal', 0)} stale_breaking_rejections={news_counts.get('rejected_stale_breaking', 0)}"
-            )
+        if news_counts.get("story_type_counts") is not None:
+            lines.append(f"  story_type_counts={format_counts(news_counts.get('story_type_counts', {}))}")
+            lines.append(f"  freshness_state_counts={format_counts(news_counts.get('freshness_state_counts', {}))}")
+            lines.append(f"  update_status_counts={format_counts(news_counts.get('update_status_counts', {}))}")
+            lines.append(f"  suppression_reason_counts={format_counts(news_counts.get('suppression_reason_counts', {}))}")
+            if classifier_details:
+                lines.extend(_format_classifier_examples(news_counts))
         lines.append(f"  quote_basis={freshness_counts or {'unavailable': 0}}")
         lines.append(f"  sections={section_mode}")
         if warnings:
@@ -1586,6 +1590,36 @@ def _snapshot_news_counts(snapshot: dict | None, previous_snapshot: dict | None)
     new = len([t for t in current_titles if t not in previous_titles])
     repeated = len(current_titles) - new
     return {"new": new, "repeated": repeated, "carried": 0}
+
+
+def _format_classifier_examples(news_counts: dict) -> list[str]:
+    lines: list[str] = []
+    included = news_counts.get("included_examples") or []
+    suppressed = news_counts.get("suppressed_examples") or []
+    rejected = news_counts.get("breaking_rejected_examples") or []
+
+    if included:
+        lines.append("  included_examples:")
+        for item in included[:3]:
+            lines.append(
+                f"    - {item.get('title', '')[:90]} | type={item.get('story_type')} "
+                f"freshness={item.get('freshness_state')} score={item.get('score')} conf={item.get('confidence')}"
+            )
+    if suppressed:
+        lines.append("  suppressed_examples:")
+        for item in suppressed[:3]:
+            lines.append(
+                f"    - {item.get('title', '')[:90]} | reason={item.get('suppress_reason')} "
+                f"type={item.get('story_type')} freshness={item.get('freshness_state')}"
+            )
+    if rejected:
+        lines.append("  breaking_rejected_examples:")
+        for item in rejected[:3]:
+            lines.append(
+                f"    - {item.get('title', '')[:90]} | reason={item.get('rejection_reason')} "
+                f"published={item.get('published_time')} first_seen={item.get('first_seen_time')} age={item.get('age')}"
+            )
+    return lines
 
 
 def _titles_from_snapshot(snapshot: dict | None) -> set[str]:

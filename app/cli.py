@@ -1315,8 +1315,14 @@ def daily_summary(ctx, target_date: str, profile_name: str):
     default=False,
     help="Regenerate provider-backed diagnostics (may call market/news providers).",
 )
+@click.option(
+    "--classifier-details",
+    is_flag=True,
+    default=False,
+    help="With --live-check, print compact classifier examples (included/suppressed/rejected).",
+)
 @click.pass_context
-def session_audit(ctx, target_date: str, profile_name: str, live_check: bool):
+def session_audit(ctx, target_date: str, profile_name: str, live_check: bool, classifier_details: bool):
     """Audit incremental session behavior, freshness basis, and section modes."""
     from app.main import run_session_audit
     report = run_session_audit(
@@ -1324,6 +1330,7 @@ def session_audit(ctx, target_date: str, profile_name: str, live_check: bool):
         target_date_str=target_date,
         profile_name=profile_name,
         live_check=live_check,
+        classifier_details=classifier_details,
     )
     click.echo(report)
 
