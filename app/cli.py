@@ -1335,6 +1335,154 @@ def session_audit(ctx, target_date: str, profile_name: str, live_check: bool, cl
     click.echo(report)
 
 
+@cli.command("news-review")
+@click.option("--date", "target_date", default="today", show_default=True, help="Date: today | yesterday | YYYY-MM-DD.")
+@click.option("--limit", default=50, show_default=True, type=int, help="Max rows to show.")
+@click.pass_context
+def news_review(ctx, target_date: str, limit: int):
+    """Print local news-classifier label rows for manual review."""
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    from app.db.models import NewsClassifierLabel
+    from app.db.session import get_session
+
+    init_db()
+    settings = ctx.obj["settings"]
+    tz = ZoneInfo(settings.timezone or "Europe/Madrid")
+    local_now = datetime.now(timezone.utc).astimezone(tz)
+    s = (target_date or "today").strip().lower()
+    if s == "today":
+        d = local_now.date()
+    elif s == "yesterday":
+        d = (local_now - timedelta(days=1)).date()
+    else:
+        from datetime import date as _date
+        d = _date.fromisoformat(s)
+
+    with get_session() as db:
+        rows = (
+            db.query(NewsClassifierLabel)
+            .filter(NewsClassifierLabel.local_date == d)
+            .order_by(
+                NewsClassifierLabel.included_in_briefing.desc(),
+                NewsClassifierLabel.sent_as_breaking.desc(),
+                NewsClassifierLabel.deterministic_score.desc(),
+                NewsClassifierLabel.updated_at.desc(),
+            )
+            .limit(max(1, int(limit)))
+            .all()
+        )
+
+    click.echo(f"NEWS REVIEW | date={d.isoformat()} | rows={len(rows)}")
+    if not rows:
+        click.echo("No rows found. Run session-audit --live-check first.")
+        return
+    for row in rows:
+        click.echo(
+            f"[{row.id}] {row.headline[:110]} | det={row.deterministic_story_type or '-'} "
+            f"fresh={row.deterministic_freshness_state or '-'} upd={row.deterministic_update_status or '-'} "
+            f"suppress={row.deterministic_suppression_reason or '-'} break={row.deterministic_breaking_eligible} "
+            f"manual={row.manual_story_type or '-'} label_source={row.label_source}"
+        )
+
+
+@cli.command("news-label-set")
+@click.option("--id", "row_id", required=True, type=int, help="news_classifier_labels row id.")
+@click.option("--story-type", default=None, help="Manual story type.")
+@click.option("--suppression-reason", default=None, help="Manual suppression reason.")
+@click.option("--breaking-eligible", default=None, type=click.Choice(["true", "false"], case_sensitive=False))
+@click.option("--ticker-mismatch-risk", default=None, type=click.Choice(["low", "medium", "high"], case_sensitive=False))
+@click.option("--stale-reprint-risk", default=None, type=click.Choice(["low", "medium", "high"], case_sensitive=False))
+@click.option("--notes", default=None, help="Optional notes.")
+@click.pass_context
+def news_label_set(
+    ctx,
+    row_id: int,
+    story_type: str | None,
+    suppression_reason: str | None,
+    breaking_eligible: str | None,
+    ticker_mismatch_risk: str | None,
+    stale_reprint_risk: str | None,
+    notes: str | None,
+):
+    """Set manual label fields on one news-classifier row."""
+    from app.db.models import NewsClassifierLabel
+    from app.db.session import get_session
+    from datetime import datetime, timezone
+
+    init_db()
+    with get_session() as db:
+        row = db.query(NewsClassifierLabel).filter(NewsClassifierLabel.id == int(row_id)).first()
+        if row is None:
+            raise click.ClickException(f"Row id {row_id} not found.")
+        changed = False
+        if story_type is not None:
+            row.manual_story_type = str(story_type).strip()
+            changed = True
+        if suppression_reason is not None:
+            row.manual_suppression_reason = str(suppression_reason).strip()
+            changed = True
+        if breaking_eligible is not None:
+            row.manual_breaking_eligible = str(breaking_eligible).strip().lower() == "true"
+            changed = True
+        if ticker_mismatch_risk is not None:
+            row.manual_ticker_mismatch_risk = str(ticker_mismatch_risk).strip().lower()
+            changed = True
+        if stale_reprint_risk is not None:
+            row.manual_stale_reprint_risk = str(stale_reprint_risk).strip().lower()
+            changed = True
+        if notes is not None:
+            row.notes = str(notes)
+            changed = True
+        if not changed:
+            raise click.ClickException("No fields provided to update.")
+        row.label_source = "manual"
+        row.updated_at = datetime.now(timezone.utc)
+    click.echo(f"Updated news label row {row_id}.")
+
+
+@cli.command("news-dataset-export")
+@click.option("--from", "from_date", default=None, help="Start date YYYY-MM-DD.")
+@click.option("--to", "to_date", default="today", show_default=True, help="End date: today|yesterday|YYYY-MM-DD.")
+@click.option("--output", "output_path", required=True, help="Output CSV path.")
+@click.option("--format", "output_format", default="csv", show_default=True, type=click.Choice(["csv"], case_sensitive=False))
+@click.pass_context
+def news_dataset_export(ctx, from_date: str | None, to_date: str, output_path: str, output_format: str):
+    """Export local news-classifier label dataset to CSV."""
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    from app.db.session import get_session
+    from app.ml.news_dataset import export_news_labels
+
+    init_db()
+    settings = ctx.obj["settings"]
+    tz = ZoneInfo(settings.timezone or "Europe/Madrid")
+    local_now = datetime.now(timezone.utc).astimezone(tz)
+
+    def _parse(value: str | None):
+        if not value:
+            return None
+        s = value.strip().lower()
+        if s == "today":
+            return local_now.date()
+        if s == "yesterday":
+            return (local_now - timedelta(days=1)).date()
+        from datetime import date as _date
+        return _date.fromisoformat(s)
+
+    d_from = _parse(from_date)
+    d_to = _parse(to_date)
+    with get_session() as db:
+        path = export_news_labels(
+            db,
+            output_path=output_path,
+            from_date=d_from,
+            to_date=d_to,
+            format=output_format,
+        )
+    click.echo(f"Exported news labels to {path}")
+
+
 @cli.group("snapshots")
 def snapshots_group():
     """Read and manage live session archive snapshots (Phase 8.9 Lite)."""

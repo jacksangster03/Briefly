@@ -49,3 +49,9 @@ configs/watchlists.yaml
 # Database backups (keep local, do not commit)
 backups/*.db
 backups/*.db-*
+
+# ML news classifier artifacts
+data/models/news_classifier/
+data/datasets/news_classifier/*.csv
+data/datasets/news_classifier/*.parquet
+data/datasets/news_classifier/*.jsonl

@@ -795,3 +795,63 @@ class LLMUsageLog(Base):
     total_tokens = Column(Integer, nullable=False, default=0)
     estimated_cost_usd = Column(Float, nullable=True)  # None when rates not configured
     created_at = Column(DateTime, default=_utcnow)
+
+
+class NewsClassifierLabel(Base):
+    """Local-first supervised label store for ML news classifier development."""
+
+    __tablename__ = "news_classifier_labels"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String(64), nullable=False, index=True)
+    headline = Column(Text, nullable=False, default="")
+    summary = Column(Text, nullable=False, default="")
+    source = Column(String(80), nullable=True, index=True)
+    domain = Column(String(160), nullable=True, index=True)
+    published_at = Column(DateTime, nullable=True, index=True)
+    first_seen_at = Column(DateTime, nullable=True, index=True)
+    tickers_json = Column(JSON, nullable=True)
+    sectors_json = Column(JSON, nullable=True)
+    deterministic_story_type = Column(String(80), nullable=True, index=True)
+    deterministic_suppression_reason = Column(String(120), nullable=True, index=True)
+    deterministic_breaking_eligible = Column(Boolean, nullable=True, index=True)
+    deterministic_freshness_state = Column(String(80), nullable=True, index=True)
+    deterministic_update_status = Column(String(80), nullable=True, index=True)
+    deterministic_score = Column(Float, nullable=True)
+    included_in_briefing = Column(Boolean, nullable=True, index=True)
+    sent_as_breaking = Column(Boolean, nullable=True, index=True)
+    session_key = Column(String(80), nullable=True, index=True)
+    local_date = Column(Date, nullable=True, index=True)
+    manual_story_type = Column(String(80), nullable=True, index=True)
+    manual_suppression_reason = Column(String(120), nullable=True, index=True)
+    manual_breaking_eligible = Column(Boolean, nullable=True, index=True)
+    manual_ticker_mismatch_risk = Column(String(40), nullable=True, index=True)
+    manual_stale_reprint_risk = Column(String(40), nullable=True, index=True)
+    label_source = Column(String(20), nullable=False, default="deterministic", index=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)
+    updated_at = Column(DateTime, default=_utcnow, index=True)
+
+
+class NewsClassifierShadowRun(Base):
+    """Shadow inference comparison rows for deterministic vs ML classifier."""
+
+    __tablename__ = "news_classifier_shadow_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(80), nullable=False, index=True)
+    event_id = Column(String(64), nullable=False, index=True)
+    session_key = Column(String(80), nullable=True, index=True)
+    local_date = Column(Date, nullable=True, index=True)
+    model_name = Column(String(120), nullable=True)
+    model_version = Column(String(80), nullable=True)
+    deterministic_story_type = Column(String(80), nullable=True, index=True)
+    ml_story_type = Column(String(80), nullable=True, index=True)
+    deterministic_suppression_reason = Column(String(120), nullable=True, index=True)
+    ml_suppression_reason = Column(String(120), nullable=True, index=True)
+    deterministic_breaking_eligible = Column(Boolean, nullable=True, index=True)
+    ml_breaking_eligible = Column(Boolean, nullable=True, index=True)
+    ml_confidence = Column(Float, nullable=True)
+    agreement = Column(Boolean, nullable=False, default=False, index=True)
+    disagreement_reason = Column(String(160), nullable=True, index=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)

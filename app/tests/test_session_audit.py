@@ -8,6 +8,8 @@ from app.main import run_session_audit
 from app.personalization.user_profile import UserProfile
 from app.schemas.events import NormalisedEvent
 from app.settings import Settings
+from app.db.models import NewsClassifierLabel
+from app.db.session import get_session
 
 
 def _profile() -> UserProfile:
@@ -143,6 +145,8 @@ def test_session_audit_live_check_prints_classifier_summary_counts(monkeypatch):
     assert "suppression_reason_counts=" in out
     assert "guidance_change:" in out
     assert "weak_etf_proxy:" in out
+    assert "dataset_rows_persisted=" in out
+    assert "ml_shadow_classifier=" in out
 
 
 def test_session_audit_classifier_details_flag_controls_examples(monkeypatch):
@@ -190,3 +194,31 @@ def test_session_audit_classifier_details_flag_controls_examples(monkeypatch):
     assert "included_examples:" in out_details
     assert "suppressed_examples:" in out_details
     assert "break_eligible=" in out_details
+
+
+def test_session_audit_live_check_persists_dataset_rows(validation_isolated_db, monkeypatch):
+    monkeypatch.setattr("app.main.load_user_profile", lambda *_args, **_kwargs: _profile())
+    monkeypatch.setattr("app.main.load_sector_universe", lambda *_a, **_k: MagicMock())
+    monkeypatch.setattr("app.main._build_services", lambda *_a, **_k: (MagicMock(), MagicMock(), MagicMock()))
+    fake_gen = MagicMock()
+    fake_briefing = MagicMock()
+    e = _classifier_event("Persisted row example", story_type="guidance_change", freshness="new")
+    fake_briefing.events_pool = [e]
+    fake_briefing.global_news = [e]
+    fake_briefing.top_themes = []
+    fake_briefing.watchlist_events = []
+    fake_briefing.portfolio_focus = []
+    fake_briefing.quote_freshness = {}
+    fake_gen.generate.return_value = fake_briefing
+    monkeypatch.setattr("app.main.MorningBriefingGenerator", lambda **_k: fake_gen)
+    monkeypatch.setattr(
+        "app.main.split_news_since_previous",
+        lambda **_k: MagicMock(new_news_items=[], repeated_news_items=[], carried_forward_items=[]),
+    )
+    monkeypatch.setattr("app.main.split_events_against_previous_snapshot", lambda **_k: ([], [], [], ""))
+
+    out = run_session_audit(Settings(), target_date_str="today", profile_name="default_user", live_check=True)
+    assert "dataset_rows_persisted=" in out
+    with get_session() as db:
+        rows = db.query(NewsClassifierLabel).all()
+        assert rows

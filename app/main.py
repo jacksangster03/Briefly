@@ -39,6 +39,8 @@ from app.briefing.session_routing import SESSION_WINDOWS, next_session_window, r
 from app.briefing.session_templates import get_session_template_for_profile
 from app.briefing.session_delta import previous_session_context, split_events_against_previous_snapshot, split_news_since_previous
 from app.briefing.news_audit import build_classifier_audit, format_counts
+from app.ml.news_classifier_shadow import classify_news_event_shadow, compare_deterministic_vs_ml, ml_news_classifier_enabled
+from app.ml.news_dataset import build_news_label_row, upsert_news_label_rows
 from app.briefing.session_snapshot_service import get_session_snapshot
 from app.briefing.session_snapshot import load_previous_snapshot, persist_snapshot, snapshot_metrics
 from app.cadence.engine import DecisionEngine
@@ -56,7 +58,7 @@ from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
 from app.db.models import BreakingStoryState
-from app.db.models import SentMessage, SessionSendState
+from app.db.models import NewsClassifierShadowRun, SentMessage, SessionSendState
 from app.db.session import get_session, init_db
 from app.logger import get_logger
 from app.healthcare.section_builder import filter_breaking_healthcare_events
@@ -1510,6 +1512,106 @@ def run_session_audit(
             candidate = getattr(briefing, "events_pool", None)
             if not isinstance(candidate, list):
                 candidate = included
+            # Persist deterministic label rows for local ML dataset foundation.
+            persisted_rows = 0
+            try:
+                rows = [
+                    build_news_label_row(
+                        evt,
+                        session_key=item.key,
+                        local_date=target_date,
+                        included_in_briefing=evt in included,
+                        sent_as_breaking=False,
+                    )
+                    for evt in candidate
+                ]
+                with get_session() as db:
+                    persisted_rows = upsert_news_label_rows(db, rows)
+            except Exception:
+                logger.debug("session-audit label persistence failed (non-fatal)", exc_info=True)
+            news_counts["dataset_rows_persisted"] = persisted_rows
+
+            ml_status = "disabled"
+            ml_summary = {
+                "evaluated": 0,
+                "agreement": 0,
+                "disagreement": 0,
+                "det_include_ml_suppress": 0,
+                "det_suppress_ml_include": 0,
+                "det_nonbreaking_ml_breaking": 0,
+                "examples": [],
+            }
+            if ml_news_classifier_enabled(settings):
+                ml_status = "active"
+            elif settings.enable_ml_news_classifier and not settings.ml_news_classifier_model_path:
+                ml_status = "skipped_missing_model"
+            elif settings.enable_ml_news_classifier:
+                ml_status = "skipped"
+            if settings.enable_ml_news_classifier and settings.ml_news_classifier_use_in_live:
+                warnings.append("ML_NEWS_CLASSIFIER_USE_IN_LIVE ignored in Phase 1 (audit-only).")
+
+            run_id = f"audit:{profile.name}:{target_date.isoformat()}:{item.key}"
+            shadow_rows: list[NewsClassifierShadowRun] = []
+            max_items = max(1, min(int(settings.ml_news_classifier_max_items or 100), len(candidate)))
+            for evt in candidate[:max_items]:
+                ml_result = classify_news_event_shadow(evt, settings)
+                cmp = compare_deterministic_vs_ml(evt, ml_result)
+                if cmp.get("agreement") is None:
+                    if ml_result and ml_result.unavailable_reason:
+                        ml_status = f"skipped ({ml_result.unavailable_reason})"
+                    continue
+                ml_summary["evaluated"] += 1
+                if cmp.get("agreement"):
+                    ml_summary["agreement"] += 1
+                else:
+                    ml_summary["disagreement"] += 1
+                    if len(ml_summary["examples"]) < 3:
+                        ml_summary["examples"].append(
+                            {
+                                "title": evt.title,
+                                "reason": cmp.get("disagreement_reason", ""),
+                                "det_story": cmp.get("deterministic_story_type", ""),
+                                "ml_story": cmp.get("ml_story_type", ""),
+                            }
+                        )
+                det_suppress = bool((evt.raw_data or {}).get("news_suppress_reason"))
+                ml_suppress = bool(cmp.get("ml_suppression_reason"))
+                if not det_suppress and ml_suppress:
+                    ml_summary["det_include_ml_suppress"] += 1
+                if det_suppress and not ml_suppress:
+                    ml_summary["det_suppress_ml_include"] += 1
+                if (not bool(cmp.get("deterministic_breaking_eligible"))) and bool(cmp.get("ml_breaking_eligible")):
+                    ml_summary["det_nonbreaking_ml_breaking"] += 1
+
+                shadow_rows.append(
+                    NewsClassifierShadowRun(
+                        run_id=run_id,
+                        event_id=str(evt.event_id or ""),
+                        session_key=item.key,
+                        local_date=target_date,
+                        model_name=str(cmp.get("model_name", "")),
+                        model_version=str(cmp.get("model_version", "")),
+                        deterministic_story_type=str(cmp.get("deterministic_story_type", "")),
+                        ml_story_type=str(cmp.get("ml_story_type", "")),
+                        deterministic_suppression_reason=str(cmp.get("deterministic_suppression_reason", "")),
+                        ml_suppression_reason=str(cmp.get("ml_suppression_reason", "")),
+                        deterministic_breaking_eligible=bool(cmp.get("deterministic_breaking_eligible")),
+                        ml_breaking_eligible=bool(cmp.get("ml_breaking_eligible")),
+                        ml_confidence=float(cmp.get("ml_confidence", 0.0) or 0.0),
+                        agreement=bool(cmp.get("agreement")),
+                        disagreement_reason=str(cmp.get("disagreement_reason", "")),
+                    )
+                )
+            if shadow_rows:
+                try:
+                    with get_session() as db:
+                        for row in shadow_rows:
+                            db.add(row)
+                except Exception:
+                    logger.debug("session-audit shadow-run persistence failed (non-fatal)", exc_info=True)
+            news_counts["ml_shadow_status"] = ml_status
+            news_counts["ml_shadow_summary"] = ml_summary
+
             diagnostics = build_classifier_audit(
                 candidate_events=candidate,
                 included_events=included,
@@ -1548,8 +1650,27 @@ def run_session_audit(
             lines.append(f"  freshness_state_counts={format_counts(news_counts.get('freshness_state_counts', {}))}")
             lines.append(f"  update_status_counts={format_counts(news_counts.get('update_status_counts', {}))}")
             lines.append(f"  suppression_reason_counts={format_counts(news_counts.get('suppression_reason_counts', {}))}")
+            lines.append(f"  dataset_rows_persisted={news_counts.get('dataset_rows_persisted', 0)}")
+            lines.append(f"  ml_shadow_classifier={news_counts.get('ml_shadow_status', 'disabled')}")
+            ml_sum = news_counts.get("ml_shadow_summary") or {}
+            if ml_sum:
+                lines.append(
+                    "  ml_shadow: "
+                    f"evaluated={ml_sum.get('evaluated', 0)} "
+                    f"agreement={ml_sum.get('agreement', 0)} "
+                    f"disagreement={ml_sum.get('disagreement', 0)} "
+                    f"det_include_ml_suppress={ml_sum.get('det_include_ml_suppress', 0)} "
+                    f"det_suppress_ml_include={ml_sum.get('det_suppress_ml_include', 0)} "
+                    f"det_nonbreaking_ml_breaking={ml_sum.get('det_nonbreaking_ml_breaking', 0)}"
+                )
             if classifier_details:
                 lines.extend(_format_classifier_examples(news_counts))
+                for item in (ml_sum.get("examples") or [])[:3]:
+                    lines.append(
+                        "  ml_disagreement_example: "
+                        f"{str(item.get('title', ''))[:90]} | reason={item.get('reason')} "
+                        f"det={item.get('det_story')} ml={item.get('ml_story')}"
+                    )
         lines.append(f"  quote_basis={freshness_counts or {'unavailable': 0}}")
         lines.append(f"  sections={section_mode}")
         if warnings:

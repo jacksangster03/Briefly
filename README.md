@@ -278,6 +278,48 @@ The Healthcare/Biotech vertical is optional (default off). When enabled, it adds
 
 The core decision system remains deterministic and rule-based; optional LLM support is non-authoritative and can be disabled with no behavior loss.
 
+### ML News Classifier Foundation (Phase 1)
+
+The machine-learning news classifier foundation is local-first and audit-only in Phase 1.
+
+- Deterministic classifier remains authoritative for all live behavior.
+- ML cannot trigger breaking alerts.
+- ML cannot suppress/include stories in live output.
+- Scheduler, idempotency, and delivery routing are unchanged.
+
+How to collect deterministic label rows:
+
+```bash
+python -m app.cli session-audit --date today --live-check --classifier-details
+```
+
+How to review local rows:
+
+```bash
+python -m app.cli news-review --date today --limit 50
+```
+
+How to apply manual labels:
+
+```bash
+python -m app.cli news-label-set --id 123 --story-type earnings_analysis
+python -m app.cli news-label-set --id 123 --breaking-eligible false
+python -m app.cli news-label-set --id 123 --suppression-reason no_direct_market_mechanism
+```
+
+How to export dataset:
+
+```bash
+python -m app.cli news-dataset-export --from 2026-05-01 --to today --output data/datasets/news_classifier/news_labels.csv
+```
+
+Model and dataset artifacts are local and gitignored:
+
+- `data/models/news_classifier/`
+- `data/datasets/news_classifier/*.csv`
+- `data/datasets/news_classifier/*.parquet`
+- `data/datasets/news_classifier/*.jsonl`
+
 ### Healthcare keys (simple setup)
 
 Use these free/public research sources first:

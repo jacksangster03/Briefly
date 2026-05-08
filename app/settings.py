@@ -139,6 +139,14 @@ class Settings(BaseSettings):
     llm_news_classifier_model: str = "gpt-4o-mini"
     llm_news_classifier_max_items_per_run: int = 8
     llm_news_classifier_monthly_budget_usd: float = 0.0
+    # -- Phase 1 local ML news classifier foundation -------------------------
+    enable_ml_news_classifier: bool = False
+    ml_news_classifier_shadow_mode: bool = True
+    ml_news_classifier_model_path: str = ""
+    ml_news_classifier_max_items: int = 100
+    ml_news_classifier_min_score: float = 0.70
+    ml_news_classifier_timeout_seconds: float = 2.0
+    ml_news_classifier_use_in_live: bool = False
 
     # -- Convenience helpers --------------------------------------------------
     @property
