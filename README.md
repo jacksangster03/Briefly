@@ -263,17 +263,6 @@ Low-signal suppression highlights:
 - generic ETF/proxy-only political polling stories are suppressed from portfolio-focused sections
 - weak ticker/company confidence items are suppressed or demoted before user-facing sections
 
-Optional LLM classifier (shadow-first):
-
-- Controlled by environment flags:
-  - `ENABLE_LLM_NEWS_CLASSIFIER`
-  - `LLM_NEWS_CLASSIFIER_SHADOW_MODE`
-  - `LLM_NEWS_CLASSIFIER_MODEL`
-  - `LLM_NEWS_CLASSIFIER_MAX_ITEMS_PER_RUN`
-  - `LLM_NEWS_CLASSIFIER_MONTHLY_BUDGET_USD`
-- LLM output is advisory and logged for comparison only in shadow mode.
-- Deterministic rules remain the final send/suppress authority.
-
 The Healthcare/Biotech vertical is optional (default off). When enabled, it adds high-signal pharma, biotech, regulatory, and manufacturing catalysts. Hard-anchor gating prevents generic AI, power, and radiology commentary from being misclassified as healthcare content.
 
 The core decision system remains deterministic and rule-based; optional LLM support is non-authoritative and can be disabled with no behavior loss.
