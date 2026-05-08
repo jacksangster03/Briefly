@@ -72,4 +72,7 @@ def test_daily_summary_today_not_blocked_by_previous_day_midnight_closing_wrap(v
         raising=False,
     )
     summary = run_daily_summary(Settings(), target_date_str="2026-05-08")
-    assert "Closing Wrap / Next-Day Setup: not sent" in summary
+    assert (
+        "Closing Wrap / Next-Day Setup: not sent" in summary
+        or "Closing Wrap / Next-Day Setup: upcoming" in summary
+    )

@@ -683,6 +683,11 @@ class MorningBriefingGenerator:
             previous=previous_snapshot,
             current=current_snapshot,
         )
+        if (briefing.session_key or "morning").lower() == "morning":
+            briefing.what_changed_header = "OVERNIGHT / PRIOR SESSION CHANGE"
+            # Morning is the broad-context pass: suppress generic placeholder noise.
+            if briefing.what_changed_lines == ["No prior comparable snapshot available."]:
+                briefing.what_changed_lines = []
         provider_health = self._provider_health_summary()
         if provider_health:
             briefing.data_freshness["Provider Health"] = provider_health
@@ -917,7 +922,14 @@ class MorningBriefingGenerator:
             ),
             preferred_symbols=preferred_symbols,
         )
-        return [self._apply_news_hygiene(evt, section="portfolio_watchlist_themes") for evt in themes]
+        cleaned: list[NormalisedEvent] = []
+        for evt in themes:
+            conf = event_company_confidence(evt)
+            if conf < 0.70 and evt.tickers:
+                # Low-confidence ticker/company mapping in Top Themes is usually noisy.
+                continue
+            cleaned.append(self._apply_news_hygiene(evt, section="portfolio_watchlist_themes"))
+        return cleaned
 
     def _build_global_news(
         self,

@@ -236,9 +236,14 @@ class EmailFormatter:
                 + "</div></td></tr>"
             )
         if change_lines:
+            change_header = "WHAT CHANGED"
+            if (briefing.session_key or "morning").lower() == "morning":
+                change_header = "OVERNIGHT / PRIOR SESSION CHANGE"
+            elif (briefing.what_changed_header or "").strip():
+                change_header = str(briefing.what_changed_header).strip()
             parts.append(
                 f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:8px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
-                f"<div style=\"font-size:10px;line-height:1.4;color:{_TEXT_MUTED};letter-spacing:0.05em;font-weight:800;\">WHAT CHANGED</div>"
+                f"<div style=\"font-size:10px;line-height:1.4;color:{_TEXT_MUTED};letter-spacing:0.05em;font-weight:800;\">{html.escape(change_header)}</div>"
                 f"<div style=\"margin-top:4px;font-size:11.5px;line-height:1.4;color:{_TEXT_SECONDARY};\">"
                 + "<br>".join(html.escape(line) for line in change_lines)
                 + "</div></td></tr>"
@@ -693,8 +698,14 @@ class EmailFormatter:
 
     @staticmethod
     def _what_changed_lines(briefing: MorningBriefing) -> list[str]:
+        key = (briefing.session_key or "morning").lower()
         if briefing.what_changed_lines:
-            return list(briefing.what_changed_lines)
+            lines = [str(line).strip() for line in briefing.what_changed_lines if str(line).strip()]
+            if key == "morning" and lines == ["No prior comparable snapshot available."]:
+                return []
+            return lines
+        if key == "morning":
+            return []
         if not briefing.regime_shift:
             return ["No prior comparable snapshot available."]
         lines: list[str] = []

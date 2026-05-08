@@ -214,10 +214,10 @@ class TestSessionRangeLabel:
         assert _session_range_label("closing_wrap") == "full session range"
 
     def test_preopen(self) -> None:
-        assert _session_range_label("us_pre_open") == "pre-market range"
+        assert _session_range_label("us_pre_open") == "pre-market proxy range"
 
     def test_unknown_fallback(self) -> None:
-        assert _session_range_label("unknown_session") == "range"
+        assert _session_range_label("unknown_session") == "provider day range"
 
 
 # ---------------------------------------------------------------------------
@@ -410,6 +410,23 @@ class TestComputeMoveContextSpec:
         # Without history, move label from static thresholds: 0.29 < 0.30 -> "Tiny gain"
         # That's fine — the spec says "small/Normal" with history, but without history is Tiny
         assert ctx.move_direction == "up"
+
+    def test_negative_only_range_avoids_near_session_highs_wording(self) -> None:
+        prev_close = 100.0
+        ctx = compute_move_context(
+            symbol="CL",
+            label="WTI",
+            asset_type=ASSET_TYPE_COMMODITY,
+            current_price=99.0,
+            change=-1.0,
+            change_percent=-1.0,
+            day_high=99.5,
+            day_low=95.0,
+            prev_close=prev_close,
+            session_mode="us_intraday_risk",
+        )
+        assert ctx.day_range_position_label != "near session highs"
+        assert ctx.day_range_position_label in {"off lows", "near top of negative range", "upper half", "mid-range", "lower half"}
 
     def test_gold_normal_gain_with_history(self) -> None:
         """Gold +0.29% with history where 0.29% is 30th pct -> 'Normal gain'."""

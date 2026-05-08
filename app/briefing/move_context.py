@@ -164,8 +164,9 @@ def _level_context_label(level_pct: float) -> str | None:
 _SESSION_RANGE_LABEL: dict[str, str] = {
     "morning": "prior session range",
     "europe_midday": "Europe session range",
-    "us_pre_open": "pre-market range",
-    "us_intraday_risk_check": "session range so far",
+    "us_pre_open": "pre-market proxy range",
+    "us_intraday_risk": "session range",
+    "us_intraday_risk_check": "session range",
     "into_close": "session range so far",
     "closing_wrap": "full session range",
     # weekends & fallback
@@ -173,7 +174,7 @@ _SESSION_RANGE_LABEL: dict[str, str] = {
     "sunday": "prior session range",
 }
 
-_DEFAULT_RANGE_LABEL = "range"
+_DEFAULT_RANGE_LABEL = "provider day range"
 
 
 def _session_range_label(session_mode: str) -> str:
@@ -321,6 +322,16 @@ def compute_move_context(
             range_span = dh - dl
             price_pos = _clamp((float(current_price) - dl) / range_span)
             day_range_position_label = _range_position_label(price_pos)
+            negative_only_range = (
+                effective_prev > 0
+                and dh <= effective_prev
+                and dl <= effective_prev
+            )
+            if negative_only_range:
+                if day_range_position_label == "near session highs":
+                    day_range_position_label = "off lows"
+                elif day_range_position_label == "upper half":
+                    day_range_position_label = "near top of negative range"
 
             # Validate range width
             low_move_pct_val = (dl / effective_prev - 1) * 100

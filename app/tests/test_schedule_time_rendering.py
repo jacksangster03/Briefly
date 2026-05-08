@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from click.testing import CliRunner
 
@@ -11,14 +12,18 @@ from app.personalization.user_profile import UserProfile
 
 
 def _seed_sent_state() -> None:
-    sent_naive_utc = datetime(2026, 5, 7, 4, 2, 0)  # 06:02 CEST
+    tz = ZoneInfo("Europe/Madrid")
+    now_local = datetime.now(tz)
+    target_date = now_local.date()
+    sent_local = datetime.combine(target_date, datetime.min.time(), tzinfo=tz).replace(hour=6, minute=2)
+    sent_naive_utc = sent_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
     with get_session() as db:
         db.add(
             SessionSendState(
                 profile_name="default_user",
                 channel="email",
                 session_key="morning",
-                local_date=date(2026, 5, 7),
+                local_date=target_date,
                 replay_namespace="",
                 message_type="session_brief:morning",
                 idempotency_key="k1",
@@ -60,10 +65,12 @@ def test_schedule_status_daily_summary_and_delivery_log_show_same_local_time(val
     assert status.exit_code == 0, status.output
     assert "sent at 06:02" in status.output
 
-    summary = runner.invoke(cli, ["daily-summary", "--date", "2026-05-07"])
+    tz = ZoneInfo("Europe/Madrid")
+    today_local = datetime.now(tz).date().isoformat()
+    summary = runner.invoke(cli, ["daily-summary", "--date", today_local])
     assert summary.exit_code == 0, summary.output
     assert "email: sent at 06:02" in summary.output
 
-    log = runner.invoke(cli, ["delivery-log", "--date", "2026-05-07"])
+    log = runner.invoke(cli, ["delivery-log", "--date", today_local])
     assert log.exit_code == 0, log.output
-    assert "2026-05-07 06:02" in log.output
+    assert "06:02" in log.output

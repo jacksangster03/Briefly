@@ -15,6 +15,8 @@ _METRIC_SYMBOLS = {
     "gold_pct": "__GOLD_PCT__",
     "us10y": "__US10Y__",
     "breadth_up_pct": "__BREADTH_UP_PCT__",
+    "breadth_up_count": "__BREADTH_UP_COUNT__",
+    "breadth_total_count": "__BREADTH_TOTAL_COUNT__",
     "us_avg_pct": "__US_AVG_PCT__",
     "eu_avg_pct": "__EU_AVG_PCT__",
     "asia_avg_pct": "__ASIA_AVG_PCT__",
@@ -68,6 +70,7 @@ def snapshot_metrics(briefing: MorningBriefing) -> dict[str, float]:
 
     sector_rows = list(briefing.market_setup.market_breadth or [])
     sector_up = sum(1 for row in sector_rows if float(row.change_percent or 0.0) > 0.0)
+    breadth_total = len(sector_rows) if sector_rows else None
     breadth_up_pct = (sector_up / len(sector_rows) * 100.0) if sector_rows else None
 
     index_quotes = briefing.market_setup.index_quotes or []
@@ -96,9 +99,11 @@ def snapshot_metrics(briefing: MorningBriefing) -> dict[str, float]:
         "gold_pct": _quote_move("GOLD"),
         "us10y": _quote_level("US10Y") or _quote_level("10Y US TREASURY YIELD"),
         "breadth_up_pct": breadth_up_pct,
-        "us_avg_pct": (sum(us) / len(us)) if us else 0.0,
-        "eu_avg_pct": (sum(eu) / len(eu)) if eu else 0.0,
-        "asia_avg_pct": (sum(asia) / len(asia)) if asia else 0.0,
+        "breadth_up_count": float(sector_up) if breadth_total is not None else None,
+        "breadth_total_count": float(breadth_total) if breadth_total is not None else None,
+        "us_avg_pct": (sum(us) / len(us)) if us else None,
+        "eu_avg_pct": (sum(eu) / len(eu)) if eu else None,
+        "asia_avg_pct": (sum(asia) / len(asia)) if asia else None,
         "portfolio_contrib_pct": total_contrib,
         "session_quality": float(briefing.session_quality_score or 0.0),
         "regime_code": regime_code,
@@ -193,7 +198,16 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
 
     magnitudes: list[float] = []
 
-    def _delta(name: str, key: str, suffix: str, scale: float = 1.0, is_rate: bool = False) -> None:
+    def _delta(
+        name: str,
+        key: str,
+        suffix: str,
+        scale: float = 1.0,
+        is_rate: bool = False,
+        *,
+        suppress_if_flat: bool = True,
+        strategic: bool = False,
+    ) -> None:
         cur_raw = current.get(key)
         prv_raw = previous.get(key)
         if cur_raw is None and prv_raw is None:
@@ -218,7 +232,9 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
             bp = round(d * 100)
             abs_bp = abs(bp)
             if abs_bp < 1:
-                qualifier = "flat"
+                if suppress_if_flat and not strategic:
+                    return
+                qualifier = "unchanged but still important" if strategic else "flat"
             elif abs_bp < 3:
                 qualifier = "little changed"
             else:
@@ -229,7 +245,9 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
 
         abs_d = abs(d)
         if abs_d < 0.05:
-            qualifier = "flat"
+            if suppress_if_flat and not strategic:
+                return
+            qualifier = "unchanged but still important" if strategic else "flat"
         elif abs_d < 0.25:
             qualifier = f"little changed ({d:+.2f}{suffix})"
         elif abs_d < 0.75:
@@ -240,12 +258,32 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
         magnitudes.append(abs_d)
         lines.append(f"{name}: {prv:.2f}{suffix} -> {cur:.2f}{suffix} ({qualifier})")
 
-    _delta("VIX", "vix_level", "")
-    _delta("WTI", "wti_pct", "%")
+    _delta("VIX", "vix_level", "", strategic=True, suppress_if_flat=False)
+    _delta("WTI", "wti_pct", "%", strategic=True, suppress_if_flat=False)
     _delta("Brent", "brent_pct", "%")
     _delta("Gold", "gold_pct", "%")
-    _delta("US 10Y", "us10y", "%", is_rate=True)
-    _delta("Sector breadth up", "breadth_up_pct", "%")
+    _delta("US 10Y", "us10y", "%", is_rate=True, suppress_if_flat=False, strategic=True)
+    # Humanized sector breadth count wording when counts are available.
+    prev_up = previous.get("breadth_up_count")
+    prev_total = previous.get("breadth_total_count")
+    cur_up = current.get("breadth_up_count")
+    cur_total = current.get("breadth_total_count")
+    if None not in (prev_up, prev_total, cur_up, cur_total) and float(cur_total) > 0 and float(prev_total) > 0:
+        pu = int(round(float(prev_up)))
+        pt = int(round(float(prev_total)))
+        cu = int(round(float(cur_up)))
+        ct = int(round(float(cur_total)))
+        if pu != cu or pt != ct:
+            prev_ratio = pu / max(1, pt)
+            cur_ratio = cu / max(1, ct)
+            state = "remains weak" if cur_ratio <= 0.40 else ("is mixed" if cur_ratio <= 0.60 else "is broadening")
+            direction = "improved" if cur_ratio > prev_ratio else "weakened"
+            lines.append(
+                f"Sector breadth: {direction} from {pu}/{pt} to {cu}/{ct} positive, but {state}."
+            )
+            magnitudes.append(abs(cur_ratio - prev_ratio))
+    else:
+        _delta("Sector breadth up", "breadth_up_pct", "%")
     _delta("US avg", "us_avg_pct", "%")
     _delta("Europe avg", "eu_avg_pct", "%")
     # Asia often remains unchanged during Europe/US sessions; only include on material delta.
@@ -255,7 +293,7 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
         last = lines[-1]
         if "(flat)" in last or "(little changed" in last:
             lines.pop()
-    _delta("Portfolio contribution", "portfolio_contrib_pct", "%")
+    _delta("Portfolio contribution", "portfolio_contrib_pct", "%", suppress_if_flat=False)
     if "watchlist_leader_pct" in current and "watchlist_laggard_pct" in current:
         cur_leader = float(current.get("watchlist_leader_pct"))
         cur_laggard = float(current.get("watchlist_laggard_pct"))
@@ -267,6 +305,12 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
             f"Watchlist leadership spread: {(cur_leader - cur_laggard):+.2f}pp "
             f"({spread_delta:+.2f}pp)"
         )
+    # Brent stale signal: unchanged Brent while WTI moved.
+    if "wti_pct" in current and "wti_pct" in previous and "brent_pct" in current and "brent_pct" in previous:
+        wti_delta = abs(float(current["wti_pct"]) - float(previous["wti_pct"]))
+        brent_delta = abs(float(current["brent_pct"]) - float(previous["brent_pct"]))
+        if wti_delta >= 0.25 and brent_delta < 0.01:
+            lines.append("Brent: unchanged while WTI moved; treat Brent as stale/provider-held context.")
     if magnitudes and max(magnitudes) < 0.05:
         return ["Little changed since prior session: cross-asset signals stable."]
     return lines[:8]

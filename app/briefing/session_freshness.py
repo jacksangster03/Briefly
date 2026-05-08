@@ -214,7 +214,9 @@ def build_data_basis_lines(
     tz = _safe_tz(timezone_name)
     stamp = _as_local(generated_at, tz).strftime("%H:%M %Z")
 
-    us_quotes = [q for q in index_quotes + watchlist_quotes if _is_us_equity_like(q)]
+    us_index_quotes = [q for q in index_quotes if _is_us_equity_like(q)]
+    us_watch_quotes = [q for q in watchlist_quotes if _is_us_equity_like(q)]
+    us_quotes = us_index_quotes + us_watch_quotes
     eu_quotes = [q for q in index_quotes if _is_europe_equity_like(q)]
     commodity_quotes = [q for q in macro_quotes if _is_commodity_like(q)]
 
@@ -230,7 +232,50 @@ def build_data_basis_lines(
         "Macro/FRED: latest official release",
     ]
     if session_key == "us_pre_open":
-        lines[0] = f"US equities: {us_basis} (pre-open context)"
+        us_cash_basis = _basis_for_group(
+            us_index_quotes, generated_at, session_key, timezone_name, fallback="unavailable"
+        )
+        us_proxy_basis = _basis_for_group(
+            us_watch_quotes, generated_at, session_key, timezone_name, fallback="unavailable"
+        )
+        lines[0] = (
+            f"US cash indices: {us_cash_basis} (pre-open context); "
+            f"US watchlist/pre-market proxies: {us_proxy_basis}"
+        )
+
+    if session_key in {"europe_midday", "us_pre_open"} and eu_basis.startswith(("prior close", "delayed", "stale")):
+        lines.append("Europe cash is open but provider quotes are prior close/delayed.")
+
+    # Brent stale/unchanged-provider note when WTI is updating but Brent is not.
+    wti_quote = next(
+        (q for q in macro_quotes if "WTI" in f"{q.display_name} {q.symbol}".upper() or "CRUDE" in f"{q.display_name} {q.symbol}".upper()),
+        None,
+    )
+    brent_quote = next(
+        (q for q in macro_quotes if "BRENT" in f"{q.display_name} {q.symbol}".upper()),
+        None,
+    )
+    if wti_quote is not None and brent_quote is not None:
+        wti_state = classify_quote_freshness(
+            quote=wti_quote,
+            generated_at=generated_at,
+            session_key=session_key,
+            timezone_name=timezone_name,
+        ).freshness_state
+        brent_meta = classify_quote_freshness(
+            quote=brent_quote,
+            generated_at=generated_at,
+            session_key=session_key,
+            timezone_name=timezone_name,
+        )
+        if wti_state in {FRESHNESS_NEAR_REAL_TIME, FRESHNESS_LIVE} and brent_meta.freshness_state in {
+            FRESHNESS_STALE,
+            FRESHNESS_PRIOR_CLOSE,
+            FRESHNESS_DELAYED,
+        }:
+            lines.append(
+                f"Brent is {brent_meta.display_prefix}; treating Brent as stale/prior-provider context."
+            )
     return lines
 
 

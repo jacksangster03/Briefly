@@ -962,6 +962,9 @@ class TelegramFormatter:
             )
             if summary:
                 parts.append(f"<i>{summary}</i>")
+            shown_quotes = quotes[:10]
+            if shown_quotes and all(self._freshness_short_label(quote=q, briefing=briefing) == "prior close" for q in shown_quotes):
+                parts.append("<i>All displayed watchlist moves are prior-close context (not live pre-market/intraday).</i>")
             freshness = self._format_quotes_freshness_summary(quotes, session_mode)
             if freshness:
                 parts.append(f"<i>{freshness}</i>")
@@ -990,6 +993,7 @@ class TelegramFormatter:
         sorted_quotes = sorted(quotes, key=lambda q: float(q.change_percent or 0.0), reverse=True)
         top = sorted_quotes[0]
         bottom = sorted_quotes[-1]
+        spread_pp = float(top.change_percent or 0.0) - float(bottom.change_percent or 0.0)
         positives = sum(1 for q in quotes if float(q.change_percent or 0.0) > 0.0)
         direction = "mostly green" if positives >= max(1, int(len(quotes) * 0.6)) else "mixed-to-red"
         catalyst = "no dominant catalyst yet"
@@ -1004,7 +1008,7 @@ class TelegramFormatter:
         return (
             f"Watchlist is {direction}; leaders: {(top.display_name or top.symbol)} {float(top.change_percent or 0.0):+.2f}% "
             f"vs laggard {(bottom.display_name or bottom.symbol)} {float(bottom.change_percent or 0.0):+.2f}%. "
-            f"Main catalyst: {catalyst}"
+            f"Dispersion: {spread_pp:.2f}pp. Main catalyst: {catalyst}"
         )
 
     def _best_catalyst_event(self, events: list[NormalisedEvent]) -> NormalisedEvent | None:
@@ -1086,14 +1090,22 @@ class TelegramFormatter:
         """Render intraday snapshot with exact levels + % change."""
         if not quotes:
             return ""
-        lines = [
-            format_compact_price_with_level(
-                self._friendly_instrument_label(q.display_name or q.symbol, q.symbol),
-                q.current_price,
-                q.change_percent,
+        lines: list[str] = []
+        for q in quotes:
+            label = self._friendly_instrument_label(q.display_name or q.symbol, q.symbol)
+            if is_treasury_yield_quote(q):
+                level = float(q.current_price or 0.0)
+                bp = int(round(float(q.change or 0.0) * 100))
+                bp_s = "flat" if bp == 0 else f"{bp:+d} bp"
+                lines.append(f"{label} {level:.2f}% ({bp_s})")
+                continue
+            lines.append(
+                format_compact_price_with_level(
+                    label,
+                    q.current_price,
+                    q.change_percent,
+                )
             )
-            for q in quotes
-        ]
         return " | ".join(lines)
 
     def _format_session_snapshot(self, briefing: MorningBriefing) -> str:

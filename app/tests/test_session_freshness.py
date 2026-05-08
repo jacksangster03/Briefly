@@ -86,4 +86,36 @@ def test_preopen_data_basis_labels_us_equities_prior_close():
         macro_quotes=[],
         watchlist_quotes=[_q("AMD", "AMD", quote_ts, 18.61)],
     )
+    assert any("us cash indices" in line.lower() for line in lines)
     assert any("prior close" in line.lower() for line in lines)
+
+
+def test_europe_open_prior_close_conflict_is_explicitly_labeled():
+    generated = datetime(2026, 5, 7, 9, 0, tzinfo=timezone.utc)  # 11:00 CEST Europe Midday
+    stale_eu = _q("^STOXX50E", "Euro Stoxx 50", datetime(2026, 5, 6, 20, 0, tzinfo=timezone.utc), -0.2)
+    lines = build_data_basis_lines(
+        session_key="europe_midday",
+        generated_at=generated,
+        timezone_name="Europe/Madrid",
+        index_quotes=[stale_eu],
+        macro_quotes=[],
+        watchlist_quotes=[],
+    )
+    assert any("europe cash is open but provider quotes are prior close/delayed" in line.lower() for line in lines)
+
+
+def test_us_preopen_does_not_claim_cash_indices_live_without_cash_updates():
+    generated = datetime(2026, 5, 7, 11, 30, tzinfo=timezone.utc)  # 13:30 CEST
+    spx_prior = _q("^GSPC", "S&P 500", datetime(2026, 5, 6, 20, 0, tzinfo=timezone.utc), 1.4)
+    amd_live = _q("AMD", "AMD", datetime(2026, 5, 7, 11, 25, tzinfo=timezone.utc), -1.2)
+    lines = build_data_basis_lines(
+        session_key="us_pre_open",
+        generated_at=generated,
+        timezone_name="Europe/Madrid",
+        index_quotes=[spx_prior],
+        macro_quotes=[],
+        watchlist_quotes=[amd_live],
+    )
+    joined = " | ".join(lines).lower()
+    assert "us cash indices: prior close" in joined
+    assert "watchlist/pre-market proxies: near-real-time" in joined

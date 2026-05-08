@@ -159,7 +159,6 @@ class TestTelegramFormatter:
         assert "Desk read:" in email.html_body
         assert "Setup read:" in email.html_body
         assert "Geo lens:" in email.html_body
-        assert "WHAT CHANGED" in email.html_body
         assert "single dominant impulse" in email.html_body
 
     def test_portfolio_impact_includes_geo_meter_and_regime_shift(self):
