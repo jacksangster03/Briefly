@@ -53,6 +53,32 @@ def build_news_label_row(
     }
 
 
+def dedupe_news_label_payload_rows(rows: list[dict]) -> list[dict]:
+    """Collapse payload rows to one representative row per stable story key."""
+    if not rows:
+        return []
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        key = stable_story_key_for_payload_row(row)
+        grouped.setdefault(key, []).append(row)
+
+    deduped: list[dict] = []
+    for key, bucket in grouped.items():
+        bucket_sorted = sorted(
+            bucket,
+            key=lambda r: (
+                _to_utc(_parse_dt(r.get("first_seen_at"))) or datetime.min.replace(tzinfo=timezone.utc),
+                _to_utc(_parse_dt(r.get("published_at"))) or datetime.min.replace(tzinfo=timezone.utc),
+                _s(r.get("event_id")),
+            ),
+            reverse=True,
+        )
+        winner = dict(bucket_sorted[0])
+        winner["_stable_story_key"] = key
+        deduped.append(winner)
+    return deduped
+
+
 def upsert_news_label_rows(db: Session, rows: list[dict]) -> int:
     """Upsert by (event_id, session_key, local_date). Returns number upserted."""
     if not rows:
@@ -177,6 +203,17 @@ def stable_story_key_for_row(row: NewsClassifierLabel) -> str:
     headline = _normalize_headline(_s(getattr(row, "headline", "")))
     if not headline:
         event_id = _s(getattr(row, "event_id", ""))
+        if event_id:
+            return f"event:{event_id}"
+    digest = hashlib.sha256(f"{domain}|{headline}".encode("utf-8")).hexdigest()[:16]
+    return f"headline:{digest}"
+
+
+def stable_story_key_for_payload_row(row: dict) -> str:
+    domain = _s(row.get("domain", "")).lower()
+    headline = _normalize_headline(_s(row.get("headline", "")))
+    if not headline:
+        event_id = _s(row.get("event_id", ""))
         if event_id:
             return f"event:{event_id}"
     digest = hashlib.sha256(f"{domain}|{headline}".encode("utf-8")).hexdigest()[:16]

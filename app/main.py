@@ -40,7 +40,11 @@ from app.briefing.session_templates import get_session_template_for_profile
 from app.briefing.session_delta import previous_session_context, split_events_against_previous_snapshot, split_news_since_previous
 from app.briefing.news_audit import build_classifier_audit, format_counts
 from app.ml.news_classifier_shadow import classify_news_event_shadow, compare_deterministic_vs_ml, ml_news_classifier_enabled
-from app.ml.news_dataset import build_news_label_row, upsert_news_label_rows
+from app.ml.news_dataset import (
+    build_news_label_row,
+    dedupe_news_label_payload_rows,
+    upsert_news_label_rows,
+)
 from app.briefing.session_snapshot_service import get_session_snapshot
 from app.briefing.session_snapshot import load_previous_snapshot, persist_snapshot, snapshot_metrics
 from app.cadence.engine import DecisionEngine
@@ -90,6 +94,36 @@ def _resolve_llm_delivery_overrides(profile: UserProfile) -> tuple[bool | None, 
     enabled = enabled_raw if isinstance(enabled_raw, bool) else None
     shadow = shadow_raw if isinstance(shadow_raw, bool) else None
     return enabled, shadow
+
+
+def _persist_scheduler_classifier_labels(
+    *,
+    briefing,
+    session_key: str,
+    local_date: date,
+) -> int:
+    """Persist deduped deterministic classifier label rows (non-blocking call site)."""
+    included = list(briefing.global_news or []) + list(briefing.top_themes or []) + list(briefing.watchlist_events or []) + list(briefing.portfolio_focus or [])
+    candidate = getattr(briefing, "events_pool", None)
+    if not isinstance(candidate, list):
+        candidate = included
+    rows = [
+        build_news_label_row(
+            evt,
+            session_key=session_key,
+            local_date=local_date,
+            included_in_briefing=evt in included,
+            sent_as_breaking=False,
+        )
+        for evt in candidate
+    ]
+    rows = dedupe_news_label_payload_rows(rows)
+    for row in rows:
+        row.pop("_stable_story_key", None)
+    if not rows:
+        return 0
+    with get_session() as db:
+        return upsert_news_label_rows(db, rows)
 
 
 @dataclass(frozen=True)
@@ -1116,6 +1150,23 @@ def run_morning_briefing(
         len(messages),
         briefing.events_sent,
     )
+
+    if command_source == "scheduler" and delivered_ok and not settings.dry_run and backfill_context is None:
+        try:
+            persisted_rows = _persist_scheduler_classifier_labels(
+                briefing=briefing,
+                session_key=canonical_session_key,
+                local_date=idempotency_date,
+            )
+            if persisted_rows:
+                logger.info(
+                    "Scheduler ML-label capture persisted | session=%s date=%s rows=%d",
+                    canonical_session_key,
+                    idempotency_date.isoformat(),
+                    persisted_rows,
+                )
+        except Exception:
+            logger.debug("Scheduler ML-label capture failed (non-fatal)", exc_info=True)
 
     # --- Phase 8.9 Lite: live session archive snapshot ----------------------
     try:

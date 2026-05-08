@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 from click.testing import CliRunner
 
 from app.cli import cli
-from app.db.models import NewsClassifierLabel
+from app.db.models import NewsClassifierLabel, NewsClassifierShadowRun
 from app.db.session import get_session
 
 
@@ -120,3 +120,40 @@ def test_news_review_dedupe_collapses_duplicates(validation_isolated_db):
     assert out_dedupe.exit_code == 0
     assert out_dedupe.output.count("Duplicate headline story") == 1
     assert "sessions_seen=2" in out_dedupe.output
+
+
+def test_news_label_quality_summary(validation_isolated_db):
+    _seed_row()
+    now = datetime.now(timezone.utc)
+    with get_session() as db:
+        db.add(
+            NewsClassifierShadowRun(
+                run_id="audit:run",
+                event_id="evt-seed",
+                session_key="morning",
+                local_date=date.today(),
+                model_name="stub",
+                model_version="v1",
+                deterministic_story_type="commentary_valuation",
+                ml_story_type="earnings_analysis",
+                deterministic_suppression_reason="valuation_commentary_without_catalyst",
+                ml_suppression_reason="",
+                deterministic_breaking_eligible=False,
+                ml_breaking_eligible=True,
+                ml_confidence=0.91,
+                agreement=False,
+                disagreement_reason="story_type,breaking_eligible",
+                created_at=now,
+            )
+        )
+    runner = CliRunner()
+    out = runner.invoke(cli, ["news-label-quality", "--to", "today", "--limit-disagreements", "5"])
+    assert out.exit_code == 0
+    assert "LABEL QUALITY SUMMARY" in out.output
+    assert "total_rows=1" in out.output
+    assert "deduped_stories=1" in out.output
+    assert "manual_label_coverage=" in out.output
+    assert "class_distribution=" in out.output
+    assert "stale_reprint_distribution=" in out.output
+    assert "breaking_eligible_distribution=" in out.output
+    assert "top_disagreement_candidates=1" in out.output

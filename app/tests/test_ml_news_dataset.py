@@ -4,8 +4,10 @@ from datetime import date, datetime, timezone
 
 from app.db.models import NewsClassifierLabel
 from app.db.session import get_session
+from app.main import _persist_scheduler_classifier_labels
 from app.ml.news_dataset import (
     build_news_label_row,
+    dedupe_news_label_payload_rows,
     dedupe_label_rows,
     export_news_labels,
     upsert_news_label_rows,
@@ -104,3 +106,37 @@ def test_dedupe_label_rows_prefers_most_recent(validation_isolated_db):
     assert len(deduped) == 1
     row = deduped[0]
     assert getattr(row, "sessions_seen", 0) == 2
+
+
+def test_dedupe_news_label_payload_rows_collapses_by_headline():
+    base = build_news_label_row(_event(), session_key="morning", local_date=date(2026, 5, 8))
+    dup = dict(base)
+    dup["event_id"] = "evt-43"
+    payload = dedupe_news_label_payload_rows([base, dup])
+    assert len(payload) == 1
+
+
+def test_scheduler_label_persistence_is_deduped(validation_isolated_db):
+    e1 = _event()
+    e1.event_id = "evt-dupe-1"
+    e1.title = "Same title"
+    e2 = _event()
+    e2.event_id = "evt-dupe-2"
+    e2.title = "Same title"
+
+    class _Brief:
+        global_news = [e1, e2]
+        top_themes = []
+        watchlist_events = []
+        portfolio_focus = []
+        events_pool = [e1, e2]
+
+    persisted = _persist_scheduler_classifier_labels(
+        briefing=_Brief(),
+        session_key="morning",
+        local_date=date(2026, 5, 8),
+    )
+    assert persisted == 1
+    with get_session() as db:
+        rows = db.query(NewsClassifierLabel).all()
+        assert len(rows) == 1

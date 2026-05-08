@@ -1502,6 +1502,105 @@ def news_dataset_export(
     click.echo(f"Exported news labels to {path}")
 
 
+@cli.command("news-label-quality")
+@click.option("--from", "from_date", default=None, help="Start date YYYY-MM-DD.")
+@click.option("--to", "to_date", default="today", show_default=True, help="End date: today|yesterday|YYYY-MM-DD.")
+@click.option("--limit-disagreements", default=10, show_default=True, type=int, help="Max disagreement candidates to print.")
+@click.pass_context
+def news_label_quality(ctx, from_date: str | None, to_date: str, limit_disagreements: int):
+    """Summarize local ML label quality and coverage."""
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+    from collections import Counter
+
+    from app.db.models import NewsClassifierLabel, NewsClassifierShadowRun
+    from app.db.session import get_session
+    from app.ml.news_dataset import dedupe_label_rows
+
+    init_db()
+    settings = ctx.obj["settings"]
+    tz = ZoneInfo(settings.timezone or "Europe/Madrid")
+    local_now = datetime.now(timezone.utc).astimezone(tz)
+
+    def _parse(value: str | None):
+        if not value:
+            return None
+        s = value.strip().lower()
+        if s == "today":
+            return local_now.date()
+        if s == "yesterday":
+            return (local_now - timedelta(days=1)).date()
+        from datetime import date as _date
+        return _date.fromisoformat(s)
+
+    d_from = _parse(from_date)
+    d_to = _parse(to_date)
+
+    with get_session() as db:
+        q = db.query(NewsClassifierLabel)
+        if d_from is not None:
+            q = q.filter(NewsClassifierLabel.local_date >= d_from)
+        if d_to is not None:
+            q = q.filter(NewsClassifierLabel.local_date <= d_to)
+        rows = list(q.order_by(NewsClassifierLabel.updated_at.desc(), NewsClassifierLabel.id.desc()).all())
+        deduped = dedupe_label_rows(rows)
+
+        manual_count = sum(
+            1
+            for r in rows
+            if any(
+                [
+                    bool(r.manual_story_type),
+                    bool(r.manual_suppression_reason),
+                    r.manual_breaking_eligible is not None,
+                    bool(r.manual_ticker_mismatch_risk),
+                    bool(r.manual_stale_reprint_risk),
+                ]
+            )
+        )
+        manual_pct = (manual_count / len(rows) * 100.0) if rows else 0.0
+
+        class_dist = Counter((r.deterministic_story_type or "unknown") for r in rows)
+        stale_reprint_dist = Counter((r.deterministic_freshness_state or "unknown") for r in rows)
+        breaking_dist = Counter(
+            "true" if r.deterministic_breaking_eligible is True else ("false" if r.deterministic_breaking_eligible is False else "unknown")
+            for r in rows
+        )
+
+        shadow_q = db.query(NewsClassifierShadowRun).filter(NewsClassifierShadowRun.agreement.is_(False))
+        if d_from is not None:
+            shadow_q = shadow_q.filter(NewsClassifierShadowRun.local_date >= d_from)
+        if d_to is not None:
+            shadow_q = shadow_q.filter(NewsClassifierShadowRun.local_date <= d_to)
+        disagreements = list(
+            shadow_q.order_by(
+                NewsClassifierShadowRun.ml_confidence.desc(),
+                NewsClassifierShadowRun.created_at.desc(),
+            )
+            .limit(max(1, int(limit_disagreements)))
+            .all()
+        )
+
+    click.echo(
+        "LABEL QUALITY SUMMARY | "
+        f"from={d_from.isoformat() if d_from else '-'} to={d_to.isoformat() if d_to else '-'}"
+    )
+    click.echo(f"total_rows={len(rows)}")
+    click.echo(f"deduped_stories={len(deduped)}")
+    click.echo(f"manual_label_coverage={manual_count}/{len(rows)} ({manual_pct:.1f}%)")
+    click.echo(f"class_distribution={dict(class_dist)}")
+    click.echo(f"stale_reprint_distribution={dict(stale_reprint_dist)}")
+    click.echo(f"breaking_eligible_distribution={dict(breaking_dist)}")
+    click.echo(f"top_disagreement_candidates={len(disagreements)}")
+    for row in disagreements:
+        click.echo(
+            f"[{row.id}] event={row.event_id or '-'} session={row.session_key or '-'} date={row.local_date or '-'} "
+            f"det={row.deterministic_story_type or '-'} ml={row.ml_story_type or '-'} "
+            f"det_break={row.deterministic_breaking_eligible} ml_break={row.ml_breaking_eligible} "
+            f"conf={row.ml_confidence if row.ml_confidence is not None else 0:.2f} reason={row.disagreement_reason or '-'}"
+        )
+
+
 @cli.group("snapshots")
 def snapshots_group():
     """Read and manage live session archive snapshots (Phase 8.9 Lite)."""
