@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 import csv
+import hashlib
 from pathlib import Path
+import re
 from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
@@ -90,6 +92,7 @@ def export_news_labels(
     from_date: date | None = None,
     to_date: date | None = None,
     format: str = "csv",
+    dedupe_headlines: bool = False,
 ) -> Path:
     fmt = (format or "csv").strip().lower()
     if fmt != "csv":
@@ -103,9 +106,12 @@ def export_news_labels(
     if to_date is not None:
         q = q.filter(NewsClassifierLabel.local_date <= to_date)
     rows = q.order_by(NewsClassifierLabel.local_date.desc(), NewsClassifierLabel.id.desc()).all()
+    if dedupe_headlines:
+        rows = dedupe_label_rows(rows)
     fields = [
         "id",
         "event_id",
+        "stable_story_key",
         "headline",
         "summary",
         "source",
@@ -124,6 +130,9 @@ def export_news_labels(
         "sent_as_breaking",
         "session_key",
         "local_date",
+        "sessions_seen",
+        "session_keys_agg",
+        "local_dates_agg",
         "manual_story_type",
         "manual_suppression_reason",
         "manual_breaking_eligible",
@@ -138,7 +147,13 @@ def export_news_labels(
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         for r in rows:
-            writer.writerow({field: getattr(r, field, None) for field in fields})
+            base = {field: getattr(r, field, None) for field in fields}
+            base["stable_story_key"] = stable_story_key_for_row(r)
+            base.setdefault("sessions_seen", 1)
+            base.setdefault("session_keys_agg", getattr(r, "session_key", "") or "")
+            ld = getattr(r, "local_date", None)
+            base.setdefault("local_dates_agg", ld.isoformat() if ld else "")
+            writer.writerow(base)
     return path
 
 
@@ -155,6 +170,53 @@ def load_labeled_examples(
     if limit:
         q = q.limit(max(1, int(limit)))
     return list(q.all())
+
+
+def stable_story_key_for_row(row: NewsClassifierLabel) -> str:
+    domain = _s(getattr(row, "domain", "")).lower()
+    headline = _normalize_headline(_s(getattr(row, "headline", "")))
+    if not headline:
+        event_id = _s(getattr(row, "event_id", ""))
+        if event_id:
+            return f"event:{event_id}"
+    digest = hashlib.sha256(f"{domain}|{headline}".encode("utf-8")).hexdigest()[:16]
+    return f"headline:{digest}"
+
+
+def dedupe_label_rows(rows: list[NewsClassifierLabel]) -> list[NewsClassifierLabel]:
+    """Collapse repeated story/headline rows into one most-recent representative row."""
+    if not rows:
+        return []
+    grouped: dict[str, list[NewsClassifierLabel]] = {}
+    for row in rows:
+        key = stable_story_key_for_row(row)
+        grouped.setdefault(key, []).append(row)
+    collapsed: list[NewsClassifierLabel] = []
+    for key, bucket in grouped.items():
+        bucket_sorted = sorted(
+            bucket,
+            key=lambda r: (
+                getattr(r, "updated_at", None) or getattr(r, "created_at", None) or datetime.min.replace(tzinfo=timezone.utc),
+                getattr(r, "id", 0),
+            ),
+            reverse=True,
+        )
+        winner = bucket_sorted[0]
+        sessions = sorted({str(getattr(r, "session_key", "") or "") for r in bucket if getattr(r, "session_key", None)})
+        dates = sorted({(getattr(r, "local_date", None).isoformat() if getattr(r, "local_date", None) else "") for r in bucket if getattr(r, "local_date", None)})
+        setattr(winner, "stable_story_key", key)
+        setattr(winner, "sessions_seen", len(bucket))
+        setattr(winner, "session_keys_agg", ",".join(sessions))
+        setattr(winner, "local_dates_agg", ",".join(dates))
+        collapsed.append(winner)
+    collapsed.sort(
+        key=lambda r: (
+            getattr(r, "updated_at", None) or getattr(r, "created_at", None) or datetime.min.replace(tzinfo=timezone.utc),
+            getattr(r, "id", 0),
+        ),
+        reverse=True,
+    )
+    return collapsed
 
 
 def _domain_for(url: str) -> str:
@@ -200,3 +262,9 @@ def _b(value) -> bool | None:
     if value is None:
         return None
     return bool(value)
+
+
+def _normalize_headline(text: str) -> str:
+    s = (text or "").lower().strip()
+    s = re.sub(r"\s+", " ", s)
+    return s

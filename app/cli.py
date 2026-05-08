@@ -1338,13 +1338,15 @@ def session_audit(ctx, target_date: str, profile_name: str, live_check: bool, cl
 @cli.command("news-review")
 @click.option("--date", "target_date", default="today", show_default=True, help="Date: today | yesterday | YYYY-MM-DD.")
 @click.option("--limit", default=50, show_default=True, type=int, help="Max rows to show.")
+@click.option("--dedupe", is_flag=True, default=False, help="Collapse repeated story/headline rows into one representative row.")
 @click.pass_context
-def news_review(ctx, target_date: str, limit: int):
+def news_review(ctx, target_date: str, limit: int, dedupe: bool):
     """Print local news-classifier label rows for manual review."""
     from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
     from app.db.models import NewsClassifierLabel
     from app.db.session import get_session
+    from app.ml.news_dataset import dedupe_label_rows
 
     init_db()
     settings = ctx.obj["settings"]
@@ -1360,7 +1362,7 @@ def news_review(ctx, target_date: str, limit: int):
         d = _date.fromisoformat(s)
 
     with get_session() as db:
-        rows = (
+        rows = list((
             db.query(NewsClassifierLabel)
             .filter(NewsClassifierLabel.local_date == d)
             .order_by(
@@ -1371,19 +1373,27 @@ def news_review(ctx, target_date: str, limit: int):
             )
             .limit(max(1, int(limit)))
             .all()
-        )
+        ))
+    if dedupe:
+        rows = dedupe_label_rows(rows)[: max(1, int(limit))]
 
-    click.echo(f"NEWS REVIEW | date={d.isoformat()} | rows={len(rows)}")
+    click.echo(f"NEWS REVIEW | date={d.isoformat()} | rows={len(rows)} | dedupe={'on' if dedupe else 'off'}")
     if not rows:
         click.echo("No rows found. Run session-audit --live-check first.")
         return
     for row in rows:
+        sessions_seen = int(getattr(row, "sessions_seen", 1) or 1)
+        session_keys_agg = str(getattr(row, "session_keys_agg", "") or "")
+        local_dates_agg = str(getattr(row, "local_dates_agg", "") or "")
         click.echo(
             f"[{row.id}] {row.headline[:110]} | det={row.deterministic_story_type or '-'} "
             f"fresh={row.deterministic_freshness_state or '-'} upd={row.deterministic_update_status or '-'} "
             f"suppress={row.deterministic_suppression_reason or '-'} break={row.deterministic_breaking_eligible} "
-            f"manual={row.manual_story_type or '-'} label_source={row.label_source}"
+            f"manual={row.manual_story_type or '-'} label_source={row.label_source} "
+            f"sessions_seen={sessions_seen}"
         )
+        if dedupe and (session_keys_agg or local_dates_agg):
+            click.echo(f"    sessions={session_keys_agg or '-'} dates={local_dates_agg or '-'}")
 
 
 @cli.command("news-label-set")
@@ -1446,8 +1456,16 @@ def news_label_set(
 @click.option("--to", "to_date", default="today", show_default=True, help="End date: today|yesterday|YYYY-MM-DD.")
 @click.option("--output", "output_path", required=True, help="Output CSV path.")
 @click.option("--format", "output_format", default="csv", show_default=True, type=click.Choice(["csv"], case_sensitive=False))
+@click.option("--dedupe-headlines", is_flag=True, default=False, help="Export one row per stable headline/story key.")
 @click.pass_context
-def news_dataset_export(ctx, from_date: str | None, to_date: str, output_path: str, output_format: str):
+def news_dataset_export(
+    ctx,
+    from_date: str | None,
+    to_date: str,
+    output_path: str,
+    output_format: str,
+    dedupe_headlines: bool,
+):
     """Export local news-classifier label dataset to CSV."""
     from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
@@ -1479,6 +1497,7 @@ def news_dataset_export(ctx, from_date: str | None, to_date: str, output_path: s
             from_date=d_from,
             to_date=d_to,
             format=output_format,
+            dedupe_headlines=dedupe_headlines,
         )
     click.echo(f"Exported news labels to {path}")
 

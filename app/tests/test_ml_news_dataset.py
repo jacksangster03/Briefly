@@ -6,6 +6,7 @@ from app.db.models import NewsClassifierLabel
 from app.db.session import get_session
 from app.ml.news_dataset import (
     build_news_label_row,
+    dedupe_label_rows,
     export_news_labels,
     upsert_news_label_rows,
 )
@@ -66,3 +67,40 @@ def test_news_dataset_export_csv(validation_isolated_db, tmp_path):
     text = out.read_text(encoding="utf-8")
     assert "deterministic_story_type" in text
     assert "manual_story_type" in text
+
+
+def test_news_dataset_export_dedupe_headlines(validation_isolated_db, tmp_path):
+    e1 = _event()
+    e1.event_id = "evt-dup-1"
+    e1.title = "Same story headline"
+    e2 = _event()
+    e2.event_id = "evt-dup-2"
+    e2.title = "Same story headline"
+    r1 = build_news_label_row(e1, session_key="morning", local_date=date(2026, 5, 8))
+    r2 = build_news_label_row(e2, session_key="us_pre_open", local_date=date(2026, 5, 8))
+    with get_session() as db:
+        upsert_news_label_rows(db, [r1, r2])
+        out = export_news_labels(
+            db,
+            tmp_path / "news_labels_dedupe.csv",
+            format="csv",
+            dedupe_headlines=True,
+        )
+    text = out.read_text(encoding="utf-8")
+    assert text.count("Same story headline") == 1
+    assert "sessions_seen" in text
+
+
+def test_dedupe_label_rows_prefers_most_recent(validation_isolated_db):
+    r1 = build_news_label_row(_event(), session_key="morning", local_date=date(2026, 5, 8))
+    r2_evt = _event()
+    r2_evt.event_id = "evt-43"
+    r2_evt.title = r1["headline"]
+    r2 = build_news_label_row(r2_evt, session_key="us_intraday_risk", local_date=date(2026, 5, 8))
+    with get_session() as db:
+        upsert_news_label_rows(db, [r1, r2])
+        rows = db.query(NewsClassifierLabel).all()
+        deduped = dedupe_label_rows(rows)
+    assert len(deduped) == 1
+    row = deduped[0]
+    assert getattr(row, "sessions_seen", 0) == 2
