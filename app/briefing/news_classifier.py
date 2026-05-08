@@ -17,6 +17,7 @@ from app.schemas.events import NormalisedEvent
 StoryType = Literal[
     "breaking_market_moving",
     "earnings_results",
+    "earnings_analysis",
     "guidance_change",
     "analyst_action",
     "macro_policy",
@@ -28,6 +29,7 @@ StoryType = Literal[
     "insider_transaction",
     "credit_debt",
     "commentary_valuation",
+    "single_name_context",
     "generic_market_wrap",
     "low_signal",
     "ignore",
@@ -53,6 +55,7 @@ class NewsClassification:
     why_market_relevant: str
     suppress_reason: str
     breaking_label: BreakingLabel
+    breaking_eligible: bool
 
 
 _LOW_SIGNAL_PATTERNS = (
@@ -110,6 +113,28 @@ _COMMENTARY_TERMS = (
     "editorial",
     "analysts say",
 )
+_ANALYSIS_PATTERNS = (
+    "what it means",
+    "reaffirm our thesis",
+    "investors excited",
+    "why are some investors",
+    "after its q1 earnings",
+    "despite scale",
+)
+_ANALYST_ACTION_TERMS = (
+    "raises target",
+    "price target",
+    "upgrades",
+    "downgrades",
+    "reiterates",
+    "outperform rating",
+    "overweight rating",
+)
+_SINGLE_NAME_CONTEXT_TERMS = (
+    "what toyota's earnings mean for tesla",
+    "what toyota’s earnings mean for tesla",
+    "what .* earnings mean for .*",
+)
 
 _SEC_TYPES = {"sec_filing", "filing", "8k", "10q", "10k"}
 
@@ -145,6 +170,13 @@ def classify_news_event(
         material_update=material_update,
         market_score=market_score,
     )
+    breaking_eligible = is_breaking_eligible_event(
+        event=event,
+        story_type=story_type,
+        freshness_state=freshness,
+        market_relevance_score=market_score,
+        suppress_reason=suppress_reason,
+    )
 
     return NewsClassification(
         story_type=story_type,
@@ -161,6 +193,7 @@ def classify_news_event(
         why_market_relevant=_why_market_relevant(story_type, text),
         suppress_reason=suppress_reason,
         breaking_label=breaking_label,
+        breaking_eligible=breaking_eligible,
     )
 
 
@@ -188,6 +221,7 @@ def annotate_news_events(
         raw["news_why_market_relevant"] = cls.why_market_relevant
         raw["news_suppress_reason"] = cls.suppress_reason
         raw["breaking_label"] = cls.breaking_label
+        raw["news_breaking_eligible"] = cls.breaking_eligible
         if cls.published_time:
             raw["news_published_at"] = cls.published_time.isoformat()
         event.raw_data = raw
@@ -211,13 +245,28 @@ def is_stale_breaking_candidate(event: NormalisedEvent) -> tuple[bool, str]:
         return True, "late_discovery_old_published_time"
     if freshness in {"old_context", "stale"}:
         return True, f"freshness_{freshness}"
+    if not bool(raw.get("news_breaking_eligible", False)):
+        return True, "not_breaking_eligible_story_type"
     return False, ""
 
 
 def _story_type(event: NormalisedEvent, text: str) -> StoryType:
     event_type = (event.event_type or "").lower()
+    title = _norm(event.title)
+    if any(term in text for term in _ANALYST_ACTION_TERMS) or event_type in {"analyst", "analyst_action"}:
+        return "analyst_action"
     if event_type in {"earnings", "earnings_results"}:
+        if any(term in text for term in _ANALYSIS_PATTERNS):
+            return "earnings_analysis"
         return "earnings_results"
+    if "earnings" in text and (
+        any(term in text for term in _ANALYSIS_PATTERNS)
+        or "what " in title and " mean for " in title
+        or "why " in title
+    ):
+        return "earnings_analysis"
+    if any(term in text for term in ("what it means for", "mean for", "reaffirm our thesis")):
+        return "single_name_context"
     if "guidance" in text:
         return "guidance_change"
     if event_type in {"macro_release", "fed_decision"} or any(term in text for term in ("fomc", "fed", "ecb", "cpi", "pce", "payroll")):
@@ -242,9 +291,12 @@ def _story_type(event: NormalisedEvent, text: str) -> StoryType:
         return "low_signal"
     if "wrap" in text or "recap" in text:
         return "generic_market_wrap"
-    if event_type in {"analyst", "analyst_action"}:
-        return "analyst_action"
-    return "breaking_market_moving" if any(term in text for term in _HARD_CATALYST_TERMS) else "ignore"
+    if any(term in text for term in _HARD_CATALYST_TERMS):
+        # Keep this narrow: hard catalyst + not commentary framing.
+        if any(term in text for term in _ANALYSIS_PATTERNS) or any(term in text for term in _COMMENTARY_TERMS):
+            return "commentary_valuation"
+        return "breaking_market_moving"
+    return "ignore"
 
 
 def _freshness_state(
@@ -276,7 +328,7 @@ def _suppress_reason(event: NormalisedEvent, text: str, story_type: StoryType) -
         return "no_hard_catalyst"
     if story_type in {"low_signal", "generic_market_wrap"}:
         return "low_signal_format"
-    if story_type == "commentary_valuation" and not _has_hard_link(text):
+    if story_type in {"commentary_valuation", "earnings_analysis", "single_name_context"} and not _has_hard_link(text):
         return "valuation_commentary_without_catalyst"
     if any(term in text for term in _POLLING_PATTERNS):
         only_etf = bool(event.tickers) and all(t in {"SPY", "QQQ", "ACWI"} for t in event.tickers)
@@ -289,6 +341,8 @@ def _market_relevance(event: NormalisedEvent, text: str, story_type: StoryType) 
     score = float(event.final_score or 0.0)
     if story_type in {"earnings_results", "guidance_change", "macro_policy", "geopolitical_energy", "mna_deal"}:
         score += 0.15
+    if story_type in {"earnings_analysis", "single_name_context", "analyst_action"}:
+        score += 0.05
     if _has_hard_link(text):
         score += 0.1
     if story_type in {"low_signal", "generic_market_wrap", "ignore"}:
@@ -324,6 +378,36 @@ def _breaking_label(*, freshness: FreshnessState, material_update: bool, market_
     if freshness == "new" and market_score >= 0.65:
         return "BREAKING"
     return "CONTEXT"
+
+
+def is_breaking_eligible_event(
+    *,
+    event: NormalisedEvent,
+    story_type: str,
+    freshness_state: str,
+    market_relevance_score: float,
+    suppress_reason: str,
+) -> bool:
+    """Deterministic breaking eligibility gate (taxonomy + mechanism)."""
+    if freshness_state in {"stale", "old_context", "unknown"}:
+        return False
+    if suppress_reason:
+        return False
+    if event.update_status not in {"new", "material_update"}:
+        return False
+    if market_relevance_score < 0.65:
+        return False
+    eligible_types = {
+        "breaking_market_moving",
+        "earnings_results",
+        "guidance_change",
+        "macro_policy",
+        "geopolitical_energy",
+        "regulatory_legal",
+        "mna_deal",
+        "credit_debt",
+    }
+    return story_type in eligible_types
 
 
 def _affected_assets(event: NormalisedEvent) -> list[str]:

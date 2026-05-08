@@ -189,3 +189,4 @@ def test_session_audit_classifier_details_flag_controls_examples(monkeypatch):
     )
     assert "included_examples:" in out_details
     assert "suppressed_examples:" in out_details
+    assert "break_eligible=" in out_details

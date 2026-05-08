@@ -50,3 +50,16 @@ def test_breaking_labels_exposed():
     assert new_evt.raw_data.get("breaking_label") in {"BREAKING", "CONTEXT"}
     assert update_evt.raw_data.get("breaking_label") == "UPDATE"
     assert stale_evt.raw_data.get("breaking_label") in {"CONTEXT", "LATE DISCOVERY"}
+
+
+def test_material_update_commentary_not_breaking_eligible():
+    evt = _event(
+        title="Why investors are excited after earnings",
+        summary="Commentary interpretation without new filing/guidance.",
+        event_type="news_search",
+        update_status="material_update",
+    )
+    annotate_news_events([evt], breaking_max_age_hours=6)
+    blocked, reason = is_stale_breaking_candidate(evt)
+    assert blocked is True
+    assert reason == "not_breaking_eligible_story_type"

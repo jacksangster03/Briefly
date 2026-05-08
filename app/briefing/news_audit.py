@@ -13,6 +13,7 @@ from app.schemas.events import NormalisedEvent
 STORY_TYPE_ORDER = [
     "breaking_market_moving",
     "earnings_results",
+    "earnings_analysis",
     "guidance_change",
     "analyst_action",
     "macro_policy",
@@ -24,6 +25,7 @@ STORY_TYPE_ORDER = [
     "insider_transaction",
     "credit_debt",
     "commentary_valuation",
+    "single_name_context",
     "generic_market_wrap",
     "low_signal",
     "ignore",
@@ -108,6 +110,10 @@ def build_classifier_audit(
                         "suppress_reason": reason,
                         "story_type": story_type,
                         "freshness_state": freshness,
+                        "update_status": str(evt.update_status or "unknown"),
+                        "score": round(float(evt.final_score or 0.0), 3),
+                        "confidence": round(float(raw.get("news_classifier_confidence", evt.factual_confidence_score or 0.0)), 3),
+                        "breaking_eligible": bool(raw.get("news_breaking_eligible", False)),
                     }
                 )
 
@@ -126,6 +132,10 @@ def build_classifier_audit(
                     "published_time": published.isoformat() if published else "unknown",
                     "first_seen_time": first_seen.isoformat() if first_seen else "unknown",
                     "age": age or "unknown",
+                    "update_status": str(evt.update_status or "unknown"),
+                    "score": round(float(evt.final_score or 0.0), 3),
+                    "confidence": round(float(raw.get("news_classifier_confidence", evt.factual_confidence_score or 0.0)), 3),
+                    "breaking_eligible": bool(raw.get("news_breaking_eligible", False)),
                 }
             )
 
@@ -137,8 +147,10 @@ def build_classifier_audit(
                 "title": evt.title,
                 "story_type": str(raw.get("news_story_type", "unknown")),
                 "freshness_state": str(raw.get("news_freshness_state", "unknown")),
+                "update_status": str(evt.update_status or "unknown"),
                 "score": round(float(evt.final_score or 0.0), 3),
                 "confidence": round(float(raw.get("news_classifier_confidence", evt.factual_confidence_score or 0.0)), 3),
+                "breaking_eligible": bool(raw.get("news_breaking_eligible", False)),
             }
         )
 

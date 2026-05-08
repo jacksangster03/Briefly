@@ -89,6 +89,79 @@ def test_low_ticker_confidence_story_can_be_suppressed():
     assert evt.raw_data.get("news_story_type") in {"generic_market_wrap", "ignore", "low_signal"}
 
 
+def test_alphabet_thesis_article_not_breaking_market_moving():
+    evt = _evt(
+        title="Alphabet's Earnings Reaffirm Our Thesis Despite Scale",
+        summary="Post-earnings interpretation and valuation framing.",
+        event_type="news_search",
+        tickers=["GOOGL"],
+    )
+    annotate_news_events([evt])
+    assert evt.raw_data.get("news_story_type") in {"earnings_analysis", "commentary_valuation"}
+    assert evt.raw_data.get("news_story_type") != "breaking_market_moving"
+    assert evt.raw_data.get("news_breaking_eligible") is False
+
+
+def test_toyota_tesla_commentary_not_breaking_market_moving():
+    evt = _evt(
+        title="What Toyota’s Earnings Mean for Tesla",
+        summary="Cross-name interpretation without fresh catalyst.",
+        event_type="news_search",
+        tickers=["TM", "TSLA"],
+    )
+    annotate_news_events([evt])
+    assert evt.raw_data.get("news_story_type") in {"single_name_context", "commentary_valuation", "earnings_analysis"}
+    assert evt.raw_data.get("news_story_type") != "breaking_market_moving"
+    assert evt.raw_data.get("news_breaking_eligible") is False
+
+
+def test_meta_excited_after_q1_not_breaking_market_moving():
+    evt = _evt(
+        title="Why Are Some Investors Excited About Meta Platforms After Its Q1 Earnings?",
+        summary="Interpretive follow-up commentary.",
+        event_type="news_search",
+        tickers=["META"],
+    )
+    annotate_news_events([evt])
+    assert evt.raw_data.get("news_story_type") in {"earnings_analysis", "commentary_valuation"}
+    assert evt.raw_data.get("news_breaking_eligible") is False
+
+
+def test_wedbush_target_raise_maps_to_analyst_action():
+    evt = _evt(
+        title="Apple shares gain after Wedbush raises target to $240",
+        summary="Analyst target change following earnings.",
+        event_type="news_search",
+        tickers=["AAPL"],
+    )
+    annotate_news_events([evt])
+    assert evt.raw_data.get("news_story_type") == "analyst_action"
+    assert evt.raw_data.get("news_breaking_eligible") is False
+
+
+def test_partner_award_not_breaking_market_moving():
+    evt = _evt(
+        title="GuidePoint Security Wins Partner Award",
+        summary="Routine partner award announcement.",
+        event_type="company_news",
+    )
+    annotate_news_events([evt])
+    assert evt.raw_data.get("news_story_type") in {"product_partnership", "low_signal", "ignore"}
+    assert evt.raw_data.get("news_story_type") != "breaking_market_moving"
+
+
+def test_fresh_sanctions_shock_can_still_be_breaking():
+    evt = _evt(
+        title="US sanctions trigger oil chokepoint fears near Hormuz",
+        summary="Crude spikes as shipping risk escalates.",
+        event_type="geopolitical",
+        published_at=datetime.now(timezone.utc) - timedelta(minutes=20),
+    )
+    annotate_news_events([evt], breaking_max_age_hours=6)
+    assert evt.raw_data.get("news_story_type") in {"geopolitical_energy", "breaking_market_moving"}
+    assert evt.raw_data.get("news_breaking_eligible") is True
+
+
 def test_llm_shadow_failure_falls_back_deterministically(monkeypatch):
     settings = Settings(enable_llm_news_classifier=True, openai_api_key="test-key")
     event = _evt()

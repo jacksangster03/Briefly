@@ -1603,21 +1603,26 @@ def _format_classifier_examples(news_counts: dict) -> list[str]:
         for item in included[:3]:
             lines.append(
                 f"    - {item.get('title', '')[:90]} | type={item.get('story_type')} "
-                f"freshness={item.get('freshness_state')} score={item.get('score')} conf={item.get('confidence')}"
+                f"freshness={item.get('freshness_state')} update={item.get('update_status')} "
+                f"score={item.get('score')} conf={item.get('confidence')} break_eligible={item.get('breaking_eligible')}"
             )
     if suppressed:
         lines.append("  suppressed_examples:")
         for item in suppressed[:3]:
             lines.append(
                 f"    - {item.get('title', '')[:90]} | reason={item.get('suppress_reason')} "
-                f"type={item.get('story_type')} freshness={item.get('freshness_state')}"
+                f"type={item.get('story_type')} freshness={item.get('freshness_state')} "
+                f"update={item.get('update_status')} score={item.get('score')} conf={item.get('confidence')} "
+                f"break_eligible={item.get('breaking_eligible')}"
             )
     if rejected:
         lines.append("  breaking_rejected_examples:")
         for item in rejected[:3]:
             lines.append(
                 f"    - {item.get('title', '')[:90]} | reason={item.get('rejection_reason')} "
-                f"published={item.get('published_time')} first_seen={item.get('first_seen_time')} age={item.get('age')}"
+                f"published={item.get('published_time')} first_seen={item.get('first_seen_time')} age={item.get('age')} "
+                f"update={item.get('update_status')} score={item.get('score')} conf={item.get('confidence')} "
+                f"break_eligible={item.get('breaking_eligible')}"
             )
     return lines
 
