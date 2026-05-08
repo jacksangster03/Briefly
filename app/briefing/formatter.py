@@ -299,7 +299,14 @@ class TelegramFormatter:
         text = (header or "").strip()
         token = "WHAT CHANGED SINCE "
         if text.upper().startswith(token):
-            return text[len(token):].strip().title()
+            raw = text[len(token):].strip().title()
+            return (
+                raw.replace("Us ", "US ")
+                .replace(" Us", " US")
+                .replace("Uk ", "UK ")
+                .replace(" Ema", " EMA")
+                .replace(" Fda", " FDA")
+            )
         return ""
 
     @staticmethod
@@ -943,6 +950,7 @@ class TelegramFormatter:
         # Watchlist quotes
         if quotes:
             q_lines = []
+            live_count = 0
             for q in quotes[:10]:
                 ctx = move_context_from_quote(
                     q,
@@ -952,6 +960,8 @@ class TelegramFormatter:
                 label = format_watchlist_move_label(ctx)
                 freshness_short = self._freshness_short_label(quote=q, briefing=briefing)
                 suffix = f" {freshness_short}" if freshness_short else ""
+                if freshness_short == "live":
+                    live_count += 1
                 q_lines.append(f"{q.display_name or q.symbol} {label}{suffix}")
             parts.append(" | ".join(q_lines))
             summary = self._watchlist_summary_line(
@@ -965,6 +975,9 @@ class TelegramFormatter:
             shown_quotes = quotes[:10]
             if shown_quotes and all(self._freshness_short_label(quote=q, briefing=briefing) == "prior close" for q in shown_quotes):
                 parts.append("<i>All displayed watchlist moves are prior-close context (not live pre-market/intraday).</i>")
+            intraday_like = (briefing.session_key or "").lower() in {"us_intraday_risk", "into_close"}
+            if intraday_like and shown_quotes and live_count >= max(1, int(len(shown_quotes) * 0.7)):
+                parts.append("<i>Watchlist basis changed from prior-close context to live intraday quotes.</i>")
             freshness = self._format_quotes_freshness_summary(quotes, session_mode)
             if freshness:
                 parts.append(f"<i>{freshness}</i>")

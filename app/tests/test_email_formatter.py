@@ -41,3 +41,33 @@ def test_market_snapshot_treasury_yield_uses_bp_not_pct_change() -> None:
     assert "10Y US Treasury Yield 4.39% (+4 bp)" in text
     assert "(+0.83%)" not in text
 
+
+def test_non_morning_email_has_explorer_footer_not_floating_line() -> None:
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 5, 8, 14, 15, tzinfo=timezone.utc),
+        session_key="us_intraday_risk",
+        session_title="US Intraday Risk Check",
+        watchlist_quotes=[
+            QuoteData(symbol="AMD", display_name="AMD", current_price=420.0, change_percent=1.1),
+        ],
+        quote_freshness={"AMD": {"freshness_state": "live"}},
+    )
+    html = EmailFormatter("Europe/Madrid").format_morning_briefing(briefing).html_body
+    assert "Explorer: " in html
+    assert "Open Watchlist Explorer" in html
+    # The explorer link should not be injected as an unlabelled floating line.
+    assert "padding:0 0 10px 0" not in html
+
+
+def test_intraday_data_basis_can_show_vix_unavailable_line() -> None:
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 5, 8, 14, 15, tzinfo=timezone.utc),
+        session_key="us_intraday_risk",
+        session_title="US Intraday Risk Check",
+        data_basis_lines=[
+            "US equities: near-real-time, Fri 08 May 16:15 CEST",
+            "VIX: unavailable (provider path did not return a live quote this cycle).",
+        ],
+    )
+    text = "\n".join(TelegramFormatter("Europe/Madrid").format_morning_briefing(briefing))
+    assert "VIX: unavailable (provider path did not return a live quote this cycle)." in text

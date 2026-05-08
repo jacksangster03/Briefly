@@ -635,6 +635,28 @@ class MorningBriefingGenerator:
             briefing,
             timezone_name=self.profile.timezone,
         )
+        # Demote low-confidence ticker/company mismatch themes from user-facing sections.
+        if briefing.contract_warnings:
+            mismatch_titles: set[str] = set()
+            for warning in briefing.contract_warnings:
+                text = str(warning or "")
+                if "Ticker/company mismatch risk on '" not in text:
+                    continue
+                try:
+                    title = text.split("Ticker/company mismatch risk on '", 1)[1].split("'", 1)[0].strip().lower()
+                except Exception:
+                    title = ""
+                if title:
+                    mismatch_titles.add(title)
+            if mismatch_titles and briefing.top_themes:
+                filtered: list[NormalisedEvent] = []
+                for evt in briefing.top_themes:
+                    conf = event_company_confidence(evt)
+                    title = (evt.title or "").strip().lower()
+                    if conf < 0.75 and any(title.startswith(prefix) for prefix in mismatch_titles):
+                        continue
+                    filtered.append(evt)
+                briefing.top_themes = filtered
         briefing.section_confidence = section_confidence(
             briefing,
             timezone_name=self.profile.timezone,

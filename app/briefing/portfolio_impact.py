@@ -25,7 +25,10 @@ def build_portfolio_impact(
     if any(tag in setup_tags for tag in ("commodity_pressure", "rates_headwind")):
         bullets.append("Macro pressure is elevated (rates/commodities), so drawdown-sensitive sleeves deserve closer monitoring.")
     if any(tag in setup_tags for tag in ("risk_on", "rates_supportive", "commodity_easing")):
-        bullets.append("Risk backdrop is supportive enough for growth-heavy exposures to participate if headlines stabilize.")
+        if any(tag in setup_tags for tag in ("cross_region_divergence", "risk_off")):
+            bullets.append("US/growth participation has improved, but Europe weakness keeps the broader risk read mixed.")
+        else:
+            bullets.append("Risk backdrop is supportive enough for growth-heavy exposures to participate if headlines stabilize.")
 
     linked_events = _linked_events(symbols, portfolio_focus + top_themes + global_news)
     if linked_events:
@@ -60,4 +63,3 @@ def _action_posture(*, setup_tags: list[str], has_linked: bool) -> str:
     if has_linked:
         return "monitor"
     return "review_diagnostics"
-

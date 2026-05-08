@@ -263,16 +263,17 @@ class EmailFormatter:
             parts.append(breadth_row)
 
         parts.append(f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:0 16px 16px 16px;background:{_SECTION_BG};background-color:{_SECTION_BG};\">")
+        parts.append(self._brief_modules(full_html))
         if (briefing.session_key or "morning").lower() != "morning":
             base = self._web_public_base_url()
             profile = str(((briefing.morning_chart_bundle or {}).get("meta") or {}).get("profile_name") or "default_user")
+            link = f"{base}/ui/briefing/charts/watchlist?profile={profile}"
             parts.append(
-                f"<div style=\"font-size:11px;line-height:1.4;color:{_TEXT_SECONDARY};padding:0 0 10px 0;\">"
-                f"<a href=\"{html.escape(base + '/ui/briefing/charts/watchlist?profile=' + profile)}\" "
-                f"style=\"color:{_TEXT_SECONDARY};text-decoration:none;border-bottom:1px dotted {_TEXT_MUTED};\">Open Watchlist Explorer</a>"
+                f"<div style=\"font-size:11px;line-height:1.45;color:{_TEXT_SECONDARY};padding:10px 0 0 0;\">"
+                "Explorer: "
+                f"<a href=\"{html.escape(link)}\" style=\"color:{_TEXT_SECONDARY};text-decoration:none;border-bottom:1px dotted {_TEXT_MUTED};\">Open Watchlist Explorer</a>"
                 "</div>"
             )
-        parts.append(self._brief_modules(full_html))
         parts.append("</td></tr>")
 
         parts.extend(["</table>", "</td></tr></table>", "</body></html>"])

@@ -104,3 +104,35 @@ def test_interpreter_mentions_weak_sector_breadth_when_indices_are_split():
     )
     result = interpret_market_setup(setup, [])
     assert "Sector breadth is weak" in result.narrative
+
+
+def test_interpreter_mentions_mixed_index_breadth_but_supportive_sector_breadth():
+    setup = MarketSetup(
+        index_quotes=[
+            _quote("^GSPC", "S&P 500 (SPX)", 0.1),
+            _quote("^IXIC", "Nasdaq Composite (COMP)", 0.5),
+            _quote("^STOXX50E", "EURO STOXX 50", -0.7),
+            _quote("^DAX", "DAX", -0.6),
+            _quote("^VIX", "VIX", 1.8),
+        ],
+        market_breadth=[
+            MarketBreadth(symbol="XLK", display_name="Technology", change_percent=0.9),
+            MarketBreadth(symbol="XLF", display_name="Financials", change_percent=0.5),
+            MarketBreadth(symbol="XLE", display_name="Energy", change_percent=0.3),
+            MarketBreadth(symbol="XLV", display_name="Health Care", change_percent=0.6),
+            MarketBreadth(symbol="XLI", display_name="Industrials", change_percent=0.7),
+            MarketBreadth(symbol="XLP", display_name="Consumer Staples", change_percent=0.1),
+            MarketBreadth(symbol="XLU", display_name="Utilities", change_percent=0.2),
+            MarketBreadth(symbol="XLY", display_name="Consumer Discretionary", change_percent=0.8),
+            MarketBreadth(symbol="XLB", display_name="Materials", change_percent=-0.2),
+            MarketBreadth(symbol="XLRE", display_name="Real Estate", change_percent=-0.1),
+            MarketBreadth(symbol="XLC", display_name="Communication Services", change_percent=-0.4),
+            MarketBreadth(symbol="SMH", display_name="Semiconductors", change_percent=0.4),
+        ],
+    )
+    result = interpret_market_setup(setup, [])
+    assert (
+        "Equity breadth is balanced" in result.narrative
+        or "Index breadth is mixed-to-weak" in result.narrative
+    )
+    assert "Sector breadth is supportive" in result.narrative or "sector breadth has improved" in result.narrative

@@ -34,3 +34,9 @@ def test_sector_breadth_delta_is_count_based_wording() -> None:
     assert "5/12" in text
     assert "improved" in text.lower() or "weakened" in text.lower()
 
+
+def test_brent_stale_note_when_wti_moves_and_brent_unchanged() -> None:
+    previous = {"wti_pct": -4.13, "brent_pct": -4.81}
+    current = {"wti_pct": -5.61, "brent_pct": -4.81}
+    lines = build_what_changed_lines(previous=previous, current=current)
+    assert any("brent" in line.lower() and "stale/provider-held" in line.lower() for line in lines)

@@ -119,3 +119,31 @@ def test_us_preopen_does_not_claim_cash_indices_live_without_cash_updates():
     joined = " | ".join(lines).lower()
     assert "us cash indices: prior close" in joined
     assert "watchlist/pre-market proxies: near-real-time" in joined
+
+
+def test_intraday_vix_unavailable_is_explicitly_labeled():
+    generated = datetime(2026, 5, 7, 14, 24, tzinfo=timezone.utc)
+    lines = build_data_basis_lines(
+        session_key="us_intraday_risk",
+        generated_at=generated,
+        timezone_name="Europe/Madrid",
+        index_quotes=[],
+        macro_quotes=[],
+        watchlist_quotes=[],
+    )
+    assert any("vix: unavailable" in line.lower() for line in lines)
+
+
+def test_brent_stale_provider_held_note_when_wti_live_and_brent_stale():
+    generated = datetime(2026, 5, 7, 14, 24, tzinfo=timezone.utc)
+    wti_live = _q("CL=F", "WTI Crude", datetime(2026, 5, 7, 14, 20, tzinfo=timezone.utc), 1.20)
+    brent_stale = _q("BZ=F", "Brent Crude", datetime(2026, 5, 6, 20, 0, tzinfo=timezone.utc), 0.00)
+    lines = build_data_basis_lines(
+        session_key="us_intraday_risk",
+        generated_at=generated,
+        timezone_name="Europe/Madrid",
+        index_quotes=[],
+        macro_quotes=[wti_live, brent_stale],
+        watchlist_quotes=[],
+    )
+    assert any("brent is" in line.lower() and "stale/prior-provider context" in line.lower() for line in lines)

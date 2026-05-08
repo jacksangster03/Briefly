@@ -246,6 +246,26 @@ def build_data_basis_lines(
     if session_key in {"europe_midday", "us_pre_open"} and eu_basis.startswith(("prior close", "delayed", "stale")):
         lines.append("Europe cash is open but provider quotes are prior close/delayed.")
 
+    # VIX availability note for intraday risk reads.
+    if session_key in {"us_intraday_risk", "into_close"}:
+        vix_quote = next(
+            (
+                q for q in index_quotes + macro_quotes
+                if "VIX" in f"{q.display_name} {q.symbol}".upper()
+            ),
+            None,
+        )
+        if vix_quote is None:
+            lines.append("VIX: unavailable (provider path did not return a live quote this cycle).")
+        else:
+            vix_meta = classify_quote_freshness(
+                quote=vix_quote,
+                generated_at=generated_at,
+                session_key=session_key,
+                timezone_name=timezone_name,
+            )
+            lines.append(f"VIX: {vix_meta.display_prefix}, {vix_meta.freshness_label}.")
+
     # Brent stale/unchanged-provider note when WTI is updating but Brent is not.
     wti_quote = next(
         (q for q in macro_quotes if "WTI" in f"{q.display_name} {q.symbol}".upper() or "CRUDE" in f"{q.display_name} {q.symbol}".upper()),

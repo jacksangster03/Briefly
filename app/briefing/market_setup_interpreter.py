@@ -188,6 +188,11 @@ def _breadth_phrase(*, setup: MarketSetup, index_quotes, region_score: int) -> s
             + sector_note
         )
     if region_score < 0:
+        if sector_total and sector_up is not None and sector_up >= max(8, int(sector_total * 0.7)):
+            return (
+                f"Index breadth is mixed-to-weak ({positive}/{total} tracked benchmarks up) under cross-region pressure, "
+                f"but sector breadth has improved ({sector_up}/{sector_total} positive)."
+            )
         return (
             f"Equity breadth is weak ({positive}/{total} tracked benchmarks up) with cross-region pressure."
             + sector_note
