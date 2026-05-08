@@ -30,6 +30,8 @@ from app.briefing.trust_contract import (
 )
 from app.briefing.regional_lens import build_regional_lens
 from app.briefing.theme_builder import build_top_themes
+from app.briefing.news_classifier import annotate_news_events, should_suppress_low_signal
+from app.briefing.llm_news_classifier import run_llm_news_classifier_shadow
 from app.healthcare.section_builder import build_healthcare_section
 from app.logger import get_logger
 from app.db.session import get_session
@@ -478,8 +480,32 @@ class MorningBriefingGenerator:
             self.settings,
             sector_lookup=self.universe.sectors_for_ticker,
         )
+        annotate_news_events(
+            scored,
+            now=briefing.generated_at.astimezone(timezone.utc),
+            breaking_max_age_hours=max(1, int(getattr(self.settings, "news_breaking_max_age_hours", 6))),
+        )
         briefing.events_after_dedup = len(scored)
         eligible = [event for event in scored if not event.already_sent and event.update_status == "new"]
+        try:
+            local_date = briefing.generated_at.astimezone(
+                ZoneInfo(self.profile.timezone or self.settings.timezone or "Europe/Madrid")
+            ).date()
+            llm_news_diag = run_llm_news_classifier_shadow(
+                settings=self.settings,
+                profile_name=self.profile.name,
+                session_key=briefing.session_key or "morning",
+                local_date=local_date,
+                events=eligible,
+            )
+            if llm_news_diag:
+                briefing.data_freshness["llm_news_classifier"] = (
+                    "shadow_executed"
+                    if llm_news_diag.get("executed")
+                    else str(llm_news_diag.get("reason", "shadow_skipped"))
+                )
+        except Exception:
+            logger.debug("llm news shadow classifier failed", exc_info=True)
 
         # 7. Assemble sections
         briefing.global_news = self._build_global_news(eligible, briefing.session_mode)
@@ -946,6 +972,8 @@ class MorningBriefingGenerator:
         )
         cleaned: list[NormalisedEvent] = []
         for evt in themes:
+            if should_suppress_low_signal(evt):
+                continue
             conf = event_company_confidence(evt)
             if conf < 0.70 and evt.tickers:
                 # Low-confidence ticker/company mapping in Top Themes is usually noisy.
@@ -968,6 +996,8 @@ class MorningBriefingGenerator:
         )
         cleaned: list[NormalisedEvent] = []
         for event in selected:
+            if should_suppress_low_signal(event):
+                continue
             if classify_section_fit(event) != "global_macro_geo":
                 continue
             if event.event_type in {"ipo", "company_news"} and not has_hard_catalyst(event.event_type, event.title, event.summary):
@@ -1018,6 +1048,8 @@ class MorningBriefingGenerator:
                 if not (ticker_matches or has_sector_tag):
                     continue
                 if self._looks_like_macro_bleed(event) and ticker_matches < 2 and event.source != "sec_edgar":
+                    continue
+                if should_suppress_low_signal(event):
                     continue
                 if not self._is_editorially_trustworthy(event, session_mode, section="sector_scan"):
                     continue
@@ -1402,6 +1434,8 @@ class MorningBriefingGenerator:
                 break
             if not is_actionable_event(event):
                 continue
+            if should_suppress_low_signal(event):
+                continue
             if self._portfolio_focus_worthy(event, portfolio_symbols, require_direct=True):
                 _push(self._apply_news_hygiene(event, section="portfolio_watchlist_themes"))
 
@@ -1409,6 +1443,8 @@ class MorningBriefingGenerator:
             if len(selected) >= MAX_PORTFOLIO_FOCUS:
                 break
             if not is_actionable_event(event):
+                continue
+            if should_suppress_low_signal(event):
                 continue
             if event.final_score < 0.62:
                 continue

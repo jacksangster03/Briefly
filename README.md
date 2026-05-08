@@ -237,11 +237,46 @@ WTI: $96.21 -4.30% | Extreme fall, still high vs 1Y range
 
 News enters the system from Finnhub and NewsAPI (core) plus optional providers: GDELT, Alpha Vantage News, FMP, and Mediastack. Each article passes through a pipeline of cleaning, ticker resolution, sector enrichment, deduplication, story clustering, credibility scoring, and personal relevance scoring against the active profile's holdings and watchlists.
 
-Geopolitics is gated by market relevance: broad world-news articles without a credible market link are suppressed. The sector scan applies a trust gate that filters low-signal content before it reaches the briefing. Breaking alerts use a deterministic classifier (breaking / high_priority / regular / ignore) with per-storyline cooldowns.
+Geopolitics is gated by market relevance: broad world-news articles without a credible market link are suppressed. The sector scan applies a trust gate that filters low-signal content before it reaches the briefing.
+
+Breaking delivery now has a two-layer deterministic gate:
+
+- Selection gate (scores/confidence/event-type thresholds)
+- Freshness gate (prevents old or late-discovery items from being sent as BREAKING)
+
+Each event is classified into a structured, auditable metadata block (stored on `event.raw_data`) including:
+
+- `news_story_type` (`earnings_results`, `guidance_change`, `macro_policy`, `geopolitical_energy`, `mna_deal`, `commentary_valuation`, `low_signal`, etc.)
+- `news_freshness_state` (`new`, `updated`, `repeated`, `stale`, `old_context`, `unknown`)
+- `breaking_label` (`BREAKING`, `UPDATE`, `CONTEXT`, `LATE DISCOVERY`)
+- relevance/confidence fields and suppress reasons
+
+Freshness policy highlights:
+
+- An old `published_at` story discovered late is labeled `LATE DISCOVERY` / `CONTEXT`, not `BREAKING`
+- `material_update` stories can be labeled `UPDATE` when they pass deterministic thresholds
+- repeated non-updated stories are suppressed in non-morning incremental sessions
+
+Low-signal suppression highlights:
+
+- valuation/opinion/listicle framing is demoted unless tied to a hard catalyst
+- generic ETF/proxy-only political polling stories are suppressed from portfolio-focused sections
+- weak ticker/company confidence items are suppressed or demoted before user-facing sections
+
+Optional LLM classifier (shadow-first):
+
+- Controlled by environment flags:
+  - `ENABLE_LLM_NEWS_CLASSIFIER`
+  - `LLM_NEWS_CLASSIFIER_SHADOW_MODE`
+  - `LLM_NEWS_CLASSIFIER_MODEL`
+  - `LLM_NEWS_CLASSIFIER_MAX_ITEMS_PER_RUN`
+  - `LLM_NEWS_CLASSIFIER_MONTHLY_BUDGET_USD`
+- LLM output is advisory and logged for comparison only in shadow mode.
+- Deterministic rules remain the final send/suppress authority.
 
 The Healthcare/Biotech vertical is optional (default off). When enabled, it adds high-signal pharma, biotech, regulatory, and manufacturing catalysts. Hard-anchor gating prevents generic AI, power, and radiology commentary from being misclassified as healthcare content.
 
-The entire system is deterministic and rule-based. No custom ML models are used in the intelligence pipeline at this stage.
+The core decision system remains deterministic and rule-based; optional LLM support is non-authoritative and can be disabled with no behavior loss.
 
 ### Healthcare keys (simple setup)
 

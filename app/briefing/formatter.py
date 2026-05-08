@@ -447,9 +447,14 @@ class TelegramFormatter:
         if is_followup:
             tier_header = "UPDATE"
         else:
+            freshness_label = str((evt.raw_data or {}).get("breaking_label", "")).strip().upper()
+            if freshness_label in {"BREAKING", "UPDATE", "CONTEXT", "LATE DISCOVERY"}:
+                tier_header = freshness_label
+            else:
+                tier_header = ""
             if classification.category == "healthcare_biotech":
                 tier_header = "BREAKING BIOTECH ALERT"
-            else:
+            elif not tier_header:
                 tier_header = {
                     "breaking": SECTION_HEADERS["breaking_title"],
                     "high_priority": "HIGH PRIORITY",

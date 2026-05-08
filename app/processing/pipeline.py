@@ -395,8 +395,8 @@ def select_breaking_events(
             continue
         if evt.already_sent:
             continue
-        # Breaking should be strict one-shot, not repeat continuations.
-        if evt.update_status != "new":
+        # Breaking allows either a fresh new alert or a true material update.
+        if evt.update_status not in {"new", "material_update"}:
             continue
         if rules.require_ticker and not evt.tickers:
             continue

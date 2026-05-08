@@ -91,7 +91,7 @@ def test_intraday_selector_skips_material_update_events():
     assert selected[0].update_status == "new"
 
 
-def test_breaking_selector_skips_material_update_events():
+def test_breaking_selector_allows_material_update_events_with_thresholds():
     rules = load_alert_rules(Settings()).breaking
     events = [
         NormalisedEvent(
@@ -112,8 +112,8 @@ def test_breaking_selector_skips_material_update_events():
         ),
     ]
     selected = select_breaking_events(events, rules)
-    assert len(selected) == 1
-    assert selected[0].title == "US warns buyers of Iranian oil could face sanctions"
+    assert len(selected) == 2
+    assert {evt.update_status for evt in selected} == {"new", "material_update"}
 
 
 def test_theme_builder_generates_clean_summary():

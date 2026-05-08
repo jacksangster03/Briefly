@@ -8,6 +8,7 @@ from app.briefing.breaking_classifier import (
     build_breaking_tracking_ids,
     classify_breaking_event,
 )
+from app.briefing.news_classifier import annotate_news_events, is_stale_breaking_candidate
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
 from app.logger import get_logger
@@ -55,6 +56,10 @@ class BreakingAlertGenerator:
             self.settings,
             sector_lookup=self.universe.sectors_for_ticker,
         )
+        annotate_news_events(
+            scored,
+            breaking_max_age_hours=max(1, int(getattr(self.settings, "news_breaking_max_age_hours", 6))),
+        )
         rules = replace(
             self.rules,
             min_final_score=min_score if min_score is not None else self.rules.min_final_score,
@@ -74,6 +79,12 @@ class BreakingAlertGenerator:
 
         limit = max_alerts if max_alerts is not None else rules.max_per_hour
         for evt in breaking[:limit]:
+            blocked, block_reason = is_stale_breaking_candidate(evt)
+            if blocked:
+                evt.raw_data = dict(evt.raw_data or {})
+                evt.raw_data["breaking_rejected_reason"] = block_reason
+                logger.info("Breaking freshness gate rejected candidate: %s (%s)", evt.title[:80], block_reason)
+                continue
             classification = classify_breaking_event(evt)
             if classification.storyline_key:
                 evt.raw_data["storyline_key"] = classification.storyline_key

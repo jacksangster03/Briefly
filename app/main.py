@@ -1504,6 +1504,22 @@ def run_session_audit(
                 "themes_prev": prev_label or "-",
             }
             freshness_counts = _freshness_counts_from_briefing(briefing)
+            included = briefing.global_news + briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus
+            story_types: dict[str, int] = {}
+            for evt in included:
+                st = str((evt.raw_data or {}).get("news_story_type", "unknown"))
+                story_types[st] = story_types.get(st, 0) + 1
+            suppressed_low_signal = 0
+            rejected_breaking_stale = 0
+            for evt in (briefing.global_news + briefing.top_themes + briefing.watchlist_events + briefing.portfolio_focus):
+                reason = str((evt.raw_data or {}).get("news_suppress_reason", ""))
+                if reason:
+                    suppressed_low_signal += 1
+                if str((evt.raw_data or {}).get("breaking_rejected_reason", "")):
+                    rejected_breaking_stale += 1
+            news_counts["story_types"] = ", ".join(f"{k}:{v}" for k, v in sorted(story_types.items())) or "-"
+            news_counts["suppressed_low_signal"] = suppressed_low_signal
+            news_counts["rejected_stale_breaking"] = rejected_breaking_stale
 
         section_mode = {
             "what_changed": "incremental only" if item.key != "morning" else "full context by design",
@@ -1525,6 +1541,11 @@ def run_session_audit(
         lines.append(
             f"  themes: new={news_counts.get('themes_new', 'n/a')} repeated={news_counts.get('themes_repeated', 'n/a')} carried={news_counts.get('themes_carried', 'n/a')} prev={news_counts.get('themes_prev', '-')}"
         )
+        if news_counts.get("story_types") is not None:
+            lines.append(f"  story_types={news_counts.get('story_types')}")
+            lines.append(
+                f"  suppressed_low_signal={news_counts.get('suppressed_low_signal', 0)} stale_breaking_rejections={news_counts.get('rejected_stale_breaking', 0)}"
+            )
         lines.append(f"  quote_basis={freshness_counts or {'unavailable': 0}}")
         lines.append(f"  sections={section_mode}")
         if warnings:

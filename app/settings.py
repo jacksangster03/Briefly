@@ -132,6 +132,13 @@ class Settings(BaseSettings):
     feature_oil_transmission_card: bool = True
     feature_dynamic_chart_stack: bool = True
     feature_email_density_mode: bool = True
+    # -- Phase: News intelligence classifier ---------------------------------
+    news_breaking_max_age_hours: int = 6
+    enable_llm_news_classifier: bool = False
+    llm_news_classifier_shadow_mode: bool = True
+    llm_news_classifier_model: str = "gpt-4o-mini"
+    llm_news_classifier_max_items_per_run: int = 8
+    llm_news_classifier_monthly_budget_usd: float = 0.0
 
     # -- Convenience helpers --------------------------------------------------
     @property
