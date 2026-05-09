@@ -112,6 +112,31 @@ class SessionSendState(Base):
     error_message = Column(Text, nullable=True)
 
 
+class DeliveryFailureAlertState(Base):
+    """Dedupe/cooldown state for scheduler delivery-failure alerts."""
+
+    __tablename__ = "delivery_failure_alert_state"
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_name",
+            "local_date",
+            "session_key",
+            "failed_channels_hash",
+            name="uq_delivery_failure_alert_scope",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    local_date = Column(Date, nullable=False, index=True)
+    session_key = Column(String(80), nullable=False, index=True)
+    failed_channels_hash = Column(String(64), nullable=False, index=True)
+    failed_channels_json = Column(JSON, nullable=False, default=list)
+    first_alerted_at = Column(DateTime, default=_utcnow, index=True)
+    last_alerted_at = Column(DateTime, default=_utcnow, index=True)
+    alert_count = Column(Integer, default=1)
+
+
 class ProviderHealthLog(Base):
     """Per-call observability for data providers."""
 

@@ -62,7 +62,7 @@ from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
 from app.data_sources.news_data import NewsDataService
 from app.db.models import BreakingStoryState
-from app.db.models import NewsClassifierShadowRun, SentMessage, SessionSendState
+from app.db.models import DeliveryFailureAlertState, NewsClassifierShadowRun, SentMessage, SessionSendState
 from app.db.session import get_session, init_db
 from app.logger import get_logger
 from app.verticals.engine import (
@@ -195,7 +195,7 @@ def _apply_backfill_email_banner(email_content: EmailRenderResult, ctx: Backfill
     )
 
 
-_ALERT_COOLDOWN_MINUTES = 90
+_ALERT_COOLDOWN_MINUTES = 360
 _ALERT_MESSAGE_TYPE = "delivery_alert"
 
 
@@ -203,6 +203,151 @@ def _delivery_alert_hash(profile_name: str, session_key: str, local_date: "date"
     import hashlib
     key = f"{_ALERT_MESSAGE_TYPE}:{profile_name}:{session_key}:{local_date.isoformat()}"
     return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def _delivery_failed_channels_hash(
+    *,
+    profile_name: str,
+    session_key: str,
+    local_date: "date",
+    failed_channels: list[str],
+) -> str:
+    import hashlib
+    scope = ",".join(sorted({str(ch).strip().lower() for ch in failed_channels if str(ch).strip()}))
+    key = f"delivery_failure:{profile_name}:{session_key}:{local_date.isoformat()}:{scope}"
+    return hashlib.sha256(key.encode()).hexdigest()[:24]
+
+
+def _authoritative_success_channels(
+    *,
+    profile_name: str,
+    session_key: str,
+    local_date: "date",
+    requested_channels: set[str],
+    timezone_name: str,
+) -> set[str]:
+    success: set[str] = set()
+    if not requested_channels:
+        return success
+    session_message_type = canonical_session_message_key(session_key)
+    try:
+        with get_session() as db_sess:
+            state_rows = (
+                db_sess.query(SessionSendState)
+                .filter(
+                    SessionSendState.profile_name == profile_name,
+                    SessionSendState.session_key == session_key,
+                    SessionSendState.local_date == local_date,
+                    SessionSendState.replay_namespace == "",
+                    SessionSendState.success.is_(True),
+                )
+                .all()
+            )
+            for row in state_rows:
+                ch = str(row.channel or "").strip().lower()
+                if ch in requested_channels:
+                    success.add(ch)
+
+            if success >= requested_channels:
+                return success
+
+            # Supplemental check for legacy/partial state gaps in session_send_state.
+            tz = ZoneInfo(timezone_name or "Europe/Madrid")
+            day_start = datetime.combine(local_date, time.min, tzinfo=tz).astimezone(timezone.utc)
+            day_end = datetime.combine(local_date, time.max, tzinfo=tz).astimezone(timezone.utc)
+            sent_rows = (
+                db_sess.query(SentMessage)
+                .filter(
+                    SentMessage.message_type == session_message_type,
+                    SentMessage.success.is_(True),
+                    SentMessage.channel.in_(list(requested_channels)),
+                    SentMessage.sent_at >= day_start,
+                    SentMessage.sent_at <= day_end,
+                )
+                .all()
+            )
+            for row in sent_rows:
+                ch = str(row.channel or "").strip().lower()
+                if ch in requested_channels:
+                    success.add(ch)
+    except Exception:
+        logger.debug("Failed authoritative success-channel lookup (non-fatal)", exc_info=True)
+    return success
+
+
+def _should_emit_delivery_failure_alert(
+    *,
+    profile_name: str,
+    session_key: str,
+    local_date: "date",
+    unresolved_failed_channels: list[str],
+    now_utc: datetime,
+) -> tuple[bool, str]:
+    failed_hash = _delivery_failed_channels_hash(
+        profile_name=profile_name,
+        session_key=session_key,
+        local_date=local_date,
+        failed_channels=unresolved_failed_channels,
+    )
+    cooldown_cutoff = now_utc - timedelta(minutes=_ALERT_COOLDOWN_MINUTES)
+    try:
+        with get_session() as db_sess:
+            row = (
+                db_sess.query(DeliveryFailureAlertState)
+                .filter(
+                    DeliveryFailureAlertState.profile_name == profile_name,
+                    DeliveryFailureAlertState.local_date == local_date,
+                    DeliveryFailureAlertState.session_key == session_key,
+                    DeliveryFailureAlertState.failed_channels_hash == failed_hash,
+                )
+                .one_or_none()
+            )
+            if row and row.last_alerted_at and row.last_alerted_at >= cooldown_cutoff:
+                return False, "cooldown"
+    except Exception:
+        logger.debug("Failed delivery-failure alert dedupe lookup (non-fatal)", exc_info=True)
+    return True, failed_hash
+
+
+def _record_delivery_failure_alert_state(
+    *,
+    profile_name: str,
+    session_key: str,
+    local_date: "date",
+    unresolved_failed_channels: list[str],
+    failed_hash: str,
+    now_utc: datetime,
+) -> None:
+    try:
+        with get_session() as db_sess:
+            row = (
+                db_sess.query(DeliveryFailureAlertState)
+                .filter(
+                    DeliveryFailureAlertState.profile_name == profile_name,
+                    DeliveryFailureAlertState.local_date == local_date,
+                    DeliveryFailureAlertState.session_key == session_key,
+                    DeliveryFailureAlertState.failed_channels_hash == failed_hash,
+                )
+                .one_or_none()
+            )
+            if row is None:
+                row = DeliveryFailureAlertState(
+                    profile_name=profile_name,
+                    local_date=local_date,
+                    session_key=session_key,
+                    failed_channels_hash=failed_hash,
+                    failed_channels_json=sorted({str(ch).lower() for ch in unresolved_failed_channels}),
+                    first_alerted_at=now_utc,
+                    last_alerted_at=now_utc,
+                    alert_count=1,
+                )
+                db_sess.add(row)
+                return
+            row.failed_channels_json = sorted({str(ch).lower() for ch in unresolved_failed_channels})
+            row.last_alerted_at = now_utc
+            row.alert_count = int(row.alert_count or 0) + 1
+    except Exception:
+        logger.debug("Failed delivery-failure alert state persistence (non-fatal)", exc_info=True)
 
 
 def _send_delivery_failure_alert(
@@ -219,51 +364,69 @@ def _send_delivery_failure_alert(
 ) -> None:
     """Send a Telegram self-alert when the scheduler fails to deliver a session.
 
-    Non-blocking. Respects a 90-minute cooldown per session/date so repeated
-    scheduler retries on a broken channel do not spam the user.
+    Non-blocking. Respects dedupe + cooldown (default 6h) keyed by
+    profile/date/session + failed-channel set.
     """
     try:
-        failed = [ch for ch, st in channel_status.items() if st == "failed"]
+        failed = [str(ch).lower() for ch, st in channel_status.items() if st == "failed"]
         sent_ok = [ch for ch, st in channel_status.items() if st == "sent"]
         if not failed:
             return
-
-        alert_hash = _delivery_alert_hash(profile_name, session_key, local_date)
-        cooldown_cutoff = datetime.now(timezone.utc) - timedelta(minutes=_ALERT_COOLDOWN_MINUTES)
-        with get_session() as db_sess:
-            recent = (
-                db_sess.query(SentMessage)
-                .filter(
-                    SentMessage.message_type == _ALERT_MESSAGE_TYPE,
-                    SentMessage.content_hash == alert_hash,
-                    SentMessage.sent_at >= cooldown_cutoff,
-                    SentMessage.success.is_(True),
-                )
-                .first()
-            )
-        if recent:
-            logger.debug(
-                "Delivery failure alert suppressed by cooldown | session=%s date=%s",
-                session_key, local_date,
+        requested_channels = {str(ch).lower() for ch in channel_status.keys()}
+        success_channels = _authoritative_success_channels(
+            profile_name=profile_name,
+            session_key=session_key,
+            local_date=local_date,
+            requested_channels=requested_channels,
+            timezone_name=timezone_name,
+        )
+        unresolved_failed = [ch for ch in failed if ch not in success_channels]
+        if not unresolved_failed:
+            logger.info(
+                "Suppressed stale delivery failure alert because session already delivered | profile=%s session=%s date=%s",
+                profile_name, session_key, local_date,
             )
             return
 
+        now_utc = datetime.now(timezone.utc)
+        should_emit, dedupe_result = _should_emit_delivery_failure_alert(
+            profile_name=profile_name,
+            session_key=session_key,
+            local_date=local_date,
+            unresolved_failed_channels=unresolved_failed,
+            now_utc=now_utc,
+        )
+        if not should_emit:
+            logger.info(
+                "Suppressed duplicate delivery failure alert within cooldown | profile=%s session=%s date=%s failed_channels=%s",
+                profile_name, session_key, local_date, ",".join(sorted(unresolved_failed)),
+            )
+            return
+        failed_hash = dedupe_result
+
         failed_lines = "\n".join(
-            f"  {ch}: {channel_reason.get(ch, 'unknown error')}" for ch in failed
+            f"  {ch}: {channel_reason.get(ch, 'unknown error')}" for ch in unresolved_failed
         )
+        resolved_sent = sorted({str(ch).lower() for ch in sent_ok} | success_channels)
         sent_lines = (
-            "\n".join(f"  {ch}: delivered" for ch in sent_ok)
-            if sent_ok else "  (none)"
+            "\n".join(f"  {ch}: delivered" for ch in resolved_sent)
+            if resolved_sent else "  (none)"
         )
+        retry_eligible = bool(unresolved_failed)
+        retry_lines = ""
+        if retry_eligible:
+            retry_lines = (
+                "The scheduler will retry automatically on the next poll cycle.\n"
+                f"To resend immediately:\n"
+                f"  python -m app.cli session-send --session {session_key} --force"
+            )
         alert_text = (
             "[DELIVERY FAILURE] Briefly scheduler alert\n\n"
             f"Session: {session_title} ({session_key})\n"
             f"Date: {local_date.isoformat()}  Generated: {generated_at_str} {timezone_name}\n\n"
             f"Failed channels:\n{failed_lines}\n\n"
             f"Sent channels:\n{sent_lines}\n\n"
-            "The scheduler will retry automatically on the next poll cycle.\n"
-            f"To resend immediately:\n"
-            f"  python -m app.cli session-send --session {session_key} --force"
+            f"{retry_lines}".rstrip()
         )
 
         messenger = TelegramMessenger(settings)
@@ -272,6 +435,7 @@ def _send_delivery_failure_alert(
             return
 
         success = messenger.send_messages([alert_text])
+        alert_hash = _delivery_alert_hash(profile_name, session_key, local_date)
         with get_session() as db_sess:
             db_sess.add(SentMessage(
                 message_type=_ALERT_MESSAGE_TYPE,
@@ -284,14 +448,24 @@ def _send_delivery_failure_alert(
                 error_message=None if success else str(getattr(messenger, "last_error", "") or "alert send failed"),
             ))
         if success:
+            _record_delivery_failure_alert_state(
+                profile_name=profile_name,
+                session_key=session_key,
+                local_date=local_date,
+                unresolved_failed_channels=unresolved_failed,
+                failed_hash=failed_hash,
+                now_utc=now_utc,
+            )
             logger.info(
-                "Delivery failure alert sent | session=%s date=%s failed_channels=%s",
-                session_key, local_date, failed,
+                "Delivery failure alert emitted for unresolved channels: %s | session=%s date=%s",
+                ",".join(sorted(unresolved_failed)),
+                session_key,
+                local_date,
             )
         else:
             logger.warning(
                 "Delivery failure alert itself failed to send | session=%s failed_channels=%s",
-                session_key, failed,
+                session_key, unresolved_failed,
             )
     except Exception:
         logger.debug("Delivery failure alert raised unexpectedly (non-blocking)", exc_info=True)
