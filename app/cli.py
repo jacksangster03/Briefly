@@ -1261,46 +1261,42 @@ def schedule_status(ctx, profile_name: str):
         (r.session_key, r.channel): r for r in rows
     }
 
-    for meta in profile_sessions:
-        sk = meta.key
-        for ch in channels:
-            row = state_map.get((sk, ch))
-            if row is None:
-                state_str = "(not attempted)"
-            elif row.success:
-                if row.sent_at:
-                    sent_utc = row.sent_at.replace(tzinfo=_dt.timezone.utc)
-                    sent_at = sent_utc.astimezone(tz).strftime("%H:%M")
-                else:
-                    sent_at = "?"
-                state_str = f"sent at {sent_at}"
-            elif row.in_progress:
-                state_str = "in progress"
+    def _row_state(row):
+        if row is None:
+            return "(not attempted)"
+        if row.success:
+            if row.sent_at:
+                sent_utc = row.sent_at.replace(tzinfo=_dt.timezone.utc)
+                sent_at = sent_utc.astimezone(tz).strftime("%H:%M")
             else:
-                state_str = f"failed: {(row.error_message or '')[:60]}"
-            click.echo(f"    {sk:<22} {ch:<10} {state_str}")
+                sent_at = "?"
+            return f"sent at {sent_at}"
+        if row.in_progress:
+            return "in progress"
+        return f"failed: {(row.error_message or '')[:60]}"
 
     if local_now.weekday() >= 5:
-        for wk_key, wk_label in (
-            ("saturday_weekend_briefing", "Weekend Briefing"),
-            ("sunday_weekend_watch", "Sunday Weekend Watch"),
-        ):
+        weekend_keys = ["saturday_weekend_briefing", "sunday_weekend_watch"]
+        for sk in weekend_keys:
             for ch in channels:
-                row = state_map.get((wk_key, ch))
-                if row is None:
-                    state_str = "(not attempted)"
-                elif row.success:
-                    if row.sent_at:
-                        sent_utc = row.sent_at.replace(tzinfo=_dt.timezone.utc)
-                        sent_at = sent_utc.astimezone(tz).strftime("%H:%M")
-                    else:
-                        sent_at = "?"
-                    state_str = f"sent at {sent_at}"
-                elif row.in_progress:
-                    state_str = "in progress"
-                else:
-                    state_str = f"failed: {(row.error_message or '')[:60]}"
-                click.echo(f"    {wk_key:<22} {ch:<10} {state_str}")
+                click.echo(f"    {sk:<22} {ch:<10} {_row_state(state_map.get((sk, ch)))}")
+
+        legacy_rows = sorted(
+            [r for r in rows if r.session_key in {"morning", "europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"}],
+            key=lambda r: (r.session_key, r.channel),
+        )
+        if legacy_rows:
+            click.echo("")
+            click.echo("  Historical/legacy weekday-key weekend records (not weekend-eligible):")
+            for row in legacy_rows:
+                click.echo(
+                    f"    {row.session_key:<22} {row.channel:<10} {_row_state(row)}"
+                )
+    else:
+        for meta in profile_sessions:
+            sk = meta.key
+            for ch in channels:
+                click.echo(f"    {sk:<22} {ch:<10} {_row_state(state_map.get((sk, ch)))}")
 
 
 @cli.command("daily-summary")

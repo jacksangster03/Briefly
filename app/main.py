@@ -1382,7 +1382,7 @@ def run_daily_summary(
     Returns:
         Multi-line plain-text summary string.
     """
-    from app.briefing.session_metadata import ASIA_COVERAGE_NOTE, sessions_for_profile
+    from app.briefing.session_metadata import ASIA_COVERAGE_NOTE, SessionMeta, sessions_for_profile
     from app.briefing.session_templates import get_session_template_for_profile
     from app.briefing.session_snapshot_service import list_session_snapshots
 
@@ -1439,10 +1439,42 @@ def run_daily_summary(
         "",
     ]
 
+    weekday_idx = target_date.weekday()
+    weekend_mode = getattr(profile_obj, "weekend_mode", "saturday_only")
+    sunday_materiality = getattr(profile_obj, "sunday_news_materiality", "material_only")
+    if weekday_idx == 5:
+        if weekend_mode in {"saturday_only", "saturday_and_sunday_news"}:
+            report_sessions: tuple[SessionMeta, ...] = (
+                SessionMeta(
+                    key="saturday_weekend_briefing",
+                    label="Weekend Briefing",
+                    focus="Friday close recap + weekend developments + next-week setup",
+                    window_start=time(6, 0),
+                    window_end=time(23, 59),
+                ),
+            )
+        else:
+            report_sessions = tuple()
+    elif weekday_idx == 6:
+        if weekend_mode == "saturday_and_sunday_news":
+            report_sessions = (
+                SessionMeta(
+                    key="sunday_weekend_watch",
+                    label="Sunday Weekend Watch",
+                    focus="Material weekend developments for Monday setup",
+                    window_start=time(9, 0),
+                    window_end=time(23, 59),
+                ),
+            )
+        else:
+            report_sessions = tuple()
+    else:
+        report_sessions = profile_sessions
+
     failures = 0
     archived = 0
 
-    for meta in profile_sessions:
+    for meta in report_sessions:
         sk = meta.key
         window_started = current_local_tod is None or meta.window_start <= current_local_tod
 
@@ -1485,6 +1517,43 @@ def run_daily_summary(
 
         lines.append("")
 
+    if weekday_idx >= 5:
+        lines.append("Weekend routing:")
+        lines.append(f"  weekend_mode: {weekend_mode}")
+        lines.append(f"  sunday_news_materiality: {sunday_materiality}")
+        if not report_sessions:
+            lines.append("  No automatic weekend scheduled sessions are eligible for this profile/mode.")
+        suppressed_weekday_count = sum(
+            1 for m in profile_sessions
+            if m.key in {"morning", "europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"}
+        )
+        if suppressed_weekday_count:
+            lines.append(f"  Weekday sessions suppressed today: {suppressed_weekday_count} (normal weekday cadence disabled on weekends)")
+        lines.append("")
+
+        expected_keys = {m.key for m in report_sessions}
+        legacy_rows = [
+            r for r in rows
+            if r.session_key not in expected_keys
+            and r.session_key in {"morning", "europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"}
+        ]
+        if legacy_rows:
+            lines.append("Historical/legacy weekday-key records found for this weekend date:")
+            for row in legacy_rows[:12]:
+                if row.success:
+                    if row.sent_at:
+                        sent_utc = row.sent_at.replace(tzinfo=timezone.utc)
+                        sent_local = sent_utc.astimezone(tz).strftime("%H:%M")
+                        status = f"sent at {sent_local}"
+                    else:
+                        status = "sent"
+                elif row.in_progress:
+                    status = "in progress"
+                else:
+                    status = "failed"
+                lines.append(f"  - {row.session_key} | {row.channel}: {status} (legacy pre-fix weekend key)")
+            lines.append("")
+
     # Breaking alerts scoped to the target date in local time
     with get_session() as db_sess:
         breaking_count = (
@@ -1499,7 +1568,7 @@ def run_daily_summary(
         )
 
     lines.append(f"Failures:          {failures}")
-    lines.append(f"Archived snapshots: {archived}/{len(profile_sessions)}")
+    lines.append(f"Archived snapshots: {archived}/{len(report_sessions)}")
     lines.append(f"Breaking alerts:   {breaking_count} (today)")
     lines.append("")
     lines.append(f"Template: {template_name} | Region: {getattr(profile_obj, 'market_region', '') or 'EMEA'} | Sub-region: {getattr(profile_obj, 'sub_region', '') or 'Eurozone'}")

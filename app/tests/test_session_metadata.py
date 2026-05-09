@@ -208,6 +208,131 @@ class TestRunDailySummary:
         result = run_daily_summary(Settings(), target_date_str="2026-05-06")
         assert "Asia" in result
 
+    def test_saturday_daily_summary_uses_weekend_session_only(self, monkeypatch) -> None:
+        from app.main import run_daily_summary
+        from app.settings import Settings
+        from contextlib import contextmanager
+        from unittest.mock import MagicMock
+        from app.personalization.user_profile import UserProfile
+
+        monkeypatch.setattr("app.main.init_db", lambda: None)
+        monkeypatch.setattr(
+            "app.main.load_user_profile",
+            lambda *_a, **_k: UserProfile(
+                timezone="Europe/Madrid",
+                delivery={"weekend_mode": "saturday_only", "sunday_news_materiality": "material_only"},
+            ),
+        )
+
+        @contextmanager
+        def _fake_session():
+            mock = MagicMock()
+            mock.query.return_value.filter.return_value.all.return_value = []
+            mock.query.return_value.filter.return_value.count.return_value = 0
+            yield mock
+
+        monkeypatch.setattr("app.main.get_session", _fake_session)
+        monkeypatch.setattr(
+            "app.briefing.session_snapshot_service.list_session_snapshots",
+            lambda **kw: [],
+            raising=False,
+        )
+
+        result = run_daily_summary(Settings(), target_date_str="2026-05-09", profile_name="default_user")
+        assert "Weekend Briefing" in result
+        assert "US Pre-Open Setup: upcoming" not in result
+        assert "US Intraday Risk Check: upcoming" not in result
+        assert "weekday sessions suppressed today" in result.lower()
+
+    def test_sunday_saturday_only_has_no_weekday_sessions(self, monkeypatch) -> None:
+        from app.main import run_daily_summary
+        from app.settings import Settings
+        from contextlib import contextmanager
+        from unittest.mock import MagicMock
+        from app.personalization.user_profile import UserProfile
+
+        monkeypatch.setattr("app.main.init_db", lambda: None)
+        monkeypatch.setattr(
+            "app.main.load_user_profile",
+            lambda *_a, **_k: UserProfile(
+                timezone="Europe/Madrid",
+                delivery={"weekend_mode": "saturday_only", "sunday_news_materiality": "material_only"},
+            ),
+        )
+
+        @contextmanager
+        def _fake_session():
+            mock = MagicMock()
+            mock.query.return_value.filter.return_value.all.return_value = []
+            mock.query.return_value.filter.return_value.count.return_value = 0
+            yield mock
+
+        monkeypatch.setattr("app.main.get_session", _fake_session)
+        monkeypatch.setattr(
+            "app.briefing.session_snapshot_service.list_session_snapshots",
+            lambda **kw: [],
+            raising=False,
+        )
+
+        result = run_daily_summary(Settings(), target_date_str="2026-05-10", profile_name="default_user")
+        assert "No automatic weekend scheduled sessions are eligible" in result
+        assert "Europe Midday Check" not in result
+        assert "US Pre-Open Setup" not in result
+
+    def test_weekend_legacy_weekday_rows_are_marked_historical(self, monkeypatch) -> None:
+        from app.main import run_daily_summary
+        from app.settings import Settings
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        from app.personalization.user_profile import UserProfile
+
+        monkeypatch.setattr("app.main.init_db", lambda: None)
+        monkeypatch.setattr(
+            "app.main.load_user_profile",
+            lambda *_a, **_k: UserProfile(
+                timezone="Europe/Madrid",
+                delivery={"weekend_mode": "saturday_only", "sunday_news_materiality": "material_only"},
+            ),
+        )
+
+        legacy_rows = [
+            SimpleNamespace(
+                session_key="morning",
+                channel="email",
+                success=True,
+                in_progress=False,
+                error_message="",
+                sent_at=None,
+            ),
+            SimpleNamespace(
+                session_key="europe_midday",
+                channel="telegram",
+                success=True,
+                in_progress=False,
+                error_message="",
+                sent_at=None,
+            ),
+        ]
+
+        @contextmanager
+        def _fake_session():
+            mock = MagicMock()
+            mock.query.return_value.filter.return_value.all.return_value = legacy_rows
+            mock.query.return_value.filter.return_value.count.return_value = 0
+            yield mock
+
+        monkeypatch.setattr("app.main.get_session", _fake_session)
+        monkeypatch.setattr(
+            "app.briefing.session_snapshot_service.list_session_snapshots",
+            lambda **kw: [],
+            raising=False,
+        )
+
+        result = run_daily_summary(Settings(), target_date_str="2026-05-09", profile_name="default_user")
+        assert "Historical/legacy weekday-key records found for this weekend date" in result
+        assert "US Pre-Open Setup: upcoming" not in result
+
 
 class TestWeekendSessionEligibility:
     def test_saturday_only_mode_allows_only_saturday_weekend_briefing(self) -> None:
