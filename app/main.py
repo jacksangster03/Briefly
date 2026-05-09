@@ -218,6 +218,16 @@ def _delivery_failed_channels_hash(
     return hashlib.sha256(key.encode()).hexdigest()[:24]
 
 
+def _success_session_key_aliases(session_key: str) -> list[str]:
+    key = str(session_key or "").strip().lower()
+    aliases = [key]
+    # Backward-compatibility for pre-weekend-routing sends where Saturday/Sunday
+    # content could have been delivered under `morning`.
+    if key in {"saturday_weekend_briefing", "sunday_weekend_watch"}:
+        aliases.append("morning")
+    return aliases
+
+
 def _authoritative_success_channels(
     *,
     profile_name: str,
@@ -229,14 +239,15 @@ def _authoritative_success_channels(
     success: set[str] = set()
     if not requested_channels:
         return success
-    session_message_type = canonical_session_message_key(session_key)
+    session_keys = _success_session_key_aliases(session_key)
+    session_message_types = [canonical_session_message_key(k) for k in session_keys]
     try:
         with get_session() as db_sess:
             state_rows = (
                 db_sess.query(SessionSendState)
                 .filter(
                     SessionSendState.profile_name == profile_name,
-                    SessionSendState.session_key == session_key,
+                    SessionSendState.session_key.in_(session_keys),
                     SessionSendState.local_date == local_date,
                     SessionSendState.replay_namespace == "",
                     SessionSendState.success.is_(True),
@@ -258,7 +269,7 @@ def _authoritative_success_channels(
             sent_rows = (
                 db_sess.query(SentMessage)
                 .filter(
-                    SentMessage.message_type == session_message_type,
+                    SentMessage.message_type.in_(session_message_types),
                     SentMessage.success.is_(True),
                     SentMessage.channel.in_(list(requested_channels)),
                     SentMessage.sent_at >= day_start,
@@ -303,6 +314,21 @@ def _should_emit_delivery_failure_alert(
                 .one_or_none()
             )
             if row and row.last_alerted_at and row.last_alerted_at >= cooldown_cutoff:
+                return False, "cooldown"
+            # Fallback dedupe if alert-state rows are unavailable/stale: reuse
+            # existing sent-message alerts keyed by session/date.
+            legacy_alert_hash = _delivery_alert_hash(profile_name, session_key, local_date)
+            recent_alert = (
+                db_sess.query(SentMessage)
+                .filter(
+                    SentMessage.message_type == _ALERT_MESSAGE_TYPE,
+                    SentMessage.content_hash == legacy_alert_hash,
+                    SentMessage.sent_at >= cooldown_cutoff,
+                    SentMessage.success.is_(True),
+                )
+                .first()
+            )
+            if recent_alert is not None:
                 return False, "cooldown"
     except Exception:
         logger.debug("Failed delivery-failure alert dedupe lookup (non-fatal)", exc_info=True)
