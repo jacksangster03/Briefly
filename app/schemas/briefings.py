@@ -88,6 +88,7 @@ class MorningBriefing(BaseModel):
     session_quality_label: str = ""
     section_confidence: dict[str, str] = Field(default_factory=dict)
     data_freshness: dict[str, str] = Field(default_factory=dict)
+    macro_policy_watch: str = ""
     quote_freshness: dict[str, dict] = Field(default_factory=dict)
     data_basis_lines: list[str] = Field(default_factory=list)
     market_clock_context: dict[str, object] = Field(default_factory=dict)

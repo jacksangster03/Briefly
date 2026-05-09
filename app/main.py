@@ -1917,8 +1917,6 @@ def run_session_audit(
         )
 
     for item in sessions:
-        if target_date == now_local.date() and now_local.time() < item.window_start:
-            continue
         previous_key, previous_label, previous_sent = previous_session_context(
             profile_name=profile_name,
             session_key=item.key,

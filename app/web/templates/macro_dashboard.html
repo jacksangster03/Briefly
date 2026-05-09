@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Macro Policy Dashboard — Briefly</title>
+  <style>
+    :root {
+      --bg: #030a12;
+      --canvas: #071524;
+      --panel: #0a1d30;
+      --divider: #17364f;
+      --text: #eaf2ff;
+      --sub: #a5b5c6;
+      --muted: #7d92a9;
+      --ok: #00c2a8;
+      --partial: #ffb454;
+      --unavailable: #8f9fb2;
+      --stale: #d48fff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .head { margin-bottom: 14px; }
+    .title { margin: 0 0 8px 0; font-size: 28px; font-weight: 800; }
+    .sub { margin: 0; color: var(--sub); }
+    .chips { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip { border: 1px solid var(--divider); background: var(--panel); border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--sub); }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .card { background: var(--canvas); border: 1px solid var(--divider); border-radius: 12px; padding: 12px; }
+    .card h2 { margin: 0 0 8px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--sub); }
+    .rows { display: grid; gap: 8px; }
+    .row { background: var(--panel); border: 1px solid var(--divider); border-radius: 10px; padding: 8px; }
+    .name { font-weight: 700; font-size: 13px; }
+    .meta { margin-top: 4px; color: var(--sub); font-size: 12px; }
+    .badge { border-radius: 999px; padding: 2px 8px; font-size: 11px; border: 1px solid var(--divider); }
+    .ok { color: var(--ok); }
+    .partial { color: var(--partial); }
+    .unavailable { color: var(--unavailable); }
+    .stale { color: var(--stale); }
+    .events { display: grid; gap: 8px; }
+    .event { border-left: 3px solid var(--divider); padding-left: 8px; }
+    .event .date { color: var(--muted); font-size: 12px; }
+    .links { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .links a { color: var(--sub); text-decoration: none; border-bottom: 1px dotted var(--sub); }
+    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  {% set p = payload %}
+  <div class="wrap">
+    <div class="head">
+      <h1 class="title">Macro Policy Dashboard</h1>
+      <p class="sub">Deterministic policy, inflation, labour, rates and catalyst monitoring with explicit freshness states.</p>
+      <div class="chips">
+        <span class="chip">Profile: {{ profile }}</span>
+        <span class="chip">Status: {{ p.status }}</span>
+        <span class="chip">Generated: {{ p.generated_at }}</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Central Bank Policy <span class="badge {{ p.central_bank_policy.status }}">{{ p.central_bank_policy.status }}</span></h2>
+        <div class="rows">
+          {% for key, row in p.central_bank_policy.series.items() %}
+          <div class="row">
+            <div class="name">{{ row.label if row.label is defined else key | upper }}</div>
+            <div class="meta">
+              {{ row.value if row.value is not none else "unavailable" }}
+              · {{ row.date if row.date else "n/a" }}
+              · {{ row.freshness if row.freshness else "unknown" }}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Inflation Tracker <span class="badge {{ p.inflation_tracker.status }}">{{ p.inflation_tracker.status }}</span></h2>
+        <div class="rows">
+          {% for key, row in p.inflation_tracker.series.items() %}
+          <div class="row">
+            <div class="name">{{ row.label if row.label is defined else key }}</div>
+            <div class="meta">{{ row.value if row.value is not none else "unavailable" }} · {{ row.date if row.date else "n/a" }} · {{ row.freshness if row.freshness else "unknown" }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Labour Market <span class="badge {{ p.labour_tracker.status }}">{{ p.labour_tracker.status }}</span></h2>
+        <div class="rows">
+          {% for key, row in p.labour_tracker.series.items() %}
+          <div class="row">
+            <div class="name">{{ row.label if row.label is defined else key }}</div>
+            <div class="meta">{{ row.value if row.value is not none else "unavailable" }} · {{ row.date if row.date else "n/a" }} · {{ row.freshness if row.freshness else "unknown" }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Rates & Yield Curve <span class="badge {{ p.rates_yield_curve_panel.status }}">{{ p.rates_yield_curve_panel.status }}</span></h2>
+        <div class="meta" style="margin-bottom:8px;">
+          Shape: <strong>{{ p.rates_yield_curve_panel.curve_shape }}</strong> ·
+          Impulse: <strong>{{ p.rates_yield_curve_panel.rate_impulse }}</strong>
+        </div>
+        <div class="meta" style="margin-bottom:8px;">{{ p.rates_yield_curve_panel.portfolio_interpretation }}</div>
+        <div class="rows">
+          {% for key, row in p.rates_yield_curve_panel.series.items() %}
+          <div class="row">
+            <div class="name">{{ row.label if row.label is defined else key }}</div>
+            <div class="meta">{{ row.value if row.value is not none else "unavailable" }} · {{ row.date if row.date else "n/a" }} · {{ row.freshness if row.freshness else "unknown" }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Next Macro Catalysts <span class="badge {{ p.macro_catalyst_calendar.status }}">{{ p.macro_catalyst_calendar.status }}</span></h2>
+        <div class="events">
+          {% if p.macro_catalyst_calendar.events %}
+            {% for ev in p.macro_catalyst_calendar.events %}
+            <div class="event">
+              <div><strong>{{ ev.title }}</strong></div>
+              <div class="date">{{ ev.date }} · {{ ev.region | upper }} · {{ ev.importance }}</div>
+              <div class="meta">{{ ev.why_it_matters }}</div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="meta">No configured events in horizon window.</div>
+          {% endif %}
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Portfolio Lens <span class="badge {{ p.portfolio_lens.status }}">{{ p.portfolio_lens.status }}</span></h2>
+        <div class="meta" style="margin-bottom:8px;">{{ p.portfolio_lens.summary }}</div>
+        <div class="rows">
+          {% for key, row in p.portfolio_lens.buckets.items() %}
+          <div class="row">
+            <div class="name">{{ key | replace("_", " ") | title }}</div>
+            <div class="meta">{{ row.intensity }} · weight {{ row.holding_weight_pct }}% · holdings {{ row.holdings | join(", ") if row.holdings else "none" }}</div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:12px;">
+      <h2>Data Basis</h2>
+      <div class="meta">{{ p.data_basis.macro_sources }}</div>
+      <div class="meta">Timezone: {{ p.data_basis.timezone }}</div>
+      <div class="meta">{{ p.data_basis.freshness_note }}</div>
+    </section>
+
+    <div class="links">
+      <a href="/ui/briefing?profile={{ profile }}">Back to Briefing</a>
+      <a href="/ui/briefing/morning/charts?profile={{ profile }}">Morning Charts</a>
+      <a href="/api/v1/profile/{{ profile }}/briefing/macro">Raw API JSON</a>
+    </div>
+  </div>
+</body>
+</html>

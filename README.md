@@ -850,6 +850,38 @@ Deep-link examples:
 
 ---
 
+## Macro Policy Dashboard (Phase 1)
+
+Briefly now includes a deterministic macro dashboard:
+
+- UI: `/ui/briefing/macro?profile=default_user`
+- API: `/api/v1/profile/default_user/briefing/macro`
+
+Scope in Phase 1:
+
+- Central bank policy tracker (Fed + ECB wired where available; BoE/BoJ/SNB shown as not-wired placeholders)
+- Inflation tracker (FRED/ECB series where available)
+- Labour tracker (FRED series where available)
+- Rates/yield curve panel (2Y/10Y/30Y + 10Y-2Y + deterministic curve/impulse labels)
+- Macro catalyst calendar from local config seed: `configs/macro_calendar.yaml`
+- Portfolio macro lens from deterministic holdings/watchlist heuristics
+
+Design constraints:
+
+- Deterministic only (no LLM gating/decisions)
+- Uses existing free/official provider stack first (FRED/ECB/Eurostat) and degrades gracefully
+- Every panel reports explicit status (`ok`, `partial`, `unavailable`) and freshness/basis metadata
+- Partial data is expected and intentionally rendered as partial/unavailable, not as hard failures
+
+Optional briefing helper:
+
+- Preference key: `briefing.include_macro_policy_watch`
+- Default: `false`
+- When enabled, Briefly adds a compact deterministic **Macro Policy Watch** line to briefing output
+- Default briefing output remains unchanged unless the preference is enabled
+
+---
+
 ## Complete Session Contract (In Depth)
 
 This section defines exactly what each session is expected to do so behavior is explicit, testable, and auditable.

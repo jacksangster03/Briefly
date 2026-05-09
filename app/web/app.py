@@ -18,6 +18,7 @@ from app.db.session import init_db
 from app.logger import get_logger
 from app.settings import Settings, get_settings
 from app.briefing.chart_builder import MorningChartBuilder
+from app.briefing.macro_policy_service import build_macro_policy_dashboard
 from app.briefing.watchlist_chart_service import build_watchlist_chart_spec
 from app.data_sources.macro_data import MacroDataService
 from app.data_sources.market_data import MarketDataService
@@ -454,6 +455,27 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 "default_benchmark": benchmark,
                 "default_symbols": selected_symbols,
                 "default_include_events": bool(include_events),
+            },
+        )
+
+    @app.get("/ui/briefing/macro", response_class=HTMLResponse, include_in_schema=False)
+    def ui_briefing_macro_dashboard(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        settings = _settings(request)
+        user_profile = _load_profile_defaults(settings, normalized_profile)
+        payload = build_macro_policy_dashboard(
+            profile=user_profile,
+            settings=settings,
+        )
+        return templates.TemplateResponse(
+            "macro_dashboard.html",
+            {
+                "request": request,
+                "profile": normalized_profile,
+                "payload": payload,
             },
         )
 
@@ -2080,6 +2102,16 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             symbols=symbol_list or None,
             include_events=include_events,
             market_data_service=market_svc,
+        )
+
+    @app.get("/api/v1/profile/{profile}/briefing/macro")
+    def api_macro_dashboard(profile: str):
+        normalized_profile = _normalize_profile(profile)
+        settings = _settings_from_app(app)
+        user_profile = _load_profile_defaults(settings, normalized_profile)
+        return build_macro_policy_dashboard(
+            profile=user_profile,
+            settings=settings,
         )
 
     @app.post("/api/v1/profile/{profile}/simulation/run")

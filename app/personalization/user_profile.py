@@ -477,6 +477,9 @@ def _load_profile_overrides(profile: UserProfile) -> None:
         }:
             profile.delivery[key.replace("delivery.", "")] = value
             continue
+        if key == "briefing.include_macro_policy_watch":
+            profile.delivery["include_macro_policy_watch"] = bool(value)
+            continue
         if key == "sections.global_news":
             profile.morning_section_flags["global_news"] = bool(value)
             continue

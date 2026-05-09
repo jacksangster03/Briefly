@@ -315,6 +315,7 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "sections.morning.sector_scan": _normalize_bool,
     "sections.morning.watchlist": _normalize_bool,
     "sections.morning.watchlist_snapshot": _normalize_bool,
+    "briefing.include_macro_policy_watch": _normalize_bool,
     "sections.global_news": _normalize_bool,
     "healthcare.enabled": _normalize_bool,
     "healthcare.mode": _normalize_vertical_mode,

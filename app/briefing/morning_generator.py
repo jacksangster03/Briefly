@@ -14,6 +14,10 @@ from app.data_sources.news_data import NewsDataService
 from app.briefing.chart_builder import MorningChartBuilder
 from app.briefing.global_news_selector import select_global_market_events
 from app.briefing.market_setup_interpreter import interpret_market_setup
+from app.briefing.macro_policy_service import (
+    build_macro_policy_dashboard,
+    build_macro_policy_watch_summary,
+)
 from app.briefing.portfolio_impact import build_portfolio_impact
 from app.briefing.regime_context import build_regime_context, compute_geo_risk_level
 from app.briefing.regime_tracker import classify_regime, persist_regime_snapshot
@@ -531,6 +535,16 @@ class MorningBriefingGenerator:
             session_key=briefing.session_key,
             candidate_events=healthcare_candidates,
         )
+        if bool(self.profile.delivery.get("include_macro_policy_watch", False)):
+            try:
+                macro_payload = build_macro_policy_dashboard(
+                    profile=self.profile,
+                    settings=self.settings,
+                    macro_data_service=self.macro_svc,
+                )
+                briefing.macro_policy_watch = build_macro_policy_watch_summary(macro_payload)
+            except Exception:
+                logger.debug("macro policy watch helper unavailable", exc_info=True)
         self._apply_session_profile(briefing)
         # Incremental non-morning content: prioritize new developments since prior session.
         try:

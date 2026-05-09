@@ -153,6 +153,15 @@ class TelegramFormatter:
         if briefing.data_basis_lines:
             basis_lines = [f"- {line}" for line in briefing.data_basis_lines[:5]]
             sections.append("\n".join(["<b>DATA BASIS</b>"] + basis_lines))
+        if briefing.macro_policy_watch:
+            sections.append(
+                "\n".join(
+                    [
+                        "<b>MACRO POLICY WATCH</b>",
+                        truncate(str(briefing.macro_policy_watch), 320),
+                    ]
+                )
+            )
         clock_block = self._format_market_clock(briefing.market_clock_context or {})
         if clock_block:
             sections.append(clock_block)

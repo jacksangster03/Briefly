@@ -1,0 +1,70 @@
+macro_calendar:
+  version: 1
+  note: "Deterministic local seed data. Update dates/events manually as needed."
+
+events:
+  - event_id: fed_fomc_seed_2026_06
+    event_type: central_bank_meeting
+    region: us
+    title: Federal Reserve (FOMC) policy decision
+    date: "2026-06-17"
+    importance: high
+    why_it_matters: "Sets the policy-rate path and shapes discount-rate expectations across assets."
+    hawkish_if: "Dot plot/rhetoric signals fewer cuts or higher terminal path."
+    dovish_if: "Signals easing bias or downside growth concern."
+    portfolio_lens: "Duration-heavy bonds and growth sleeves are most sensitivity-exposed."
+
+  - event_id: ecb_policy_seed_2026_06
+    event_type: central_bank_meeting
+    region: europe
+    title: ECB monetary policy meeting
+    date: "2026-06-11"
+    importance: high
+    why_it_matters: "Euro area policy stance transmits to EUR rates, credit conditions and FX."
+    hawkish_if: "Guidance pushes back on easing path."
+    dovish_if: "Guidance supports softer growth/inflation outlook."
+    portfolio_lens: "EUR rates, banks, and exporters are most directly impacted."
+
+  - event_id: boe_policy_seed_2026_06
+    event_type: central_bank_meeting
+    region: uk
+    title: Bank of England policy meeting
+    date: "2026-06-19"
+    importance: medium
+    why_it_matters: "Shapes UK gilt pricing and GBP risk tone."
+    hawkish_if: "Voting split or guidance implies tighter-for-longer policy."
+    dovish_if: "Signals clearer easing path."
+    portfolio_lens: "GBP exposure and UK-sensitive risk sleeves react first."
+
+  - event_id: us_cpi_seed_2026_05
+    event_type: inflation_release
+    region: us
+    title: US CPI release
+    date: "2026-05-13"
+    importance: high
+    why_it_matters: "Primary inflation print for rates repricing and policy expectations."
+    hawkish_if: "Core/services inflation surprises above consensus."
+    dovish_if: "Disinflation trend broadens across core components."
+    portfolio_lens: "Rates, duration, USD and growth valuation sensitivity."
+
+  - event_id: us_pce_seed_2026_05
+    event_type: inflation_release
+    region: us
+    title: US PCE release
+    date: "2026-05-29"
+    importance: high
+    why_it_matters: "Fed-preferred inflation gauge; drives policy path confidence."
+    hawkish_if: "Core PCE re-accelerates."
+    dovish_if: "Core PCE moderates with softer breadth."
+    portfolio_lens: "Duration and quality-growth sleeves are most exposed."
+
+  - event_id: us_nfp_seed_2026_06
+    event_type: labour_release
+    region: us
+    title: US Nonfarm Payrolls (NFP)
+    date: "2026-06-05"
+    importance: high
+    why_it_matters: "Labour momentum influences growth durability and policy timing."
+    hawkish_if: "Payrolls/wages remain too strong for disinflation confidence."
+    dovish_if: "Payroll and wage cooling supports easing expectations."
+    portfolio_lens: "Rates-beta and cyclical vs defensive balance."
