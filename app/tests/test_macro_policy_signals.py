@@ -77,3 +77,22 @@ def test_ecb_uses_eurozone_hicp_when_available():
     joined = " ".join(sig["ecb_bias"]["drivers"]).lower()
     assert "eurozone hicp" in joined
     assert sig["ecb_bias"]["label"] in {"cut_leaning", "hold", "hike_leaning", "uncertain"}
+
+
+def test_regions_schema_includes_placeholders_and_spain_country_lens():
+    sig = build_policy_signals(_payload())
+    regions = sig["regions"]
+    assert set(("us", "eurozone", "uk", "japan", "china", "spain")).issubset(set(regions.keys()))
+    assert regions["uk"]["status"] == "unavailable"
+    assert regions["japan"]["status"] == "unavailable"
+    assert regions["china"]["status"] == "unavailable"
+    assert regions["spain"]["scope"] == "country_lens"
+    assert regions["spain"]["policy_bias"]["label"] == "uncertain"
+
+
+def test_backward_compatibility_top_level_bias_fields_remain():
+    sig = build_policy_signals(_payload())
+    assert "fed_bias" in sig
+    assert "ecb_bias" in sig
+    assert "regions" in sig
+    assert "global_summary" in sig

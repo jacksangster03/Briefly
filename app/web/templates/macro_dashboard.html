@@ -120,6 +120,26 @@
           {% endfor %}
         </div>
       </div>
+      {% if sig.get("regions") %}
+      <div class="rows" style="margin-top:10px;">
+        <div class="row">
+          <div class="name">Regional Coverage</div>
+          <div class="meta">Fed/ECB are active deterministic signals. UK, Japan and China are Phase 1 placeholders. Spain is a Eurozone country lens.</div>
+          <div class="grid" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top:8px;">
+            {% for rkey, r in sig.get("regions", {}).items() %}
+            <div class="row">
+              <div class="name">{{ r.get("region_label", rkey|upper) }}</div>
+              <div class="meta">Status: {{ r.get("status", "unavailable") }}</div>
+              <div class="meta">Bias: {{ r.get("policy_bias", {}).get("label", "uncertain") }} ({{ r.get("policy_bias", {}).get("confidence", "low") }})</div>
+              {% if r.get("policy_bias", {}).get("missing") %}
+              <div class="meta">Missing: {{ r.get("policy_bias", {}).get("missing", []) | join(", ") }}</div>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
       {% if sig.get("methodology_note") %}
       <div class="meta" style="margin-top:8px;">{{ sig.get("methodology_note") }}</div>
       {% endif %}

@@ -20,6 +20,12 @@ def build_policy_signals(dashboard_payload: dict[str, Any]) -> dict[str, Any]:
         labour_panel=payload.get("labour_tracker", {}) or {},
         policy_panel=payload.get("central_bank_policy", {}) or {},
     )
+    regions = _build_region_signals(
+        payload=payload,
+        fed_bias=fed,
+        ecb_bias=ecb,
+    )
+    global_summary = _build_global_summary(regions)
     implications = build_portfolio_implications(
         inflation_pressure=inflation,
         labour_pressure=labour,
@@ -38,6 +44,8 @@ def build_policy_signals(dashboard_payload: dict[str, Any]) -> dict[str, Any]:
         "labour_pressure": _strip_status(labour),
         "rates_pressure": _strip_status(rates),
         "portfolio_implications": implications,
+        "regions": regions,
+        "global_summary": global_summary,
         "methodology_note": "Deterministic signal, not a market-implied probability and not a forecast.",
     }
 
@@ -379,3 +387,101 @@ def _as_float(value: Any) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _build_region_signals(
+    *,
+    payload: dict[str, Any],
+    fed_bias: dict[str, Any],
+    ecb_bias: dict[str, Any],
+) -> dict[str, Any]:
+    inflation_series = ((payload.get("inflation_tracker") or {}).get("series") or {})
+    labour_series = ((payload.get("labour_tracker") or {}).get("series") or {})
+
+    us = {
+        "region_key": "us",
+        "region_label": "United States",
+        "scope": "central_bank",
+        "central_bank": "Fed",
+        "status": fed_bias.get("status", "partial"),
+        "policy_bias": _strip_status(fed_bias),
+    }
+    eurozone = {
+        "region_key": "eurozone",
+        "region_label": "Eurozone",
+        "scope": "central_bank",
+        "central_bank": "ECB",
+        "status": ecb_bias.get("status", "partial"),
+        "policy_bias": _strip_status(ecb_bias),
+    }
+
+    placeholders = {
+        "uk": _region_placeholder("uk", "United Kingdom", "BoE"),
+        "japan": _region_placeholder("japan", "Japan", "BoJ"),
+        "china": _region_placeholder("china", "China", "PBoC"),
+    }
+
+    spain_missing: list[str] = []
+    hicp = _as_float((inflation_series.get("eurozone_hicp") or {}).get("value"))
+    if hicp is None:
+        spain_missing.append("eurozone_hicp_proxy")
+    ibex = _as_float((labour_series.get("spain_ibex_proxy") or {}).get("value"))
+    if ibex is None:
+        spain_missing.append("spain_market_proxy")
+    spain = {
+        "region_key": "spain",
+        "region_label": "Spain",
+        "scope": "country_lens",
+        "status": "partial",
+        "policy_bias": {
+            "label": "uncertain",
+            "confidence": "low",
+            "drivers": [
+                "Spain is modeled as a country lens inside Eurozone policy, not a standalone central bank bias."
+            ],
+            "missing": spain_missing or ["country_specific_policy_inputs"],
+            "risks": ["Use Eurozone ECB signal as primary policy anchor for Spain in Phase 1."],
+        },
+    }
+
+    regions: dict[str, Any] = {
+        "us": us,
+        "eurozone": eurozone,
+        "uk": placeholders["uk"],
+        "japan": placeholders["japan"],
+        "china": placeholders["china"],
+        "spain": spain,
+    }
+    return regions
+
+
+def _region_placeholder(key: str, label: str, central_bank: str) -> dict[str, Any]:
+    return {
+        "region_key": key,
+        "region_label": label,
+        "scope": "central_bank",
+        "central_bank": central_bank,
+        "status": "unavailable",
+        "policy_bias": {
+            "label": "uncertain",
+            "confidence": "low",
+            "drivers": [f"{central_bank} regional signal is not wired in Phase 1."],
+            "missing": [f"{key}_inflation", f"{key}_labour", f"{key}_policy_rate"],
+            "risks": ["Placeholder only; no regional deterministic bias yet."],
+        },
+    }
+
+
+def _build_global_summary(regions: dict[str, Any]) -> dict[str, Any]:
+    us = ((regions.get("us") or {}).get("policy_bias") or {})
+    euro = ((regions.get("eurozone") or {}).get("policy_bias") or {})
+    status_values = [
+        str((regions.get("us") or {}).get("status", "unavailable")),
+        str((regions.get("eurozone") or {}).get("status", "unavailable")),
+    ]
+    return {
+        "status": _aggregate_status(status_values),
+        "fed_bias": us.get("label", "uncertain"),
+        "ecb_bias": euro.get("label", "uncertain"),
+        "note": "Regional policy bias is deterministic, non-probabilistic, and not a forecast.",
+    }

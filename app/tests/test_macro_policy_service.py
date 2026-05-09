@@ -102,6 +102,10 @@ def test_macro_policy_dashboard_schema_is_stable(validation_test_settings):
         "policy_signals",
     ):
         assert key in payload
+    assert "fed_bias" in payload["policy_signals"]
+    assert "ecb_bias" in payload["policy_signals"]
+    assert "regions" in payload["policy_signals"]
+    assert "global_summary" in payload["policy_signals"]
     assert payload["rates_yield_curve_panel"]["curve_shape"] == "normal curve"
     assert payload["rates_yield_curve_panel"]["status"] in {"ok", "partial", "unavailable"}
     assert payload["inflation_tracker"]["series"]["us_cpi"]["label"] in {"US CPI YoY", "US CPI index level"}

@@ -884,6 +884,11 @@ Deterministic Policy Signal conventions:
   - Fed bias uses US inflation/labour/rates inputs.
   - ECB bias uses Eurozone HICP + ECB policy rate + Euro-area labour when available.
   - If Eurozone inputs are incomplete, ECB signal degrades to partial/uncertain with explicit missing fields.
+- Regional signal scaffolding is included for expansion:
+  - `regions.us` and `regions.eurozone` are active deterministic tracks.
+  - `regions.uk`, `regions.japan`, and `regions.china` are explicit Phase 1 placeholders (`unavailable` / `not_wired`).
+  - `regions.spain` is a country lens under Eurozone policy context, not a standalone central bank track.
+  - Backward compatibility is preserved with top-level `fed_bias` and `ecb_bias` fields.
 - Signal labels are bias descriptors (`cut_leaning`, `hold`, `hike_leaning`, `uncertain`) and pressure states (`easing`, `sticky`, `reaccelerating`, `cooling`, `tight`, `neutral`).
 - Each signal includes:
   - drivers (what pushed the label)

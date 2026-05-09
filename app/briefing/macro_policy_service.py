@@ -54,6 +54,20 @@ def build_macro_policy_dashboard(
             "labour_pressure": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["signal_engine_error"]},
             "rates_pressure": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["signal_engine_error"]},
             "portfolio_implications": ["Policy signal unavailable due to partial data or service error."],
+            "regions": {
+                "us": {"status": "unavailable", "policy_bias": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["signal_engine_error"], "risks": []}},
+                "eurozone": {"status": "unavailable", "policy_bias": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["signal_engine_error"], "risks": []}},
+                "uk": {"status": "unavailable", "policy_bias": {"label": "uncertain", "confidence": "low", "drivers": ["not_wired"], "missing": ["not_wired"], "risks": []}},
+                "japan": {"status": "unavailable", "policy_bias": {"label": "uncertain", "confidence": "low", "drivers": ["not_wired"], "missing": ["not_wired"], "risks": []}},
+                "china": {"status": "unavailable", "policy_bias": {"label": "uncertain", "confidence": "low", "drivers": ["not_wired"], "missing": ["not_wired"], "risks": []}},
+                "spain": {"status": "partial", "policy_bias": {"label": "uncertain", "confidence": "low", "drivers": ["country_lens"], "missing": ["signal_engine_error"], "risks": []}},
+            },
+            "global_summary": {
+                "status": "unavailable",
+                "fed_bias": "uncertain",
+                "ecb_bias": "uncertain",
+                "note": "Regional policy signal unavailable.",
+            },
             "methodology_note": "Deterministic signal unavailable. Not a forecast.",
         }
 
