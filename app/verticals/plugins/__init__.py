@@ -1,0 +1,2 @@
+"""Vertical plugin package."""
+

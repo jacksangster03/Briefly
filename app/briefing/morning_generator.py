@@ -32,7 +32,7 @@ from app.briefing.regional_lens import build_regional_lens
 from app.briefing.theme_builder import build_top_themes
 from app.briefing.news_classifier import annotate_news_events, should_suppress_low_signal
 from app.briefing.llm_news_classifier import run_llm_news_classifier_shadow
-from app.healthcare.section_builder import build_healthcare_section
+from app.verticals.engine import build_vertical_section
 from app.logger import get_logger
 from app.db.session import get_session
 from app.personalization.delivery_rules import load_alert_rules
@@ -525,11 +525,11 @@ class MorningBriefingGenerator:
             eligible=eligible,
             briefing=briefing,
         )
-        briefing.healthcare_intelligence = build_healthcare_section(
+        briefing.healthcare_intelligence = build_vertical_section(
             profile=self.profile,
+            vertical_key="healthcare",
             session_key=briefing.session_key,
-            events=healthcare_candidates,
-            verbose_when_empty=False,
+            candidate_events=healthcare_candidates,
         )
         self._apply_session_profile(briefing)
         # Incremental non-morning content: prioritize new developments since prior session.

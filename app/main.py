@@ -65,7 +65,7 @@ from app.db.models import BreakingStoryState
 from app.db.models import NewsClassifierShadowRun, SentMessage, SessionSendState
 from app.db.session import get_session, init_db
 from app.logger import get_logger
-from app.healthcare.section_builder import filter_breaking_healthcare_events
+from app.verticals.engine import vertical_breaking_candidates, verticals_status_for_profile
 from app.messaging.email import EmailMessenger
 from app.messaging.telegram import TelegramMessenger
 from app.personalization.user_profile import UserProfile, load_user_profile
@@ -1663,6 +1663,27 @@ def run_session_audit(
         f"template={template_name}",
         "",
     ]
+    try:
+        vertical_rows = verticals_status_for_profile(profile=profile)
+    except Exception:
+        vertical_rows = []
+    if vertical_rows:
+        active_rows = [
+            row for row in vertical_rows
+            if str(row.get("mode", "off")) != "off"
+            or str(row.get("activation_status", "")) in {"active", "ready", "error"}
+        ]
+        if active_rows:
+            lines.append("verticals:")
+            for row in active_rows:
+                lines.append(
+                    "  - "
+                    f"{row.get('vertical_key')} mode={row.get('mode')} "
+                    f"status={row.get('activation_status')} reason={row.get('activation_reason')} "
+                    f"candidates={row.get('candidate_count')} included={row.get('included_count')} "
+                    f"suppressed={row.get('suppressed_count')} error={row.get('plugin_error') or '-'}"
+                )
+            lines.append("")
     with get_session() as db:
         rows = (
             db.query(SessionSendState)
@@ -2313,8 +2334,10 @@ def run_breaking_check(settings: Settings | None = None) -> None:
 
         if profile.healthcare_enabled and bool(profile.healthcare_preferences.get("breaking_alerts", False)):
             hc_by_event_id = {
-                evt.title: evt for evt in filter_breaking_healthcare_events(
+                evt.title: evt
+                for evt in vertical_breaking_candidates(
                     profile=profile,
+                    vertical_key="healthcare",
                     events=[alert.event for alert in fresh_alerts],
                 )
             }

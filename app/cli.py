@@ -347,6 +347,54 @@ def prefs_show(profile_name: str):
         click.echo(f"  {key} = {json.dumps(prefs[key], ensure_ascii=False)}")
 
 
+@cli.command("verticals-status")
+@click.option(
+    "--profile",
+    "profile_name",
+    default="default_user",
+    show_default=True,
+    help="Profile name to inspect.",
+)
+@click.pass_context
+def verticals_status(ctx, profile_name: str):
+    """Show registered vertical plugins and current activation/config diagnostics."""
+    import json
+
+    from app.personalization.user_profile import load_user_profile
+    from app.verticals.engine import verticals_status_for_profile
+
+    init_db()
+    settings = ctx.obj["settings"]
+    profile = load_user_profile(settings)
+    if profile_name and profile_name != profile.name:
+        click.echo(
+            f"Note: loaded profile '{profile.name}' from config; requested '{profile_name}'. "
+            "Use config/user_profile.yaml to switch active profile."
+        )
+    rows = verticals_status_for_profile(profile=profile)
+
+    click.echo(f"VERTICALS STATUS | profile={profile.name} | tz={profile.timezone}")
+    if not rows:
+        click.echo("No registered vertical plugins.")
+        return
+    for row in rows:
+        click.echo(
+            f"- {row.get('vertical_key')} ({row.get('display_name')}) "
+            f"mode={row.get('mode')} status={row.get('activation_status')} reason={row.get('activation_reason')}"
+        )
+        click.echo(
+            f"  candidates={row.get('candidate_count')} included={row.get('included_count')} "
+            f"suppressed={row.get('suppressed_count')} error={row.get('plugin_error') or '-'}"
+        )
+        source_status = row.get("source_status") or {}
+        if source_status:
+            click.echo(f"  source_status={json.dumps(source_status, sort_keys=True)}")
+        if row.get("portfolio_exposure_summary"):
+            click.echo(f"  portfolio={row.get('portfolio_exposure_summary')}")
+        if row.get("watchlist_exposure_summary"):
+            click.echo(f"  watchlist={row.get('watchlist_exposure_summary')}")
+
+
 @cli.command("prefs-set")
 @click.option(
     "--profile",

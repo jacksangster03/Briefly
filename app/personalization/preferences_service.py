@@ -36,6 +36,7 @@ ALLOWED_HOME_REGIONS = {
 }
 ALLOWED_EMAIL_DENSITY_MODES = {"desk", "full"}
 ALLOWED_HEALTHCARE_SEVERITIES = {"low", "medium", "high", "critical"}
+ALLOWED_VERTICAL_MODES = {"off", "watch", "active", "portfolio_linked"}
 ALLOWED_WEEKEND_MODES = {"off", "saturday_only", "saturday_and_sunday_news"}
 ALLOWED_SUNDAY_NEWS_MATERIALITY = {"material_only", "always_short"}
 
@@ -213,6 +214,16 @@ def _normalize_healthcare_severity(value: Any) -> str:
     return severity
 
 
+def _normalize_vertical_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    if mode not in ALLOWED_VERTICAL_MODES:
+        raise ValueError(
+            f"Unsupported vertical mode '{mode}'. "
+            f"Allowed: {', '.join(sorted(ALLOWED_VERTICAL_MODES))}"
+        )
+    return mode
+
+
 def _normalize_weekend_mode(value: Any) -> str:
     mode = str(value or "").strip().lower()
     if mode not in ALLOWED_WEEKEND_MODES:
@@ -288,6 +299,7 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "sections.morning.watchlist_snapshot": _normalize_bool,
     "sections.global_news": _normalize_bool,
     "healthcare.enabled": _normalize_bool,
+    "healthcare.mode": _normalize_vertical_mode,
     "healthcare.max_items_morning": _normalize_positive_int,
     "healthcare.max_items_intraday": _normalize_positive_int,
     "healthcare.breaking_alerts": _normalize_bool,
