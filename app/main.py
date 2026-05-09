@@ -1141,12 +1141,20 @@ def run_morning_briefing(
                 session_delivery_context=session_delivery_context,
             )
             delivered_ok = telegram_ok or delivered_ok
-            channel_status["telegram"] = "sent" if telegram_ok else "failed"
-            channel_reason["telegram"] = (
-                "delivered"
-                if telegram_ok
-                else str(getattr(messenger, "last_error", "") or "telegram transport failed")
-            )
+            if settings.dry_run:
+                channel_status["telegram"] = "dry-run" if telegram_ok else "failed"
+                channel_reason["telegram"] = (
+                    "dry-run preview only"
+                    if telegram_ok
+                    else str(getattr(messenger, "last_error", "") or "telegram dry-run transport failed")
+                )
+            else:
+                channel_status["telegram"] = "sent" if telegram_ok else "failed"
+                channel_reason["telegram"] = (
+                    "delivered"
+                    if telegram_ok
+                    else str(getattr(messenger, "last_error", "") or "telegram transport failed")
+                )
     if (
         settings.show_output
         and settings.normalized_delivery_channel != "telegram"
@@ -1169,12 +1177,20 @@ def run_morning_briefing(
             session_delivery_context=session_delivery_context,
         )
         delivered_ok = email_ok or delivered_ok
-        channel_status["email"] = "sent" if email_ok else "failed"
-        channel_reason["email"] = (
-            "delivered"
-            if email_ok
-            else str(getattr(messenger, "last_error", "") or "email transport failed")
-        )
+        if settings.dry_run:
+            channel_status["email"] = "dry-run" if email_ok else "failed"
+            channel_reason["email"] = (
+                "dry-run preview only"
+                if email_ok
+                else str(getattr(messenger, "last_error", "") or "email dry-run transport failed")
+            )
+        else:
+            channel_status["email"] = "sent" if email_ok else "failed"
+            channel_reason["email"] = (
+                "delivered"
+                if email_ok
+                else str(getattr(messenger, "last_error", "") or "email transport failed")
+            )
         if not email_ok:
             logger.warning(
                 "Email delivery failed. Next checks: run `python -m app.cli preflight` and "
@@ -1229,12 +1245,20 @@ def run_morning_briefing(
         except Exception:
             logger.debug("Failed to persist session snapshot", exc_info=True)
 
-    logger.info(
-        "%s delivered: %d messages, %d events",
-        briefing.session_title,
-        len(messages),
-        briefing.events_sent,
-    )
+    if settings.dry_run:
+        logger.info(
+            "%s dry-run complete: %d messages, %d events",
+            briefing.session_title,
+            len(messages),
+            briefing.events_sent,
+        )
+    else:
+        logger.info(
+            "%s delivered: %d messages, %d events",
+            briefing.session_title,
+            len(messages),
+            briefing.events_sent,
+        )
 
     if command_source == "scheduler" and delivered_ok and not settings.dry_run and backfill_context is None:
         try:

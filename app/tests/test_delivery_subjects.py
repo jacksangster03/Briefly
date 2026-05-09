@@ -290,6 +290,45 @@ def test_saturday_weekend_briefing_uses_friday_close_weekend_update_header() -> 
     assert "FRIDAY CLOSE / WEEKEND UPDATE" in text
 
 
+def test_weekend_output_uses_weekend_portfolio_heading_not_weekday_heading() -> None:
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 5, 9, 6, 30, tzinfo=timezone.utc),
+        session_mode="saturday",
+        session_key="saturday_weekend_briefing",
+        session_title="Weekend Briefing",
+        portfolio_impact_bullets=["Friday close contribution remained mixed across sleeves."],
+    )
+    text = "\n".join(TelegramFormatter("Europe/Madrid").format_morning_briefing(briefing))
+    assert "PORTFOLIO CLOSE READ" in text
+    assert "PORTFOLIO IMPACT TODAY" not in text
+
+
+def test_weekend_no_new_headlines_line_mentions_active_risk_context_when_geo_elevated() -> None:
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 5, 10, 9, 0, tzinfo=timezone.utc),
+        session_mode="sunday",
+        session_key="sunday_weekend_watch",
+        session_title="Sunday Weekend Watch",
+        what_changed_header="FRIDAY CLOSE / WEEKEND UPDATE",
+        global_news=[],
+        geo_risk_level="elevated",
+    )
+    text = "\n".join(TelegramFormatter("Europe/Madrid").format_morning_briefing(briefing))
+    assert "No new material headlines since the last weekend scan; existing risk context remains active" in text
+
+
+def test_weekday_portfolio_heading_remains_unchanged() -> None:
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 5, 8, 8, 0, tzinfo=timezone.utc),
+        session_mode="weekday",
+        session_key="morning",
+        session_title="Morning Briefing",
+        portfolio_impact_bullets=["Broad market context remains mixed."],
+    )
+    text = "\n".join(TelegramFormatter("Europe/Madrid").format_morning_briefing(briefing))
+    assert "PORTFOLIO IMPACT TODAY" in text
+
+
 def test_delivery_log_includes_subject_and_hash_columns(validation_isolated_db):
     from click.testing import CliRunner
     from app.cli import cli

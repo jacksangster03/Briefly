@@ -353,3 +353,103 @@ def test_closing_wrap_0002_belongs_to_previous_local_date():
         timezone_name="Europe/Madrid",
     )
     assert d.isoformat() == "2026-05-07"
+
+
+def test_dry_run_session_brief_logs_dry_run_status_and_writes_no_live_send_state(
+    monkeypatch,
+    validation_isolated_db,
+):
+    from types import SimpleNamespace
+    from app.main import run_morning_briefing
+    from app.personalization.user_profile import UserProfile
+    from app.schemas.briefings import MorningBriefing
+    from app.schemas.delivery import EmailRenderResult
+    from app.db.models import SentMessage, SessionSendState
+    from app.db.session import get_session
+
+    class _StubGenerator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, *, session_key: str = "morning", session_title: str = "Morning Briefing") -> MorningBriefing:
+            return MorningBriefing(
+                generated_at=datetime(2026, 5, 9, 8, 0, tzinfo=timezone.utc),
+                session_key=session_key,
+                session_title=session_title,
+                data_freshness={"Market Prices": "2026-05-09 08:00 CEST"},
+            )
+
+    class _StubTelegramFormatter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def format_morning_briefing(self, briefing: MorningBriefing) -> list[str]:
+            return [f"{briefing.session_title}: telegram"]
+
+    class _StubEmailFormatter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def format_morning_briefing(self, briefing: MorningBriefing) -> EmailRenderResult:
+            return EmailRenderResult(
+                subject=briefing.session_title,
+                plain_text=f"{briefing.session_title}: email",
+                html_body=f"<p>{briefing.session_title}: email</p>",
+                inline_assets=[],
+            )
+
+    class _StubLLMRenderer:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def render_morning(self, *, deterministic_email, **kwargs):
+            return SimpleNamespace(active_email=deterministic_email, shadow_preview=None)
+
+    class _FakeEmailMessenger:
+        name = "email"
+
+        def __init__(self, settings):
+            self.settings = settings
+            self.dry_run = True
+            self.last_error = ""
+
+        def is_configured(self) -> bool:
+            return True
+
+        def send_rich(self, *, subject: str, plain_text: str, html_body: str, inline_assets=None) -> bool:
+            return True
+
+    logs: list[str] = []
+    monkeypatch.setattr(
+        "app.main.logger.info",
+        lambda message, *args: logs.append(message % args if args else message),
+    )
+    monkeypatch.setattr("app.main.load_user_profile", lambda settings: UserProfile(name="default_user"))
+    monkeypatch.setattr("app.main.load_sector_universe", lambda settings: object())
+    monkeypatch.setattr("app.main._build_services", lambda settings: (object(), object(), object()))
+    monkeypatch.setattr("app.main.MorningBriefingGenerator", _StubGenerator)
+    monkeypatch.setattr("app.main.TelegramFormatter", _StubTelegramFormatter)
+    monkeypatch.setattr("app.main.EmailFormatter", _StubEmailFormatter)
+    monkeypatch.setattr("app.main.LLMEmailRenderer", _StubLLMRenderer)
+    monkeypatch.setattr("app.main.EmailMessenger", _FakeEmailMessenger)
+    monkeypatch.setattr("app.main.load_previous_snapshot", lambda **kwargs: (None, {}))
+    monkeypatch.setattr("app.main.persist_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr("app.main.record_sent_events", lambda *args, **kwargs: None)
+
+    settings = Settings(
+        dry_run=True,
+        delivery_channel="email",
+        email_user="sender@example.com",
+        email_password="secret",
+        email_to="recipient@example.com",
+    )
+
+    run_morning_briefing(settings, auto_route_session=False, session_override="morning")
+    log_text = "\n".join(logs)
+    assert "email=dry-run (dry-run preview only)" in log_text
+    assert "dry-run complete" in log_text
+    assert " delivered: " not in log_text
+
+    with get_session() as session:
+        assert session.query(SentMessage).count() == 0
+        assert session.query(SessionSendState).count() == 0

@@ -184,6 +184,10 @@ class TelegramFormatter:
             impact_header = "PORTFOLIO CHECK"
         elif is_closing:
             impact_header = "PORTFOLIO ATTRIBUTION"
+        elif session_key == "saturday_weekend_briefing":
+            impact_header = "PORTFOLIO CLOSE READ"
+        elif session_key == "sunday_weekend_watch":
+            impact_header = "PORTFOLIO WEEKEND READ"
         impact = self._format_portfolio_impact(
             briefing.portfolio_impact_bullets,
             briefing.portfolio_action_posture,
@@ -207,11 +211,25 @@ class TelegramFormatter:
                 sections.append(global_news)
         elif not briefing.global_news:
             since = self._since_label_from_header(briefing.what_changed_header)
+            weekend_elevated_geo = (
+                is_weekend
+                and str(briefing.geo_risk_level or "").strip().lower()
+                in {"elevated", "high", "severe"}
+            )
+            empty_line = (
+                "No new material headlines since the last weekend scan; existing risk context remains active"
+                if weekend_elevated_geo
+                else (
+                    f"No material new headlines since {since}."
+                    if since
+                    else "No material new headlines this session."
+                )
+            )
             sections.append(
                 "\n".join(
                     [
                         f"<b>{SECTION_HEADERS['global_news']}</b>",
-                        f"No material new headlines since {since}." if since else "No material new headlines this session.",
+                        empty_line,
                     ]
                 )
             )
