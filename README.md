@@ -880,6 +880,12 @@ Optional briefing helper:
 - When enabled, Briefly adds a compact deterministic **Macro Policy Watch** line to briefing output
 - Default briefing output remains unchanged unless the preference is enabled
 
+Operational resilience:
+
+- Macro dashboard UI/API should never fail hard on provider errors. If FRED/ECB/Eurostat series fail, time out, or return partial payloads, panels degrade to `partial`/`unavailable` with visible status badges.
+- Missing or malformed calendar configuration is treated as `events=[]` rather than an exception.
+- Route-level fallback payloads are returned if dashboard assembly fails, so `/ui/briefing/macro` and `/api/v1/profile/{profile}/briefing/macro` remain available.
+
 ---
 
 ## Complete Session Contract (In Depth)

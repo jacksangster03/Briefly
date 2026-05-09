@@ -70,3 +70,27 @@ def test_macro_dashboard_api_route_schema(validation_test_settings, monkeypatch)
     assert "macro_catalyst_calendar" in payload
     assert "portfolio_lens" in payload
     assert "data_basis" in payload
+
+
+def test_macro_dashboard_ui_handles_missing_fields_without_500(validation_test_settings, monkeypatch):
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+    monkeypatch.setattr("app.web.app.build_macro_policy_dashboard", lambda **_kwargs: {"status": "partial"})
+    response = client.get("/ui/briefing/macro?profile=default_user")
+    assert response.status_code == 200
+    assert "Macro Policy Dashboard" in response.text
+
+
+def test_macro_dashboard_api_handles_service_exception(validation_test_settings, monkeypatch):
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+
+    def _boom(**_kwargs):
+        raise RuntimeError("macro boom")
+
+    monkeypatch.setattr("app.web.app.build_macro_policy_dashboard", _boom)
+    response = client.get("/api/v1/profile/default_user/briefing/macro")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "unavailable"
+    assert "central_bank_policy" in payload

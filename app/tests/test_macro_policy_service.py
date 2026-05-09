@@ -128,3 +128,26 @@ def test_macro_policy_watch_summary_handles_partial():
     )
     assert "Macro Policy Watch:" in summary
     assert "Fed Meeting" in summary
+
+
+class _BoomMacroService:
+    def __init__(self):
+        self.fred = None
+
+    def get_ecb_snapshot(self):
+        raise RuntimeError("ecb unavailable")
+
+    def get_yield_curve(self):
+        raise RuntimeError("curve unavailable")
+
+
+def test_macro_policy_dashboard_handles_provider_failures(validation_test_settings):
+    profile = load_user_profile(validation_test_settings)
+    payload = build_macro_policy_dashboard(
+        profile=profile,
+        settings=validation_test_settings,
+        macro_data_service=_BoomMacroService(),  # type: ignore[arg-type]
+    )
+    assert payload["status"] in {"partial", "unavailable"}
+    assert payload["central_bank_policy"]["status"] in {"partial", "unavailable"}
+    assert payload["rates_yield_curve_panel"]["status"] == "unavailable"

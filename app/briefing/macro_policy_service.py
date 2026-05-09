@@ -19,17 +19,20 @@ def build_macro_policy_dashboard(
     settings: Settings,
     macro_data_service: MacroDataService | None = None,
 ) -> dict[str, Any]:
-    svc = macro_data_service or MacroDataService(settings)
     now_utc = datetime.now(timezone.utc)
     local_tz = ZoneInfo(profile.timezone or settings.timezone or "Europe/Madrid")
     local_now = now_utc.astimezone(local_tz)
+    try:
+        svc = macro_data_service or MacroDataService(settings)
+    except Exception:
+        svc = None
 
-    policy = _build_central_bank_policy(svc)
-    inflation = _build_inflation_tracker(svc)
-    labour = _build_labour_tracker(svc)
-    rates = _build_rates_panel(svc)
-    calendar = _build_calendar(settings=settings, local_now=local_now)
-    lens = build_macro_portfolio_lens(profile)
+    policy = _safe_panel(lambda: _build_central_bank_policy(svc), panel_name="central_bank_policy")
+    inflation = _safe_panel(lambda: _build_inflation_tracker(svc), panel_name="inflation_tracker")
+    labour = _safe_panel(lambda: _build_labour_tracker(svc), panel_name="labour_tracker")
+    rates = _safe_panel(lambda: _build_rates_panel(svc), panel_name="rates_yield_curve_panel")
+    calendar = _safe_panel(lambda: _build_calendar(settings=settings, local_now=local_now), panel_name="macro_catalyst_calendar")
+    lens = _safe_panel(lambda: build_macro_portfolio_lens(profile), panel_name="portfolio_lens")
 
     panels = [policy, inflation, labour, rates, calendar, lens]
     overall_status = _aggregate_status([str(panel.get("status", "unavailable")) for panel in panels])
@@ -75,6 +78,8 @@ def build_macro_policy_watch_summary(payload: dict[str, Any]) -> str:
 
 
 def _build_central_bank_policy(svc: MacroDataService) -> dict[str, Any]:
+    if svc is None:
+        return _panel_unavailable("macro service unavailable")
     fed = _fred_point(svc, "FEDFUNDS")
     ecb_points = {p.series_id: p for p in (svc.get_ecb_snapshot() or [])}
     ecb = ecb_points.get("ECB_DFR")
@@ -93,6 +98,8 @@ def _build_central_bank_policy(svc: MacroDataService) -> dict[str, Any]:
 
 
 def _build_inflation_tracker(svc: MacroDataService) -> dict[str, Any]:
+    if svc is None:
+        return _panel_unavailable("macro service unavailable")
     ecb_points = {p.series_id: p for p in (svc.get_ecb_snapshot() or [])}
     series = {
         "us_cpi": _series_payload(_fred_point(svc, "CPIAUCSL"), label="US CPI index"),
@@ -110,6 +117,8 @@ def _build_inflation_tracker(svc: MacroDataService) -> dict[str, Any]:
 
 
 def _build_labour_tracker(svc: MacroDataService) -> dict[str, Any]:
+    if svc is None:
+        return _panel_unavailable("macro service unavailable")
     series = {
         "us_unemployment_rate": _series_payload(_fred_point(svc, "UNRATE"), label="US unemployment rate"),
         "us_payrolls": _series_payload(_fred_point(svc, "PAYEMS"), label="US nonfarm payrolls"),
@@ -125,6 +134,8 @@ def _build_labour_tracker(svc: MacroDataService) -> dict[str, Any]:
 
 
 def _build_rates_panel(svc: MacroDataService) -> dict[str, Any]:
+    if svc is None:
+        return _panel_unavailable("macro service unavailable")
     curve = {p.series_id: p for p in (svc.get_yield_curve() or [])}
     two = curve.get("DGS2")
     ten = curve.get("DGS10")
@@ -161,9 +172,33 @@ def _build_calendar(*, settings: Settings, local_now: datetime) -> dict[str, Any
 
 
 def _fred_point(svc: MacroDataService, series_id: str):
+    if svc is None:
+        return None
     if not svc.fred or not svc.fred.is_configured():
         return None
     return svc.fred.get_latest_observation(series_id)
+
+
+def _safe_panel(builder, *, panel_name: str) -> dict[str, Any]:
+    try:
+        payload = builder()
+        if isinstance(payload, dict):
+            payload.setdefault("status", "partial")
+            payload.setdefault("data_basis", "")
+            return payload
+    except Exception:
+        pass
+    return _panel_unavailable(f"{panel_name} unavailable")
+
+
+def _panel_unavailable(note: str) -> dict[str, Any]:
+    return {
+        "status": "unavailable",
+        "data_basis": note,
+        "series": {},
+        "events": [],
+        "summary": note,
+    }
 
 
 def _series_payload(point, *, label: str) -> dict[str, Any]:
@@ -281,4 +316,3 @@ def _value_line(series_row: dict[str, Any] | None) -> str:
         return label
     sign = "+" if float(chg) >= 0 else ""
     return f"{label} ({sign}{float(chg):.2f})"
-

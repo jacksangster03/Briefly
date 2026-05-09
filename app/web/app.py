@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date as _date_cls, datetime, timedelta
+from datetime import date as _date_cls, datetime, timedelta, timezone
 import json
 from pathlib import Path
 from typing import Any
@@ -466,10 +466,34 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         normalized_profile = _normalize_profile(profile)
         settings = _settings(request)
         user_profile = _load_profile_defaults(settings, normalized_profile)
-        payload = build_macro_policy_dashboard(
-            profile=user_profile,
-            settings=settings,
-        )
+        try:
+            payload = build_macro_policy_dashboard(
+                profile=user_profile,
+                settings=settings,
+            )
+        except Exception:
+            payload = {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "status": "unavailable",
+                "central_bank_policy": {"status": "unavailable", "series": {}, "data_basis": "dashboard fallback"},
+                "inflation_tracker": {"status": "unavailable", "series": {}, "data_basis": "dashboard fallback"},
+                "labour_tracker": {"status": "unavailable", "series": {}, "data_basis": "dashboard fallback"},
+                "rates_yield_curve_panel": {
+                    "status": "unavailable",
+                    "series": {},
+                    "curve_shape": "unavailable",
+                    "rate_impulse": "unavailable",
+                    "portfolio_interpretation": "Macro panel unavailable; check provider status.",
+                    "data_basis": "dashboard fallback",
+                },
+                "macro_catalyst_calendar": {"status": "unavailable", "events": [], "data_basis": "dashboard fallback"},
+                "portfolio_lens": {"status": "partial", "summary": "Portfolio lens unavailable.", "buckets": {}, "data_basis": "dashboard fallback"},
+                "data_basis": {
+                    "macro_sources": "dashboard fallback",
+                    "timezone": str(user_profile.timezone or settings.timezone),
+                    "freshness_note": "Macro dashboard degraded safely due to provider or render failure.",
+                },
+            }
         return templates.TemplateResponse(
             "macro_dashboard.html",
             {
@@ -2109,10 +2133,33 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         normalized_profile = _normalize_profile(profile)
         settings = _settings_from_app(app)
         user_profile = _load_profile_defaults(settings, normalized_profile)
-        return build_macro_policy_dashboard(
-            profile=user_profile,
-            settings=settings,
-        )
+        try:
+            return build_macro_policy_dashboard(
+                profile=user_profile,
+                settings=settings,
+            )
+        except Exception:
+            return {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "status": "unavailable",
+                "central_bank_policy": {"status": "unavailable", "series": {}},
+                "inflation_tracker": {"status": "unavailable", "series": {}},
+                "labour_tracker": {"status": "unavailable", "series": {}},
+                "rates_yield_curve_panel": {
+                    "status": "unavailable",
+                    "series": {},
+                    "curve_shape": "unavailable",
+                    "rate_impulse": "unavailable",
+                    "portfolio_interpretation": "Macro panel unavailable; check provider status.",
+                },
+                "macro_catalyst_calendar": {"status": "unavailable", "events": []},
+                "portfolio_lens": {"status": "partial", "summary": "Portfolio lens unavailable.", "buckets": {}},
+                "data_basis": {
+                    "macro_sources": "dashboard fallback",
+                    "timezone": str(user_profile.timezone or settings.timezone),
+                    "freshness_note": "Macro dashboard degraded safely due to provider or service failure.",
+                },
+            }
 
     @app.post("/api/v1/profile/{profile}/simulation/run")
     def api_run_simulation(profile: str, payload: SimulationRunRequest):

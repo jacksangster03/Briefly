@@ -47,23 +47,30 @@
   </style>
 </head>
 <body>
-  {% set p = payload %}
+  {% set p = payload or {} %}
+  {% set cb = p.get("central_bank_policy", {}) %}
+  {% set inf = p.get("inflation_tracker", {}) %}
+  {% set lab = p.get("labour_tracker", {}) %}
+  {% set rates = p.get("rates_yield_curve_panel", {}) %}
+  {% set cal = p.get("macro_catalyst_calendar", {}) %}
+  {% set lens = p.get("portfolio_lens", {}) %}
+  {% set basis = p.get("data_basis", {}) %}
   <div class="wrap">
     <div class="head">
       <h1 class="title">Macro Policy Dashboard</h1>
       <p class="sub">Deterministic policy, inflation, labour, rates and catalyst monitoring with explicit freshness states.</p>
       <div class="chips">
         <span class="chip">Profile: {{ profile }}</span>
-        <span class="chip">Status: {{ p.status }}</span>
-        <span class="chip">Generated: {{ p.generated_at }}</span>
+        <span class="chip">Status: {{ p.get("status", "unavailable") }}</span>
+        <span class="chip">Generated: {{ p.get("generated_at", "n/a") }}</span>
       </div>
     </div>
 
     <div class="grid">
       <section class="card">
-        <h2>Central Bank Policy <span class="badge {{ p.central_bank_policy.status }}">{{ p.central_bank_policy.status }}</span></h2>
+        <h2>Central Bank Policy <span class="badge {{ cb.get('status', 'unavailable') }}">{{ cb.get("status", "unavailable") }}</span></h2>
         <div class="rows">
-          {% for key, row in p.central_bank_policy.series.items() %}
+          {% for key, row in cb.get("series", {}).items() %}
           <div class="row">
             <div class="name">{{ row.label if row.label is defined else key | upper }}</div>
             <div class="meta">
@@ -77,9 +84,9 @@
       </section>
 
       <section class="card">
-        <h2>Inflation Tracker <span class="badge {{ p.inflation_tracker.status }}">{{ p.inflation_tracker.status }}</span></h2>
+        <h2>Inflation Tracker <span class="badge {{ inf.get('status', 'unavailable') }}">{{ inf.get("status", "unavailable") }}</span></h2>
         <div class="rows">
-          {% for key, row in p.inflation_tracker.series.items() %}
+          {% for key, row in inf.get("series", {}).items() %}
           <div class="row">
             <div class="name">{{ row.label if row.label is defined else key }}</div>
             <div class="meta">{{ row.value if row.value is not none else "unavailable" }} · {{ row.date if row.date else "n/a" }} · {{ row.freshness if row.freshness else "unknown" }}</div>
@@ -89,9 +96,9 @@
       </section>
 
       <section class="card">
-        <h2>Labour Market <span class="badge {{ p.labour_tracker.status }}">{{ p.labour_tracker.status }}</span></h2>
+        <h2>Labour Market <span class="badge {{ lab.get('status', 'unavailable') }}">{{ lab.get("status", "unavailable") }}</span></h2>
         <div class="rows">
-          {% for key, row in p.labour_tracker.series.items() %}
+          {% for key, row in lab.get("series", {}).items() %}
           <div class="row">
             <div class="name">{{ row.label if row.label is defined else key }}</div>
             <div class="meta">{{ row.value if row.value is not none else "unavailable" }} · {{ row.date if row.date else "n/a" }} · {{ row.freshness if row.freshness else "unknown" }}</div>
@@ -101,14 +108,14 @@
       </section>
 
       <section class="card">
-        <h2>Rates & Yield Curve <span class="badge {{ p.rates_yield_curve_panel.status }}">{{ p.rates_yield_curve_panel.status }}</span></h2>
+        <h2>Rates & Yield Curve <span class="badge {{ rates.get('status', 'unavailable') }}">{{ rates.get("status", "unavailable") }}</span></h2>
         <div class="meta" style="margin-bottom:8px;">
-          Shape: <strong>{{ p.rates_yield_curve_panel.curve_shape }}</strong> ·
-          Impulse: <strong>{{ p.rates_yield_curve_panel.rate_impulse }}</strong>
+          Shape: <strong>{{ rates.get("curve_shape", "unavailable") }}</strong> ·
+          Impulse: <strong>{{ rates.get("rate_impulse", "unavailable") }}</strong>
         </div>
-        <div class="meta" style="margin-bottom:8px;">{{ p.rates_yield_curve_panel.portfolio_interpretation }}</div>
+        <div class="meta" style="margin-bottom:8px;">{{ rates.get("portfolio_interpretation", "unavailable") }}</div>
         <div class="rows">
-          {% for key, row in p.rates_yield_curve_panel.series.items() %}
+          {% for key, row in rates.get("series", {}).items() %}
           <div class="row">
             <div class="name">{{ row.label if row.label is defined else key }}</div>
             <div class="meta">{{ row.value if row.value is not none else "unavailable" }} · {{ row.date if row.date else "n/a" }} · {{ row.freshness if row.freshness else "unknown" }}</div>
@@ -118,10 +125,10 @@
       </section>
 
       <section class="card">
-        <h2>Next Macro Catalysts <span class="badge {{ p.macro_catalyst_calendar.status }}">{{ p.macro_catalyst_calendar.status }}</span></h2>
+        <h2>Next Macro Catalysts <span class="badge {{ cal.get('status', 'unavailable') }}">{{ cal.get("status", "unavailable") }}</span></h2>
         <div class="events">
-          {% if p.macro_catalyst_calendar.events %}
-            {% for ev in p.macro_catalyst_calendar.events %}
+          {% if cal.get("events") %}
+            {% for ev in cal.get("events", []) %}
             <div class="event">
               <div><strong>{{ ev.title }}</strong></div>
               <div class="date">{{ ev.date }} · {{ ev.region | upper }} · {{ ev.importance }}</div>
@@ -135,10 +142,10 @@
       </section>
 
       <section class="card">
-        <h2>Portfolio Lens <span class="badge {{ p.portfolio_lens.status }}">{{ p.portfolio_lens.status }}</span></h2>
-        <div class="meta" style="margin-bottom:8px;">{{ p.portfolio_lens.summary }}</div>
+        <h2>Portfolio Lens <span class="badge {{ lens.get('status', 'unavailable') }}">{{ lens.get("status", "unavailable") }}</span></h2>
+        <div class="meta" style="margin-bottom:8px;">{{ lens.get("summary", "unavailable") }}</div>
         <div class="rows">
-          {% for key, row in p.portfolio_lens.buckets.items() %}
+          {% for key, row in lens.get("buckets", {}).items() %}
           <div class="row">
             <div class="name">{{ key | replace("_", " ") | title }}</div>
             <div class="meta">{{ row.intensity }} · weight {{ row.holding_weight_pct }}% · holdings {{ row.holdings | join(", ") if row.holdings else "none" }}</div>
@@ -150,9 +157,9 @@
 
     <section class="card" style="margin-top:12px;">
       <h2>Data Basis</h2>
-      <div class="meta">{{ p.data_basis.macro_sources }}</div>
-      <div class="meta">Timezone: {{ p.data_basis.timezone }}</div>
-      <div class="meta">{{ p.data_basis.freshness_note }}</div>
+      <div class="meta">{{ basis.get("macro_sources", "unavailable") }}</div>
+      <div class="meta">Timezone: {{ basis.get("timezone", "n/a") }}</div>
+      <div class="meta">{{ basis.get("freshness_note", "Macro dashboard basis unavailable.") }}</div>
     </section>
 
     <div class="links">
