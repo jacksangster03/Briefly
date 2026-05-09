@@ -735,11 +735,30 @@ class MorningBriefingGenerator:
             previous=previous_snapshot,
             current=current_snapshot,
         )
-        if (briefing.session_key or "morning").lower() == "morning":
+        session_key_norm = (briefing.session_key or "morning").lower()
+        if session_key_norm == "morning":
             briefing.what_changed_header = "OVERNIGHT / PRIOR SESSION CHANGE"
             # Morning is the broad-context pass: suppress generic placeholder noise.
             if briefing.what_changed_lines == ["No prior comparable snapshot available."]:
                 briefing.what_changed_lines = []
+        elif session_key_norm in {"saturday_weekend_briefing", "sunday_weekend_watch"}:
+            briefing.what_changed_header = "FRIDAY CLOSE / WEEKEND UPDATE"
+            cleaned: list[str] = []
+            for line in briefing.what_changed_lines:
+                text = str(line or "").strip()
+                if not text:
+                    continue
+                # Remove unchanged/noise deltas such as "X: a -> a (flat)".
+                if "->" in text and "(flat" in text.lower():
+                    continue
+                if "->" in text and "unchanged but still important" in text.lower():
+                    continue
+                cleaned.append(text)
+            if not cleaned or cleaned == ["No prior comparable snapshot available."]:
+                cleaned = [
+                    "No material cross-asset change since Friday close; focus remains on weekend headlines and Monday futures."
+                ]
+            briefing.what_changed_lines = cleaned[:6]
         provider_health = self._provider_health_summary()
         if provider_health:
             briefing.data_freshness["Provider Health"] = provider_health

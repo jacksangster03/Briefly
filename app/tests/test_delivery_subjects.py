@@ -6,6 +6,9 @@ from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
 from app.db.models import SentMessage, SessionSendState
 from app.db.session import get_session
+from app.briefing.email_formatter import EmailFormatter
+from app.briefing.formatter import TelegramFormatter
+from app.schemas.briefings import MorningBriefing
 
 
 def _make_briefing(
@@ -255,6 +258,36 @@ class TestDeliveryLogCli:
         result = runner.invoke(cli, ["delivery-log", "--date", "today"])
         assert "Delivery Log" in result.output
         assert "Europe/Madrid" in result.output
+
+
+def test_saturday_weekend_briefing_uses_monday_watchpoints_header() -> None:
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 5, 9, 6, 30, tzinfo=timezone.utc),
+        session_mode="saturday",
+        session_key="saturday_weekend_briefing",
+        session_title="Weekend Briefing",
+        what_changed_lines=["No material cross-asset change since Friday close; focus remains on weekend headlines and Monday futures."],
+    )
+    html = EmailFormatter("Europe/Madrid").format_morning_briefing(briefing).html_body
+    text = "\n".join(TelegramFormatter("Europe/Madrid").format_morning_briefing(briefing))
+    assert "MONDAY WATCHPOINTS" in html
+    assert "TODAY'S TRIGGERS" not in html
+    assert "SESSION TRIGGERS" not in text
+
+
+def test_saturday_weekend_briefing_uses_friday_close_weekend_update_header() -> None:
+    briefing = MorningBriefing(
+        generated_at=datetime(2026, 5, 9, 6, 30, tzinfo=timezone.utc),
+        session_mode="saturday",
+        session_key="saturday_weekend_briefing",
+        session_title="Weekend Briefing",
+        what_changed_header="FRIDAY CLOSE / WEEKEND UPDATE",
+        what_changed_lines=["No material cross-asset change since Friday close; focus remains on weekend headlines and Monday futures."],
+    )
+    html = EmailFormatter("Europe/Madrid").format_morning_briefing(briefing).html_body
+    text = "\n".join(TelegramFormatter("Europe/Madrid").format_morning_briefing(briefing))
+    assert "FRIDAY CLOSE / WEEKEND UPDATE" in html
+    assert "FRIDAY CLOSE / WEEKEND UPDATE" in text
 
 
 def test_delivery_log_includes_subject_and_hash_columns(validation_isolated_db):

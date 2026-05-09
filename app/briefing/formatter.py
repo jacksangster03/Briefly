@@ -321,7 +321,9 @@ class TelegramFormatter:
         session_key = (briefing.session_key or "morning").lower()
         if session_key == "morning":
             return ""
-        if session_key == "closing_wrap":
+        if session_key in {"saturday_weekend_briefing", "sunday_weekend_watch"}:
+            header = "MONDAY WATCHPOINTS"
+        elif session_key == "closing_wrap":
             header = "TOMORROW SETUP"
         elif session_key in {"us_intraday_risk", "into_close"}:
             header = "WATCH INTO CLOSE"

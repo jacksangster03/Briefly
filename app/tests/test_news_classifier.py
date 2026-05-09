@@ -150,6 +150,68 @@ def test_partner_award_not_breaking_market_moving():
     assert evt.raw_data.get("news_story_type") != "breaking_market_moving"
 
 
+def test_quality_screen_headline_is_not_breaking_or_credit_debt():
+    evt = _evt(
+        title="Apple Caviar Cruise Quality Screen: Why It Shines",
+        summary="A valuation quality screen ranking article.",
+        event_type="news_search",
+        tickers=["AAPL"],
+    )
+    annotate_news_events([evt])
+    assert evt.raw_data.get("news_story_type") in {"commentary_valuation", "low_signal"}
+    assert evt.raw_data.get("news_story_type") not in {"credit_debt", "macro_policy", "breaking_market_moving"}
+    assert evt.raw_data.get("news_breaking_eligible") is False
+
+
+def test_servicenow_ai_control_plane_not_macro_policy():
+    evt = _evt(
+        title="ServiceNow unveils enterprise AI control plane for workflow orchestration",
+        summary="Product positioning and enterprise rollout context.",
+        event_type="company_news",
+        tickers=["NOW"],
+    )
+    annotate_news_events([evt])
+    assert evt.raw_data.get("news_story_type") in {"product_partnership", "single_name_context"}
+    assert evt.raw_data.get("news_story_type") != "macro_policy"
+
+
+def test_apollo_blackstone_financing_not_geopolitical():
+    evt = _evt(
+        title="Apollo and Blackstone lead financing deal tied to Broadcom-linked infrastructure",
+        summary="Private credit lenders arranged a debt financing facility.",
+        event_type="news_search",
+        tickers=["AVGO"],
+    )
+    annotate_news_events([evt])
+    assert evt.raw_data.get("news_story_type") in {"credit_debt", "mna_deal"}
+    assert evt.raw_data.get("news_story_type") != "geopolitical_energy"
+
+
+def test_buyout_push_employment_context_not_mna_deal():
+    evt = _evt(
+        title="Microsoft buyout push offers cash and healthcare to staff in restructuring move",
+        summary="Voluntary employee buyout and workforce realignment.",
+        event_type="company_news",
+        tickers=["MSFT"],
+    )
+    annotate_news_events([evt])
+    assert evt.raw_data.get("news_story_type") == "single_name_context"
+    assert evt.raw_data.get("news_story_type") != "mna_deal"
+    assert evt.raw_data.get("news_breaking_eligible") is False
+
+
+def test_prediction_listicle_headline_is_low_signal_and_not_breaking():
+    evt = _evt(
+        title="Why this stock could outperform the S&P 500: prediction roundup",
+        summary="Opinion-led forecast without direct catalyst.",
+        event_type="news_search",
+        tickers=["SPY", "QQQ"],
+    )
+    annotate_news_events([evt])
+    assert evt.raw_data.get("news_story_type") in {"low_signal", "commentary_valuation"}
+    assert evt.raw_data.get("news_breaking_eligible") is False
+
+
 def test_fresh_sanctions_shock_can_still_be_breaking():
     evt = _evt(
         title="US sanctions trigger oil chokepoint fears near Hormuz",

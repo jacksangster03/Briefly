@@ -224,9 +224,12 @@ class EmailFormatter:
                 f"{desk_read}</td></tr>"
             )
         if trigger_lines:
+            trigger_header = "TODAY'S TRIGGERS"
+            if (briefing.session_key or "").lower() in {"saturday_weekend_briefing", "sunday_weekend_watch"}:
+                trigger_header = "MONDAY WATCHPOINTS"
             parts.append(
                 f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:8px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
-                f"<div style=\"font-size:10px;line-height:1.4;color:{_TEXT_MUTED};letter-spacing:0.05em;font-weight:800;\">TODAY'S TRIGGERS</div>"
+                f"<div style=\"font-size:10px;line-height:1.4;color:{_TEXT_MUTED};letter-spacing:0.05em;font-weight:800;\">{html.escape(trigger_header)}</div>"
                 f"<div style=\"margin-top:4px;font-size:11.5px;line-height:1.4;color:{_TEXT_SECONDARY};\">"
                 + "<br>".join(html.escape(line) for line in trigger_lines)
                 + "</div></td></tr>"
@@ -243,6 +246,8 @@ class EmailFormatter:
             change_header = "WHAT CHANGED"
             if (briefing.session_key or "morning").lower() == "morning":
                 change_header = "OVERNIGHT / PRIOR SESSION CHANGE"
+            elif (briefing.session_key or "").lower() in {"saturday_weekend_briefing", "sunday_weekend_watch"}:
+                change_header = "FRIDAY CLOSE / WEEKEND UPDATE"
             elif (briefing.what_changed_header or "").strip():
                 change_header = str(briefing.what_changed_header).strip()
             parts.append(

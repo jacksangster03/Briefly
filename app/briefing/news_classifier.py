@@ -69,6 +69,14 @@ _LOW_SIGNAL_PATTERNS = (
     "what's behind",
     "what’s behind",
     "market wrap",
+    "quality screen",
+    "shines in screen",
+    "outperform the s&p",
+    "outperform the s&p 500",
+    "why stock could",
+    "so why is stock down",
+    "valuation after",
+    "prediction",
 )
 
 _POLLING_PATTERNS = (
@@ -112,6 +120,10 @@ _COMMENTARY_TERMS = (
     "column",
     "editorial",
     "analysts say",
+    "quality screen",
+    "prediction",
+    "price prediction",
+    "valuation after",
 )
 _ANALYSIS_PATTERNS = (
     "what it means",
@@ -123,6 +135,7 @@ _ANALYSIS_PATTERNS = (
 )
 _ANALYST_ACTION_TERMS = (
     "raises target",
+    "sets target",
     "price target",
     "upgrades",
     "downgrades",
@@ -134,6 +147,33 @@ _SINGLE_NAME_CONTEXT_TERMS = (
     "what toyota's earnings mean for tesla",
     "what toyota’s earnings mean for tesla",
     "what .* earnings mean for .*",
+)
+
+_FINANCING_TERMS = (
+    "financing deal",
+    "private credit lenders",
+    "private lenders",
+    "debt financing facility",
+    "bridge financing",
+    "credit facility",
+    "loan agreement",
+    "loan for",
+)
+
+_EMPLOYMENT_RESTRUCTURING_TERMS = (
+    "offers cash and healthcare",
+    "voluntary buyout",
+    "employee buyout",
+    "workforce reduction",
+    "restructuring plan",
+    "severance",
+)
+
+_PRODUCT_CONTEXT_TERMS = (
+    "control plane",
+    "enterprise ai",
+    "platform launch",
+    "product positioning",
 )
 
 _SEC_TYPES = {"sec_filing", "filing", "8k", "10q", "10k"}
@@ -253,6 +293,10 @@ def is_stale_breaking_candidate(event: NormalisedEvent) -> tuple[bool, str]:
 def _story_type(event: NormalisedEvent, text: str) -> StoryType:
     event_type = (event.event_type or "").lower()
     title = _norm(event.title)
+    if any(term in text for term in _LOW_SIGNAL_PATTERNS):
+        return "low_signal"
+    if any(term in text for term in _COMMENTARY_TERMS):
+        return "commentary_valuation"
     if any(term in text for term in _ANALYST_ACTION_TERMS) or event_type in {"analyst", "analyst_action"}:
         return "analyst_action"
     if event_type in {"earnings", "earnings_results"}:
@@ -269,13 +313,23 @@ def _story_type(event: NormalisedEvent, text: str) -> StoryType:
         return "single_name_context"
     if "guidance" in text:
         return "guidance_change"
+    if any(term in text for term in _EMPLOYMENT_RESTRUCTURING_TERMS):
+        return "single_name_context"
+    if any(term in text for term in _PRODUCT_CONTEXT_TERMS):
+        return "product_partnership"
+    if any(term in text for term in _FINANCING_TERMS):
+        return "credit_debt"
     if event_type in {"macro_release", "fed_decision"} or any(term in text for term in ("fomc", "fed", "ecb", "cpi", "pce", "payroll")):
         return "macro_policy"
-    if event_type == "geopolitical" or any(term in text for term in ("hormuz", "iran", "israel", "sanction", "oil", "crude")):
+    if event_type == "geopolitical" or any(term in text for term in ("hormuz", "iran", "israel", "sanction", "oil", "crude", "chokepoint", "blockade", "strait")):
         return "geopolitical_energy"
     if event_type in {"regulatory", "fda", "legal"} or any(term in text for term in ("fda", "lawsuit", "antitrust", "chmp")):
         return "regulatory_legal"
-    if any(term in text for term in ("merger", "acquisition", "m&a", "takeover", "buyout")):
+    if any(term in text for term in ("merger", "acquisition", "m&a", "takeover")):
+        return "mna_deal"
+    if "buyout" in text:
+        if any(term in text for term in _EMPLOYMENT_RESTRUCTURING_TERMS):
+            return "single_name_context"
         return "mna_deal"
     if any(term in text for term in ("partnership", "collaboration", "product launch")):
         return "product_partnership"
@@ -283,12 +337,8 @@ def _story_type(event: NormalisedEvent, text: str) -> StoryType:
         return "filing_sec"
     if any(term in text for term in ("insider", "director bought", "ceo sold")):
         return "insider_transaction"
-    if any(term in text for term in ("debt", "credit", "downgrade", "default", "refinancing")):
+    if any(term in text for term in ("debt", "credit", "default", "refinancing", "loan")):
         return "credit_debt"
-    if any(term in text for term in _COMMENTARY_TERMS):
-        return "commentary_valuation"
-    if any(term in text for term in _LOW_SIGNAL_PATTERNS):
-        return "low_signal"
     if "wrap" in text or "recap" in text:
         return "generic_market_wrap"
     if any(term in text for term in _HARD_CATALYST_TERMS):
