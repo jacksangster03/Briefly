@@ -37,6 +37,7 @@ ALLOWED_HOME_REGIONS = {
 ALLOWED_EMAIL_DENSITY_MODES = {"desk", "full"}
 ALLOWED_HEALTHCARE_SEVERITIES = {"low", "medium", "high", "critical"}
 ALLOWED_VERTICAL_MODES = {"off", "watch", "active", "portfolio_linked"}
+ALLOWED_VERTICAL_PRIORITIES = {"low", "normal", "high"}
 ALLOWED_WEEKEND_MODES = {"off", "saturday_only", "saturday_and_sunday_news"}
 ALLOWED_SUNDAY_NEWS_MATERIALITY = {"material_only", "always_short"}
 
@@ -224,6 +225,16 @@ def _normalize_vertical_mode(value: Any) -> str:
     return mode
 
 
+def _normalize_vertical_priority(value: Any) -> str:
+    priority = str(value or "").strip().lower()
+    if priority not in ALLOWED_VERTICAL_PRIORITIES:
+        raise ValueError(
+            f"Unsupported vertical priority '{priority}'. "
+            f"Allowed: {', '.join(sorted(ALLOWED_VERTICAL_PRIORITIES))}"
+        )
+    return priority
+
+
 def _normalize_weekend_mode(value: Any) -> str:
     mode = str(value or "").strip().lower()
     if mode not in ALLOWED_WEEKEND_MODES:
@@ -246,6 +257,13 @@ def _normalize_sunday_news_materiality(value: Any) -> str:
 
 def _normalize_positive_int(value: Any) -> int:
     val = int(value)
+    if val < 0:
+        raise ValueError("Value must be >= 0")
+    return val
+
+
+def _normalize_non_negative_float(value: Any) -> float:
+    val = float(value)
     if val < 0:
         raise ValueError("Value must be >= 0")
     return val
@@ -309,6 +327,13 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "healthcare.minimum_severity_morning": _normalize_healthcare_severity,
     "healthcare.minimum_severity_intraday": _normalize_healthcare_severity,
     "healthcare.minimum_severity_breaking": _normalize_healthcare_severity,
+    "verticals.healthcare.mode": _normalize_vertical_mode,
+    "verticals.healthcare.priority": _normalize_vertical_priority,
+    "verticals.healthcare.max_items.morning": _normalize_positive_int,
+    "verticals.healthcare.max_items.intraday": _normalize_positive_int,
+    "verticals.healthcare.min_severity": _normalize_healthcare_severity,
+    "verticals.healthcare.portfolio_weight_threshold": _normalize_non_negative_float,
+    "verticals.healthcare.watchlist_count_threshold": _normalize_positive_int,
     "snapshots.enabled": _normalize_bool,
     "snapshots.retention_days": _normalize_positive_int,
     "snapshots.store_email_html": _normalize_bool,

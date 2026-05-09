@@ -79,6 +79,7 @@ _ALL_SECTIONS = [
     "section-holdings",
     "section-coverage",
     "section-delivery",
+    "section-verticals",
     "section-morning",
     "section-briefing-morning-charts",
     "section-audit",
@@ -108,6 +109,12 @@ _PAGE_CONTEXTS: dict[str, dict[str, Any]] = {
         "workspace": "briefing",
         "workspace_page": "delivery",
         "visible_sections": ["section-delivery"],
+    },
+    "briefing_verticals": {
+        "global_nav": "briefing",
+        "workspace": "briefing",
+        "workspace_page": "verticals",
+        "visible_sections": ["section-verticals"],
     },
     "briefing_morning": {
         "global_nav": "briefing",
@@ -391,6 +398,18 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             request,
             profile=normalized_profile,
             page_key="briefing_morning",
+        )
+
+    @app.get("/ui/briefing/verticals", response_class=HTMLResponse, include_in_schema=False)
+    def ui_briefing_verticals(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        return _render_settings_page(
+            request,
+            profile=normalized_profile,
+            page_key="briefing_verticals",
         )
 
     @app.get("/ui/briefing/morning/charts", response_class=HTMLResponse, include_in_schema=False)
@@ -848,6 +867,24 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             profile=normalized_profile,
             updates=updates,
             success_message="Morning section visibility saved.",
+            page_key=page_key,
+        )
+
+    @app.post(
+        "/ui/profile/{profile}/save/verticals",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def ui_save_verticals(request: Request, profile: str):
+        normalized_profile = _normalize_profile(profile)
+        form = await request.form()
+        updates = _vertical_updates_from_form(form)
+        page_key = _page_key_from_form(form, default="briefing_verticals")
+        return _render_ui_after_update(
+            request,
+            profile=normalized_profile,
+            updates=updates,
+            success_message="Vertical intelligence preferences saved.",
             page_key=page_key,
         )
 
@@ -2553,6 +2590,23 @@ def _section_updates_from_form(form) -> dict[str, Any]:
     for section in section_keys:
         key = "sections.global_news" if section == "global_news" else f"sections.morning.{section}"
         updates[key] = f"section_{section}" in form
+    return updates
+
+
+def _vertical_updates_from_form(form) -> dict[str, Any]:
+    updates: dict[str, Any] = {
+        "verticals.healthcare.mode": str(form.get("verticals_healthcare_mode", "")).strip().lower(),
+        "verticals.healthcare.priority": str(form.get("verticals_healthcare_priority", "")).strip().lower(),
+        "verticals.healthcare.max_items.morning": int(str(form.get("verticals_healthcare_max_items_morning", "4")).strip() or "4"),
+        "verticals.healthcare.max_items.intraday": int(str(form.get("verticals_healthcare_max_items_intraday", "3")).strip() or "3"),
+        "verticals.healthcare.min_severity": str(form.get("verticals_healthcare_min_severity", "")).strip().lower(),
+        "verticals.healthcare.portfolio_weight_threshold": float(
+            str(form.get("verticals_healthcare_portfolio_weight_threshold", "0")).strip() or "0"
+        ),
+        "verticals.healthcare.watchlist_count_threshold": int(
+            str(form.get("verticals_healthcare_watchlist_count_threshold", "1")).strip() or "1"
+        ),
+    }
     return updates
 
 

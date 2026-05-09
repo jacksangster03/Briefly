@@ -63,6 +63,7 @@ from app.simulation.service import load_simulation_context
 from app.bonds.service import compute_bond_analytics as _compute_bond_analytics, load_bond_overrides
 from app.esg.service import compute_portfolio_esg as _compute_portfolio_esg, load_esg_config
 from app.fx.service import compute_fx_exposure as _compute_fx_exposure, load_fx_config
+from app.verticals.engine import verticals_status_for_profile
 
 
 POLICY_INVESTOR_TYPES = [
@@ -355,6 +356,10 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
     metadata["benchmark_summary"] = benchmark_view
     metadata["validation_presets"] = list_preset_summaries()
     metadata["ui_glossary"] = UI_GLOSSARY
+    try:
+        metadata["verticals_diagnostics"] = verticals_status_for_profile(profile=profile)
+    except Exception:
+        metadata["verticals_diagnostics"] = []
     simulation_context = load_simulation_context(
         profile_name=normalized_profile,
         fallback_holdings=holdings,
@@ -410,6 +415,19 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
         ui_readiness=analysis["ui_readiness"],
     )
 
+    healthcare_pref = profile.healthcare_preferences if hasattr(profile, "healthcare_preferences") else {}
+    vertical_effective = {
+        "healthcare": {
+            "mode": str(overrides.get("verticals.healthcare.mode") or healthcare_pref.get("mode") or ("active" if healthcare_pref.get("enabled", False) else "off")),
+            "priority": str(overrides.get("verticals.healthcare.priority") or "normal"),
+            "max_items_morning": int(overrides.get("verticals.healthcare.max_items.morning") or healthcare_pref.get("max_items_morning", 4) or 4),
+            "max_items_intraday": int(overrides.get("verticals.healthcare.max_items.intraday") or healthcare_pref.get("max_items_intraday", 3) or 3),
+            "min_severity": str(overrides.get("verticals.healthcare.min_severity") or healthcare_pref.get("minimum_severity_intraday", "high")),
+            "portfolio_weight_threshold": float(overrides.get("verticals.healthcare.portfolio_weight_threshold") or 0.0),
+            "watchlist_count_threshold": int(overrides.get("verticals.healthcare.watchlist_count_threshold") or 1),
+        }
+    }
+
     return {
         "profile": normalized_profile,
         "risk_config": risk_config,
@@ -458,6 +476,7 @@ def build_profile_state(settings: Settings, profile_name: str) -> dict[str, Any]
                 "watchlist": profile.morning_section_enabled("watchlist"),
                 "watchlist_snapshot": profile.morning_section_enabled("watchlist_snapshot"),
             },
+            "verticals": vertical_effective,
         },
         "overrides": overrides,
         "policy": policy,

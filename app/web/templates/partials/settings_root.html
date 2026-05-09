@@ -58,7 +58,7 @@
 {% set simulation_horizon_presets = simulation_ctx.horizon_presets if simulation_ctx.horizon_presets is defined else {} %}
 {% set morning_chart_preview = morning_chart_preview if morning_chart_preview is defined else (metadata.morning_chart_preview if metadata.morning_chart_preview is defined else {"bundle": {}, "selection": [], "assets": []}) %}
 {% set visible_sections = visible_sections if visible_sections is defined else [
-  "section-easy-setup","section-briefing-home","section-overview","section-analyzer","section-policy","section-allocation","section-risk","section-cma","section-scenarios","section-simulation","section-rebalancing","section-attribution","section-benchmark","section-holdings","section-coverage","section-delivery","section-morning","section-briefing-morning-charts","section-audit-home","section-audit"
+  "section-easy-setup","section-briefing-home","section-overview","section-analyzer","section-policy","section-allocation","section-risk","section-cma","section-scenarios","section-simulation","section-rebalancing","section-attribution","section-benchmark","section-holdings","section-coverage","section-delivery","section-verticals","section-morning","section-briefing-morning-charts","section-audit-home","section-audit"
 ] %}
 {% set workspace = workspace if workspace is defined else "briefing" %}
 {% set workspace_page = workspace_page if workspace_page is defined else "home" %}
@@ -1427,6 +1427,10 @@
       <a class="summary" href="/ui/briefing/morning?profile={{ state.profile }}" style="text-decoration:none;">
         <div class="kpi-label">Morning Composition</div>
         <div>Toggle morning brief sections and save composition layout.</div>
+      </a>
+      <a class="summary" href="/ui/briefing/verticals?profile={{ state.profile }}" style="text-decoration:none;">
+        <div class="kpi-label">Vertical Intelligence</div>
+        <div>Configure healthcare mode, thresholds, and diagnostics for vertical routing.</div>
       </a>
       <a class="summary" href="/ui/briefing/morning/charts?profile={{ state.profile }}" style="text-decoration:none;">
         <div class="kpi-label">Morning Charts</div>
@@ -4529,6 +4533,93 @@
         <button type="submit">Save Delivery</button>
       </div>
     </form>
+  </section>
+  {% endif %}
+
+  {% if "section-verticals" in visible_sections %}
+  {% set vcfg = state.effective.verticals.healthcare if state.effective.verticals is defined and state.effective.verticals.healthcare is defined else {} %}
+  {% set vdiag_rows = metadata.verticals_diagnostics if metadata.verticals_diagnostics is defined else [] %}
+  {% set hdiag = (vdiag_rows | selectattr("vertical_key", "equalto", "healthcare") | list | first) %}
+  <section class="card" id="section-verticals" data-module-section="section-verticals">
+    <h2>Market Briefing · Vertical Intelligence</h2>
+    <p class="muted">Phase 2A controls for deterministic vertical routing. Healthcare is the first plugin and official source ingestion remains disabled/stubbed in this phase.</p>
+    <form
+      hx-post="/ui/profile/{{ state.profile }}/save/verticals"
+      hx-target="#settings-root"
+      hx-swap="outerHTML"
+      method="post"
+      class="tracked-form"
+    >
+      <div class="inline-grid">
+        <div class="field">
+          <label>
+            Healthcare Mode
+            {% if "verticals.healthcare.mode" in state.overrides %}<span class="pill">override</span>{% endif %}
+          </label>
+          <select name="verticals_healthcare_mode" required>
+            {% for mode in ["off","watch","active","portfolio_linked"] %}
+              <option value="{{ mode }}" {% if vcfg.mode == mode %}selected{% endif %}>{{ mode }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>
+            Priority
+            {% if "verticals.healthcare.priority" in state.overrides %}<span class="pill">override</span>{% endif %}
+          </label>
+          <select name="verticals_healthcare_priority" required>
+            {% for p in ["low","normal","high"] %}
+              <option value="{{ p }}" {% if vcfg.priority == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>
+            Minimum Severity
+            {% if "verticals.healthcare.min_severity" in state.overrides %}<span class="pill">override</span>{% endif %}
+          </label>
+          <select name="verticals_healthcare_min_severity" required>
+            {% for s in ["low","medium","high","critical"] %}
+              <option value="{{ s }}" {% if vcfg.min_severity == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="inline-grid" style="margin-top:4px;">
+        <div class="field">
+          <label>Morning Max Items</label>
+          <input type="number" min="0" step="1" name="verticals_healthcare_max_items_morning" value="{{ vcfg.max_items_morning if vcfg.max_items_morning is defined else 4 }}">
+        </div>
+        <div class="field">
+          <label>Intraday Max Items</label>
+          <input type="number" min="0" step="1" name="verticals_healthcare_max_items_intraday" value="{{ vcfg.max_items_intraday if vcfg.max_items_intraday is defined else 3 }}">
+        </div>
+        <div class="field">
+          <label>Portfolio Exposure Threshold (%)</label>
+          <input type="number" min="0" step="0.1" name="verticals_healthcare_portfolio_weight_threshold" value="{{ vcfg.portfolio_weight_threshold if vcfg.portfolio_weight_threshold is defined else 0 }}">
+        </div>
+        <div class="field">
+          <label>Watchlist Count Threshold</label>
+          <input type="number" min="0" step="1" name="verticals_healthcare_watchlist_count_threshold" value="{{ vcfg.watchlist_count_threshold if vcfg.watchlist_count_threshold is defined else 1 }}">
+        </div>
+      </div>
+      <div class="actions">
+        <button type="submit">Save Vertical Preferences</button>
+      </div>
+    </form>
+
+    <div class="briefing-summary-card" style="margin-top:12px;">
+      <strong>Healthcare Diagnostics</strong>
+      {% if hdiag %}
+        <p>Registered: yes · Mode: {{ hdiag.mode or vcfg.mode }} · Status: {{ hdiag.activation_status or "unknown" }} · Reason: {{ hdiag.activation_reason or "-" }}</p>
+        <p>Portfolio/watchlist: {{ hdiag.portfolio_exposure_summary or "-" }} · {{ hdiag.watchlist_exposure_summary or "-" }}</p>
+        <p>Run metrics: candidates={{ hdiag.candidate_count if hdiag.candidate_count is not none else "unavailable" }}, included={{ hdiag.included_count if hdiag.included_count is not none else "unavailable" }}, suppressed={{ hdiag.suppressed_count if hdiag.suppressed_count is not none else "unavailable" }}</p>
+        <p>Last run: {{ hdiag.updated_at_utc or "unavailable" }}</p>
+        <p>Sources: {% if hdiag.source_status %}{{ hdiag.source_status | tojson }}{% else %}unavailable{% endif %}</p>
+      {% else %}
+        <p>Registered diagnostics unavailable.</p>
+      {% endif %}
+    </div>
   </section>
   {% endif %}
 

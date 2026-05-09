@@ -19,7 +19,8 @@ class HealthcareVerticalPlugin:
 
     def resolve_mode(self, *, profile) -> VerticalMode:
         prefs = profile.healthcare_preferences if hasattr(profile, "healthcare_preferences") else {}
-        explicit_mode = normalize_vertical_mode(prefs.get("mode"), default="")
+        overrides = getattr(profile, "preference_overrides", {}) or {}
+        explicit_mode = normalize_vertical_mode(overrides.get("verticals.healthcare.mode", prefs.get("mode")), default="")
         if explicit_mode:
             return explicit_mode
         return infer_healthcare_mode_from_legacy_enabled(bool(prefs.get("enabled", False)))
@@ -124,4 +125,3 @@ class HealthcareVerticalPlugin:
             ),
             "event_type_catalog_size": len(HEALTHCARE_EVENT_TYPES),
         }
-

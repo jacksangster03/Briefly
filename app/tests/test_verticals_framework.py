@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from click.testing import CliRunner
+from fastapi.testclient import TestClient
 
 from app.cli import cli
 from app.healthcare.section_builder import build_healthcare_section
 from app.personalization.user_profile import UserProfile
+from app.web.app import create_web_app
+from app.web.control_plane_service import apply_preference_updates, build_profile_state
 from app.schemas.events import NormalisedEvent
 from app.verticals.engine import build_vertical_section, verticals_status_for_profile
 from app.verticals.registry import load_vertical_plugins
@@ -125,3 +128,62 @@ def test_verticals_status_cli_works_enabled_and_disabled(monkeypatch):
     out_disabled = runner.invoke(cli, ["verticals-status", "--profile", "default_user"])
     assert out_disabled.exit_code == 0
     assert "mode=off" in out_disabled.output.lower()
+
+
+def test_verticals_page_renders(validation_test_settings):
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+    response = client.get("/ui/briefing/verticals?profile=default_user")
+    assert response.status_code == 200
+    html = response.text
+    assert "Vertical Intelligence" in html
+    assert "Healthcare Mode" in html
+    assert "Healthcare Diagnostics" in html
+
+
+def test_verticals_healthcare_mode_preference_save_read(validation_isolated_db, validation_test_settings):
+    apply_preference_updates(
+        "default_user",
+        {
+            "verticals.healthcare.mode": "watch",
+            "verticals.healthcare.priority": "high",
+            "verticals.healthcare.max_items.morning": 5,
+            "verticals.healthcare.max_items.intraday": 2,
+            "verticals.healthcare.min_severity": "high",
+            "verticals.healthcare.portfolio_weight_threshold": 7.5,
+            "verticals.healthcare.watchlist_count_threshold": 3,
+        },
+    )
+    state = build_profile_state(validation_test_settings, "default_user")
+    eff = state["effective"]["verticals"]["healthcare"]
+    assert eff["mode"] == "watch"
+    assert eff["priority"] == "high"
+    assert eff["max_items_morning"] == 5
+    assert eff["max_items_intraday"] == 2
+    assert eff["min_severity"] == "high"
+    assert abs(float(eff["portfolio_weight_threshold"]) - 7.5) < 1e-9
+    assert eff["watchlist_count_threshold"] == 3
+
+
+def test_verticals_invalid_mode_rejected(validation_isolated_db):
+    try:
+        apply_preference_updates("default_user", {"verticals.healthcare.mode": "ultra"})
+    except ValueError as exc:
+        assert "Unsupported vertical mode" in str(exc)
+        return
+    assert False, "Expected ValueError for invalid vertical mode"
+
+
+def test_vertical_diagnostics_render_off_and_active(monkeypatch, validation_test_settings):
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+
+    monkeypatch.setattr("app.verticals.engine.vertical_mode_for_profile", lambda **_k: "off")
+    resp_off = client.get("/ui/briefing/verticals?profile=default_user")
+    assert resp_off.status_code == 200
+    assert "Status:" in resp_off.text
+
+    monkeypatch.setattr("app.verticals.engine.vertical_mode_for_profile", lambda **_k: "active")
+    resp_active = client.get("/ui/briefing/verticals?profile=default_user")
+    assert resp_active.status_code == 200
+    assert "Mode:" in resp_active.text
