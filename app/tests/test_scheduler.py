@@ -116,7 +116,7 @@ class TestRunStartupCatchup:
         saturday = datetime(2026, 5, 9, 10, 0, tzinfo=timezone.utc)  # a Saturday
         with patch("app.scheduler.datetime") as mock_dt, \
              patch("app.scheduler.run_catch_up") as mock_cu, \
-             patch("app.scheduler.load_user_profile"), \
+             patch("app.scheduler.load_user_profile") as mock_profile, \
              patch("app.scheduler.init_db"):
             mock_dt.now.return_value = saturday
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -126,8 +126,35 @@ class TestRunStartupCatchup:
             saturday_obj = MagicMock()
             saturday_obj.astimezone.return_value = sat_local
             mock_dt.now.return_value = saturday_obj
+            profile = MagicMock()
+            profile.timezone = "Europe/Madrid"
+            profile.weekend_mode = "off"
+            mock_profile.return_value = profile
             _run_startup_catchup(settings)
         mock_cu.assert_not_called()
+
+    def test_weekend_mode_allows_startup_catchup(self):
+        settings = _make_settings()
+        sat_local = MagicMock()
+        sat_local.weekday.return_value = 5
+        sat_local.date.return_value.isoformat.return_value = "2026-05-09"
+        sat_local.strftime.return_value = "10:00"
+        now_utc = MagicMock()
+        now_utc.astimezone.return_value = sat_local
+
+        with patch("app.scheduler.datetime") as mock_dt, \
+             patch("app.scheduler.run_catch_up", return_value=_summary()) as mock_cu, \
+             patch("app.scheduler.load_user_profile") as mock_profile, \
+             patch("app.scheduler.ZoneInfo"), \
+             patch("app.scheduler.init_db"):
+            mock_dt.now.return_value = now_utc
+            profile = MagicMock()
+            profile.timezone = "Europe/Madrid"
+            profile.weekend_mode = "saturday_only"
+            mock_profile.return_value = profile
+            _run_startup_catchup(settings)
+
+        mock_cu.assert_called_once()
 
     def test_weekday_calls_run_catch_up(self):
         settings = _make_settings()

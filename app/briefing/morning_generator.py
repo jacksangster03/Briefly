@@ -772,6 +772,27 @@ class MorningBriefingGenerator:
         key = (briefing.session_key or "morning").lower()
         if key == "morning":
             return
+        if key == "saturday_weekend_briefing":
+            briefing.global_news = list(briefing.global_news[:5])
+            briefing.top_themes = list(briefing.top_themes[:3])
+            briefing.portfolio_focus = list(briefing.portfolio_focus[:4])
+            briefing.watchlist_events = list(briefing.watchlist_events[:4])
+            briefing.sector_scan = list(briefing.sector_scan[:2])
+            briefing.macro_context = list(briefing.macro_context[:4])
+            briefing.commodity_strip = list(briefing.commodity_strip[:4])
+            self._trim_market_snapshot_quotes(briefing, max_index=8, max_macro=5)
+            return
+        if key == "sunday_weekend_watch":
+            briefing.global_news = list(briefing.global_news[:4])
+            briefing.top_themes = list(briefing.top_themes[:2])
+            briefing.portfolio_focus = list(briefing.portfolio_focus[:2])
+            briefing.watchlist_events = list(briefing.watchlist_events[:3])
+            briefing.sector_scan = []
+            briefing.earnings_calendar = []
+            briefing.macro_context = list(briefing.macro_context[:2])
+            briefing.commodity_strip = list(briefing.commodity_strip[:2])
+            self._trim_market_snapshot_quotes(briefing, max_index=4, max_macro=3)
+            return
         watch_symbols = {symbol.upper() for symbol in (self.profile.all_watchlist_tickers + self.profile.portfolio_symbols)}
         local_now = briefing.generated_at.astimezone(timezone.utc)
         today = local_now.date()

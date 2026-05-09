@@ -207,3 +207,41 @@ class TestRunDailySummary:
 
         result = run_daily_summary(Settings(), target_date_str="2026-05-06")
         assert "Asia" in result
+
+
+class TestWeekendSessionEligibility:
+    def test_saturday_only_mode_allows_only_saturday_weekend_briefing(self) -> None:
+        from app.main import _allowed_sessions_for_profile_day
+
+        allowed = _allowed_sessions_for_profile_day(
+            mode="active",
+            weekend_mode="saturday_only",
+            weekday_idx=5,
+        )
+        assert allowed == {"saturday_weekend_briefing"}
+
+    def test_sunday_material_mode_allows_only_sunday_watch(self) -> None:
+        from app.main import _allowed_sessions_for_profile_day
+
+        allowed = _allowed_sessions_for_profile_day(
+            mode="active",
+            weekend_mode="saturday_and_sunday_news",
+            weekday_idx=6,
+        )
+        assert allowed == {"sunday_weekend_watch"}
+
+    def test_weekend_off_allows_no_weekend_sessions(self) -> None:
+        from app.main import _allowed_sessions_for_profile_day
+
+        sat = _allowed_sessions_for_profile_day(
+            mode="active",
+            weekend_mode="off",
+            weekday_idx=5,
+        )
+        sun = _allowed_sessions_for_profile_day(
+            mode="active",
+            weekend_mode="off",
+            weekday_idx=6,
+        )
+        assert sat == set()
+        assert sun == set()

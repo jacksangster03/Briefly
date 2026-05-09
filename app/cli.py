@@ -1116,7 +1116,7 @@ def schedule_status(ctx, profile_name: str):
     from app.briefing.session_routing import next_session_window, resolve_session_window
     from app.db.models import ProviderHealthLog, SessionSendState
     from app.db.session import get_session, init_db
-    from app.main import _allowed_sessions_for_mode
+    from app.main import _allowed_sessions_for_mode, _allowed_sessions_for_profile_day
     from app.personalization.user_profile import load_user_profile
 
     import datetime as _dt
@@ -1225,12 +1225,22 @@ def schedule_status(ctx, profile_name: str):
     click.echo(f"  Note: {ASIA_COVERAGE_NOTE}")
     click.echo("")
     click.echo("  Cadence preferences")
-    allowed = _allowed_sessions_for_mode(profile.session_mode)
+    allowed = _allowed_sessions_for_profile_day(
+        mode=profile.session_mode,
+        weekend_mode=profile.weekend_mode,
+        weekday_idx=local_now.weekday(),
+    )
     always_list = profile.always_send_sessions or []
     click.echo(f"    session_mode:             {profile.session_mode}")
-    click.echo(f"    allowed_sessions:         {', '.join(sorted(allowed))}")
+    click.echo(f"    allowed_sessions:         {', '.join(sorted(allowed)) if allowed else '(none)'}")
     click.echo(f"    always_send_sessions:     {', '.join(always_list) if always_list else '(none)'}")
     click.echo(f"    suppress_low_materiality: {profile.suppress_low_materiality}")
+    click.echo(f"    weekend_mode:             {profile.weekend_mode}")
+    click.echo(f"    sunday_news_materiality:  {profile.sunday_news_materiality}")
+    if local_now.weekday() >= 5:
+        weekday_sessions = _allowed_sessions_for_mode("active")
+        suppressed = sorted(weekday_sessions - set(allowed))
+        click.echo(f"    weekend_weekday_suppressed: {', '.join(suppressed) if suppressed else '(none)'}")
     click.echo("")
     click.echo(f"  Today's send state ({today.isoformat()})")
 
@@ -1269,6 +1279,28 @@ def schedule_status(ctx, profile_name: str):
             else:
                 state_str = f"failed: {(row.error_message or '')[:60]}"
             click.echo(f"    {sk:<22} {ch:<10} {state_str}")
+
+    if local_now.weekday() >= 5:
+        for wk_key, wk_label in (
+            ("saturday_weekend_briefing", "Weekend Briefing"),
+            ("sunday_weekend_watch", "Sunday Weekend Watch"),
+        ):
+            for ch in channels:
+                row = state_map.get((wk_key, ch))
+                if row is None:
+                    state_str = "(not attempted)"
+                elif row.success:
+                    if row.sent_at:
+                        sent_utc = row.sent_at.replace(tzinfo=_dt.timezone.utc)
+                        sent_at = sent_utc.astimezone(tz).strftime("%H:%M")
+                    else:
+                        sent_at = "?"
+                    state_str = f"sent at {sent_at}"
+                elif row.in_progress:
+                    state_str = "in progress"
+                else:
+                    state_str = f"failed: {(row.error_message or '')[:60]}"
+                click.echo(f"    {wk_key:<22} {ch:<10} {state_str}")
 
 
 @cli.command("daily-summary")

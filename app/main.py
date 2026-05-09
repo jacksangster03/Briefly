@@ -300,6 +300,63 @@ def _allowed_sessions_for_mode(mode: str) -> set[str]:
     return {"morning", "us_pre_open"}
 
 
+def _weekend_allowed_sessions(*, weekend_mode: str, weekday_idx: int) -> set[str]:
+    mode = (weekend_mode or "saturday_only").strip().lower()
+    if mode == "off":
+        return set()
+    if weekday_idx == 5:
+        return {"saturday_weekend_briefing"}
+    if weekday_idx == 6 and mode == "saturday_and_sunday_news":
+        return {"sunday_weekend_watch"}
+    return set()
+
+
+def _allowed_sessions_for_profile_day(*, mode: str, weekend_mode: str, weekday_idx: int) -> set[str]:
+    if weekday_idx >= 5:
+        return _weekend_allowed_sessions(weekend_mode=weekend_mode, weekday_idx=weekday_idx)
+    return _allowed_sessions_for_mode(mode)
+
+
+def _has_material_weekend_news(briefing) -> bool:
+    pools = list(briefing.global_news or []) + list(briefing.top_themes or []) + list(briefing.watchlist_events or []) + list(briefing.portfolio_focus or [])
+    for evt in pools:
+        score = float(getattr(evt, "final_score", 0.0) or 0.0)
+        size = int(getattr(evt, "cluster_size", 0) or 0)
+        raw = getattr(evt, "raw_data", {}) or {}
+        if score >= 1.1 or size >= 6:
+            return True
+        if bool(raw.get("news_breaking_eligible")):
+            return True
+        if str(raw.get("news_story_type", "")).lower() in {
+            "breaking_market_moving",
+            "macro_policy",
+            "geopolitical_energy",
+            "regulatory_legal",
+            "mna_deal",
+            "guidance_change",
+            "earnings_results",
+        }:
+            return True
+    return False
+
+
+def _make_sunday_no_material_compact(briefing) -> None:
+    briefing.what_changed_header = "WEEKEND WATCH"
+    briefing.what_changed_lines = ["No material weekend developments so far. Monitoring for Monday setup catalysts."]
+    briefing.global_news = []
+    briefing.top_themes = []
+    briefing.sector_scan = []
+    briefing.watchlist_events = []
+    briefing.portfolio_focus = []
+    briefing.earnings_calendar = []
+    briefing.regional_lens = []
+    briefing.market_setup.index_quotes = []
+    briefing.market_setup.macro_quotes = []
+    briefing.market_setup.market_breadth = []
+    briefing.macro_context = []
+    briefing.commodity_strip = []
+
+
 def _session_marker_key(session_key: str, local_now: datetime) -> str:
     return f"session:{session_key}:{local_now.date().isoformat()}"
 
@@ -843,9 +900,12 @@ def run_morning_briefing(
     logger.info("Starting session briefing pipeline...")
     profile = load_user_profile(settings)
     now_utc = datetime.now(timezone.utc)
+    local_tz_name = profile.timezone or settings.timezone
+    local_now_pre = now_utc.astimezone(ZoneInfo(local_tz_name))
+    weekday_idx = local_now_pre.weekday()
     session_window = resolve_session_window(
         now=now_utc,
-        timezone_name=profile.timezone or settings.timezone,
+        timezone_name=local_tz_name,
         session_template=getattr(profile, "session_template", None),
     )
     session_key = "morning"
@@ -855,13 +915,20 @@ def run_morning_briefing(
         session_key = explicit.key
         session_title = explicit.title
     elif auto_route_session and not force_morning:
-        session_key = session_window.key
-        session_title = session_window.title
-        if session_key != "morning":
-            logger.info(
-                "Outside morning window. Rendering %s; use --force-morning to override.",
-                session_title,
-            )
+        if weekday_idx == 5:
+            session_key = "saturday_weekend_briefing"
+            session_title = "Weekend Briefing"
+        elif weekday_idx == 6:
+            session_key = "sunday_weekend_watch"
+            session_title = "Sunday Weekend Watch"
+        else:
+            session_key = session_window.key
+            session_title = session_window.title
+            if session_key != "morning":
+                logger.info(
+                    "Outside morning window. Rendering %s; use --force-morning to override.",
+                    session_title,
+                )
     decision_engine = DecisionEngine(
         settings,
         profile_name=profile.name,
@@ -875,7 +942,14 @@ def run_morning_briefing(
     )
     session_marker = f"session:{session_key}:{marker_date.isoformat()}"
     if respect_cadence:
-        allowed = _allowed_sessions_for_mode(profile.session_mode)
+        if session_override and command_source != "scheduler":
+            allowed = _allowed_sessions_for_mode(profile.session_mode)
+        else:
+            allowed = _allowed_sessions_for_profile_day(
+                mode=profile.session_mode,
+                weekend_mode=profile.weekend_mode,
+                weekday_idx=local_now.weekday(),
+            )
         always_send = set(profile.always_send_sessions)
         if session_key not in allowed and session_key not in always_send:
             logger.info(
@@ -904,6 +978,17 @@ def run_morning_briefing(
     )
 
     briefing = generator.generate(session_key=session_key, session_title=session_title)
+    if briefing.session_key == "sunday_weekend_watch":
+        has_material = _has_material_weekend_news(briefing)
+        materiality_pref = profile.sunday_news_materiality
+        if (respect_cadence or command_source == "scheduler") and not has_material and materiality_pref == "material_only":
+            logger.info(
+                "Cadence decision (session): suppress | session=%s reason=no_material_weekend_news",
+                briefing.session_key,
+            )
+            return
+        if not has_material and materiality_pref == "always_short":
+            _make_sunday_no_material_compact(briefing)
     _template_name, _template_items = get_session_template_for_profile(profile)
     _template_map = {item.key: item for item in _template_items}
     _clock_item = _template_map.get(briefing.session_key)
@@ -1843,6 +1928,11 @@ _CATCH_UP_SESSIONS: tuple[tuple[str, str, time], ...] = (
     ("closing_wrap",     "Closing Wrap / Next-Day Setup",    time(22, 0)),
 )
 
+_WEEKEND_CATCH_UP_SESSIONS: tuple[tuple[str, str, time], ...] = (
+    ("saturday_weekend_briefing", "Weekend Briefing", time(6, 0)),
+    ("sunday_weekend_watch", "Sunday Weekend Watch", time(9, 0)),
+)
+
 
 def _channel_send_states_today(
     profile_name: str,
@@ -1920,7 +2010,11 @@ def run_catch_up(
     current_tod = time(23, 59) if is_past_date else local_now.time()
 
     effective_mode = "active" if active_mode else profile.session_mode
-    allowed = _allowed_sessions_for_mode(effective_mode)
+    allowed = _allowed_sessions_for_profile_day(
+        mode=effective_mode,
+        weekend_mode=profile.weekend_mode,
+        weekday_idx=target_date.weekday(),
+    )
     always_send_set = set(profile.always_send_sessions)
 
     delivery_plan = _delivery_channel_plan(settings=settings, profile=profile, message_type="intraday")
@@ -1932,8 +2026,10 @@ def run_catch_up(
     if is_past_date:
         logger.info("Catch-up targeting past date %s; all session windows treated as elapsed.", date_label)
 
+    sessions_to_scan = _CATCH_UP_SESSIONS if target_date.weekday() < 5 else _WEEKEND_CATCH_UP_SESSIONS
+
     summary: list[dict] = []
-    for session_key, session_title, window_start in _CATCH_UP_SESSIONS:
+    for session_key, session_title, window_start in sessions_to_scan:
         if window_start > current_tod:
             summary.append({
                 "session": session_key,

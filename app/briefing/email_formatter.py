@@ -118,7 +118,11 @@ class EmailFormatter:
     def _subject(self, briefing: MorningBriefing) -> str:
         date_str = briefing.generated_at.strftime("%a %d %b")
         if briefing.session_mode in {"saturday", "sunday"}:
-            session_label = "Weekend Briefing"
+            key = (briefing.session_key or "").strip().lower()
+            if key == "sunday_weekend_watch":
+                session_label = "Sunday Weekend Watch"
+            else:
+                session_label = "Weekend Briefing"
         elif briefing.session_title and briefing.session_key not in {"", "morning"}:
             session_label = briefing.session_title
         else:

@@ -25,6 +25,9 @@ SESSION_WINDOWS: tuple[SessionWindow, ...] = (
     SessionWindow("into_close", "Into Close Update", time(17, 30), time(22, 0)),
 )
 
+SATURDAY_WINDOW = SessionWindow("saturday_weekend_briefing", "Weekend Briefing", time(6, 0), time(23, 59))
+SUNDAY_WINDOW = SessionWindow("sunday_weekend_watch", "Sunday Weekend Watch", time(9, 0), time(23, 59))
+
 
 def _windows_for_template(template_name: str | None) -> tuple[SessionWindow, ...]:
     name = (template_name or "emea_global").strip().lower()
@@ -44,6 +47,10 @@ def _windows_for_template(template_name: str | None) -> tuple[SessionWindow, ...
 def resolve_session_window(*, now: datetime, timezone_name: str, session_template: str | None = None) -> SessionWindow:
     tz = ZoneInfo(timezone_name)
     local_now = now.astimezone(tz) if now.tzinfo else now.replace(tzinfo=tz)
+    if local_now.weekday() == 5:
+        return SATURDAY_WINDOW
+    if local_now.weekday() == 6:
+        return SUNDAY_WINDOW
     tod = local_now.timetz().replace(tzinfo=None)
     windows = _windows_for_template(session_template)
     for window in windows:
@@ -73,6 +80,10 @@ def session_window_for_key(key: str) -> SessionWindow:
     for window in _windows_for_template("emea_global"):
         if window.key == mapped:
             return window
+    if mapped == "saturday_weekend_briefing":
+        return SATURDAY_WINDOW
+    if mapped == "sunday_weekend_watch":
+        return SUNDAY_WINDOW
     if mapped == "closing_wrap":
         return SessionWindow("closing_wrap", "Closing Wrap / Next-Day Setup", time(22, 0), time(23, 59))
     return SessionWindow("morning", "Morning Briefing", time(6, 0), time(10, 30))
@@ -82,6 +93,10 @@ def next_session_window(*, now: datetime, timezone_name: str, session_template: 
     """Return the next chronological session window from current local time."""
     tz = ZoneInfo(timezone_name)
     local_now = now.astimezone(tz) if now.tzinfo else now.replace(tzinfo=tz)
+    if local_now.weekday() == 5:
+        return SUNDAY_WINDOW
+    if local_now.weekday() == 6:
+        return SessionWindow("morning", "Morning Briefing", time(6, 0), time(10, 30))
     tod = local_now.timetz().replace(tzinfo=None)
     windows = _windows_for_template(session_template)
     for window in windows:

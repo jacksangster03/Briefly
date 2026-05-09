@@ -36,6 +36,8 @@ ALLOWED_HOME_REGIONS = {
 }
 ALLOWED_EMAIL_DENSITY_MODES = {"desk", "full"}
 ALLOWED_HEALTHCARE_SEVERITIES = {"low", "medium", "high", "critical"}
+ALLOWED_WEEKEND_MODES = {"off", "saturday_only", "saturday_and_sunday_news"}
+ALLOWED_SUNDAY_NEWS_MATERIALITY = {"material_only", "always_short"}
 
 
 def _normalize_profile(profile_name: str) -> str:
@@ -211,6 +213,26 @@ def _normalize_healthcare_severity(value: Any) -> str:
     return severity
 
 
+def _normalize_weekend_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    if mode not in ALLOWED_WEEKEND_MODES:
+        raise ValueError(
+            f"Unsupported weekend mode '{mode}'. "
+            f"Allowed: {', '.join(sorted(ALLOWED_WEEKEND_MODES))}"
+        )
+    return mode
+
+
+def _normalize_sunday_news_materiality(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    if mode not in ALLOWED_SUNDAY_NEWS_MATERIALITY:
+        raise ValueError(
+            f"Unsupported sunday_news_materiality '{mode}'. "
+            f"Allowed: {', '.join(sorted(ALLOWED_SUNDAY_NEWS_MATERIALITY))}"
+        )
+    return mode
+
+
 def _normalize_positive_int(value: Any) -> int:
     val = int(value)
     if val < 0:
@@ -254,6 +276,8 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "delivery.always_send_sessions": _normalize_session_key_list,
     "delivery.suppress_low_materiality": _normalize_bool,
     "delivery.email_density_mode": _normalize_email_density_mode,
+    "delivery.weekend_mode": _normalize_weekend_mode,
+    "delivery.sunday_news_materiality": _normalize_sunday_news_materiality,
     "sections.morning.market_setup": _normalize_bool,
     "sections.morning.macro_context": _normalize_bool,
     "sections.morning.global_news": _normalize_bool,

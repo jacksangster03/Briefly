@@ -105,8 +105,8 @@ class TestEmailSubjectWeekend:
     def test_saturday_uses_weekend_briefing(self) -> None:
         briefing = _make_briefing(
             session_mode="saturday",
-            session_key="saturday",
-            session_title="Saturday",
+            session_key="saturday_weekend_briefing",
+            session_title="Weekend Briefing",
         )
         subject = _get_subject(briefing)
         assert "Weekend Briefing" in subject
@@ -119,6 +119,15 @@ class TestEmailSubjectWeekend:
         )
         subject = _get_subject(briefing)
         assert "Weekend Briefing" in subject
+
+    def test_sunday_weekend_watch_uses_watch_label(self) -> None:
+        briefing = _make_briefing(
+            session_mode="sunday",
+            session_key="sunday_weekend_watch",
+            session_title="Sunday Weekend Watch",
+        )
+        subject = _get_subject(briefing)
+        assert "Sunday Weekend Watch" in subject
 
 
 # ---------------------------------------------------------------------------

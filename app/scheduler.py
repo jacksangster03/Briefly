@@ -117,8 +117,10 @@ def _run_startup_catchup(settings: Settings) -> None:
         local_now = datetime.now(timezone.utc).astimezone(tz)
 
         if local_now.weekday() >= 5:
-            logger.info("Startup catch-up: skipped (weekend — %s).", local_now.strftime("%A"))
-            return
+            weekend_mode = getattr(profile, "weekend_mode", "saturday_only")
+            if weekend_mode == "off":
+                logger.info("Startup catch-up: skipped (weekend mode off — %s).", local_now.strftime("%A"))
+                return
 
         logger.info(
             "Startup catch-up: checking for elapsed-but-unsent sessions on %s at %s...",

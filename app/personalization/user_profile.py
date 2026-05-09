@@ -162,6 +162,16 @@ class UserProfile:
         return raw if raw in {"desk", "full", "auto", "medium"} else "auto"
 
     @property
+    def weekend_mode(self) -> str:
+        raw = str(self.delivery.get("weekend_mode", "saturday_only")).strip().lower()
+        return raw if raw in {"off", "saturday_only", "saturday_and_sunday_news"} else "saturday_only"
+
+    @property
+    def sunday_news_materiality(self) -> str:
+        raw = str(self.delivery.get("sunday_news_materiality", "material_only")).strip().lower()
+        return raw if raw in {"material_only", "always_short"} else "material_only"
+
+    @property
     def quiet_hours(self) -> tuple[str, str]:
         return (
             self.delivery.get("quiet_hours_start", "23:00"),
@@ -462,6 +472,8 @@ def _load_profile_overrides(profile: UserProfile) -> None:
             "delivery.session_mode",
             "delivery.always_send_sessions",
             "delivery.suppress_low_materiality",
+            "delivery.weekend_mode",
+            "delivery.sunday_news_materiality",
         }:
             profile.delivery[key.replace("delivery.", "")] = value
             continue
