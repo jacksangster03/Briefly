@@ -55,11 +55,11 @@ class FREDProvider(BaseProvider):
 
     # -- Series observation ---------------------------------------------------
 
-    def get_latest_observation(self, series_id: str) -> MacroDataPoint | None:
+    def get_latest_observation(self, series_id: str, units: str | None = None) -> MacroDataPoint | None:
         """Fetch the most recent observation for a FRED series."""
         attempted = [series_id] + SERIES_FALLBACKS.get(series_id, [])
         for sid in attempted:
-            point = self._get_latest_observation_once(series_id=sid)
+            point = self._get_latest_observation_once(series_id=sid, units=units)
             if point is not None:
                 # Preserve requested semantic ID/name for downstream consumers.
                 point.series_id = series_id
@@ -68,16 +68,19 @@ class FREDProvider(BaseProvider):
         logger.warning("Failed to fetch FRED series %s", series_id)
         return None
 
-    def _get_latest_observation_once(self, series_id: str) -> MacroDataPoint | None:
+    def _get_latest_observation_once(self, series_id: str, units: str | None = None) -> MacroDataPoint | None:
         """Single-attempt fetch for one concrete FRED series ID."""
         try:
+            params = {
+                "series_id": series_id,
+                "sort_order": "desc",
+                "limit": 2,  # current + previous for change calc
+            }
+            if units:
+                params["units"] = units
             data = self._get(
                 f"{BASE_URL}/series/observations",
-                params=self._params({
-                    "series_id": series_id,
-                    "sort_order": "desc",
-                    "limit": 2,  # current + previous for change calc
-                }),
+                params=self._params(params),
             )
         except ProviderError:
             return None

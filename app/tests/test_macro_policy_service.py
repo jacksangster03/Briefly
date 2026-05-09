@@ -13,11 +13,13 @@ from app.personalization.user_profile import load_user_profile
 class _FakeFred:
     def __init__(self, points: dict[str, object]):
         self._points = points
+        self.calls: list[tuple[str, str | None]] = []
 
     def is_configured(self) -> bool:
         return True
 
-    def get_latest_observation(self, series_id: str):
+    def get_latest_observation(self, series_id: str, units: str | None = None):
+        self.calls.append((series_id, units))
         return self._points.get(series_id)
 
 
@@ -92,6 +94,51 @@ def test_macro_policy_dashboard_schema_is_stable(validation_test_settings):
         assert key in payload
     assert payload["rates_yield_curve_panel"]["curve_shape"] == "normal curve"
     assert payload["rates_yield_curve_panel"]["status"] in {"ok", "partial", "unavailable"}
+    assert payload["inflation_tracker"]["series"]["us_cpi"]["label"] in {"US CPI YoY", "US CPI index level"}
+
+
+def test_inflation_prefers_yoy_transform(validation_test_settings):
+    profile = load_user_profile(validation_test_settings)
+    points = {
+        "CPIAUCSL": _point("CPIAUCSL", 3.4, 0.1),
+        "CPILFESL": _point("CPILFESL", 3.2, 0.1),
+        "PCEPI": _point("PCEPI", 2.6, 0.0),
+        "PCEPILFE": _point("PCEPILFE", 2.8, 0.0),
+        "GBRCPIALLMINMEI": _point("GBRCPIALLMINMEI", 3.1, 0.0),
+    }
+    svc = _FakeMacroService(points=points, curve=[], ecb=[])
+    payload = build_macro_policy_dashboard(
+        profile=profile,
+        settings=validation_test_settings,
+        macro_data_service=svc,  # type: ignore[arg-type]
+    )
+    us_cpi = payload["inflation_tracker"]["series"]["us_cpi"]
+    assert us_cpi["unit"] == "%"
+    assert us_cpi["value_kind"] == "rate_yoy"
+    assert us_cpi["label"] == "US CPI YoY"
+    assert ("CPIAUCSL", "pc1") in svc.fred.calls
+
+
+def test_inflation_raw_index_fallback_is_labelled(validation_test_settings):
+    profile = load_user_profile(validation_test_settings)
+
+    class _NoTransformFred(_FakeFred):
+        def get_latest_observation(self, series_id: str, units: str | None = None):
+            if units == "pc1":
+                return None
+            return super().get_latest_observation(series_id, units=units)
+
+    svc = _FakeMacroService(points={"CPIAUCSL": _point("CPIAUCSL", 318.1, 0.2)}, curve=[], ecb=[])
+    svc.fred = _NoTransformFred({"CPIAUCSL": _point("CPIAUCSL", 318.1, 0.2)})
+    payload = build_macro_policy_dashboard(
+        profile=profile,
+        settings=validation_test_settings,
+        macro_data_service=svc,  # type: ignore[arg-type]
+    )
+    us_cpi = payload["inflation_tracker"]["series"]["us_cpi"]
+    assert us_cpi["label"] == "US CPI index level"
+    assert us_cpi["value_kind"] == "index_level"
+    assert us_cpi.get("fallback_note")
 
 
 def test_macro_policy_dashboard_graceful_when_data_missing(validation_test_settings):
@@ -151,3 +198,26 @@ def test_macro_policy_dashboard_handles_provider_failures(validation_test_settin
     assert payload["status"] in {"partial", "unavailable"}
     assert payload["central_bank_policy"]["status"] in {"partial", "unavailable"}
     assert payload["rates_yield_curve_panel"]["status"] == "unavailable"
+
+
+def test_missing_date_and_stale_status_handling(validation_test_settings):
+    profile = load_user_profile(validation_test_settings)
+    points = {
+        "UNRATE": _point("UNRATE", 4.1, 0.0, date=""),
+        "DGS10": _point("DGS10", 4.2, 0.0, date="2024-01-01"),
+        "DGS2": _point("DGS2", 4.0, 0.0, date="2024-01-01"),
+        "DGS30": _point("DGS30", 4.4, 0.0, date="2024-01-01"),
+        "T10Y2Y": _point("T10Y2Y", 0.2, 0.0, date="2024-01-01"),
+    }
+    svc = _FakeMacroService(points=points, curve=[points["DGS2"], points["DGS10"], points["DGS30"]], ecb=[])
+    payload = build_macro_policy_dashboard(
+        profile=profile,
+        settings=validation_test_settings,
+        macro_data_service=svc,  # type: ignore[arg-type]
+    )
+    unrate = payload["labour_tracker"]["series"]["us_unemployment_rate"]
+    assert unrate["status"] == "partial"
+    assert unrate["latest_observation_date"] == ""
+    ten = payload["rates_yield_curve_panel"]["series"]["us_10y"]
+    assert ten["status"] in {"stale", "partial"}
+    assert ten["unit"] == "%"

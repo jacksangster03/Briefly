@@ -15,7 +15,18 @@ def test_macro_dashboard_ui_route_renders(validation_test_settings, monkeypatch)
             "generated_at": "2026-05-10T08:00:00+00:00",
             "status": "partial",
             "central_bank_policy": {"status": "partial", "series": {}},
-            "inflation_tracker": {"status": "partial", "series": {}},
+            "inflation_tracker": {
+                "status": "partial",
+                "series": {
+                    "us_cpi": {
+                        "label": "US CPI YoY",
+                        "value": 3.4,
+                        "unit": "%",
+                        "latest_observation_date": "2026-05-01",
+                        "freshness": "fresh",
+                    }
+                },
+            },
             "labour_tracker": {"status": "partial", "series": {}},
             "rates_yield_curve_panel": {
                 "status": "partial",
@@ -40,6 +51,8 @@ def test_macro_dashboard_ui_route_renders(validation_test_settings, monkeypatch)
     assert "Next Macro Catalysts" in html
     assert "Portfolio Lens" in html
     assert "Data Basis" in html
+    assert "US CPI YoY" in html
+    assert "%" in html
 
 
 def test_macro_dashboard_api_route_schema(validation_test_settings, monkeypatch):

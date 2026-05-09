@@ -102,12 +102,42 @@ def _build_inflation_tracker(svc: MacroDataService) -> dict[str, Any]:
         return _panel_unavailable("macro service unavailable")
     ecb_points = {p.series_id: p for p in (svc.get_ecb_snapshot() or [])}
     series = {
-        "us_cpi": _series_payload(_fred_point(svc, "CPIAUCSL"), label="US CPI index"),
-        "us_core_cpi": _series_payload(_fred_point(svc, "CPILFESL"), label="US Core CPI index"),
-        "us_pce": _series_payload(_fred_point(svc, "PCEPI"), label="US PCE index"),
-        "us_core_pce": _series_payload(_fred_point(svc, "PCEPILFE"), label="US Core PCE index"),
-        "eurozone_hicp": _series_payload(ecb_points.get("ECB_HICP"), label="Eurozone HICP YoY"),
-        "uk_cpi": _series_payload(_fred_point(svc, "GBRCPIALLMINMEI"), label="UK CPI YoY"),
+        "us_cpi": _inflation_series_payload(
+            transformed=_fred_point(svc, "CPIAUCSL", units="pc1"),
+            raw=_fred_point(svc, "CPIAUCSL"),
+            yoy_label="US CPI YoY",
+            raw_label="US CPI index level",
+        ),
+        "us_core_cpi": _inflation_series_payload(
+            transformed=_fred_point(svc, "CPILFESL", units="pc1"),
+            raw=_fred_point(svc, "CPILFESL"),
+            yoy_label="US Core CPI YoY",
+            raw_label="US Core CPI index level",
+        ),
+        "us_pce": _inflation_series_payload(
+            transformed=_fred_point(svc, "PCEPI", units="pc1"),
+            raw=_fred_point(svc, "PCEPI"),
+            yoy_label="US PCE YoY",
+            raw_label="US PCE index level",
+        ),
+        "us_core_pce": _inflation_series_payload(
+            transformed=_fred_point(svc, "PCEPILFE", units="pc1"),
+            raw=_fred_point(svc, "PCEPILFE"),
+            yoy_label="US Core PCE YoY",
+            raw_label="US Core PCE index level",
+        ),
+        "eurozone_hicp": _series_payload(
+            ecb_points.get("ECB_HICP"),
+            label="Eurozone HICP YoY",
+            unit="%",
+            value_kind="rate_yoy",
+        ),
+        "uk_cpi": _inflation_series_payload(
+            transformed=_fred_point(svc, "GBRCPIALLMINMEI", units="pc1"),
+            raw=_fred_point(svc, "GBRCPIALLMINMEI"),
+            yoy_label="UK CPI YoY",
+            raw_label="UK CPI index level",
+        ),
     }
     return {
         "status": _aggregate_status([str(v.get("status", "unavailable")) for v in series.values()]),
@@ -120,11 +150,37 @@ def _build_labour_tracker(svc: MacroDataService) -> dict[str, Any]:
     if svc is None:
         return _panel_unavailable("macro service unavailable")
     series = {
-        "us_unemployment_rate": _series_payload(_fred_point(svc, "UNRATE"), label="US unemployment rate"),
-        "us_payrolls": _series_payload(_fred_point(svc, "PAYEMS"), label="US nonfarm payrolls"),
-        "us_wage_growth": _series_payload(_fred_point(svc, "CES0500000003"), label="US average hourly earnings"),
-        "us_initial_claims": _series_payload(_fred_point(svc, "ICSA"), label="US initial claims"),
-        "us_jolts_openings": _series_payload(_fred_point(svc, "JTSJOL"), label="US JOLTS openings"),
+        "us_unemployment_rate": _series_payload(
+            _fred_point(svc, "UNRATE"),
+            label="US unemployment rate",
+            unit="%",
+            value_kind="rate_level",
+        ),
+        "us_payrolls": _series_payload(
+            _fred_point(svc, "PAYEMS"),
+            label="US nonfarm payrolls level",
+            unit="thousands",
+            value_kind="level",
+        ),
+        "us_wage_growth": _inflation_series_payload(
+            transformed=_fred_point(svc, "CES0500000003", units="pc1"),
+            raw=_fred_point(svc, "CES0500000003"),
+            yoy_label="US average hourly earnings YoY",
+            raw_label="US average hourly earnings level",
+            raw_unit="USD/hour",
+        ),
+        "us_initial_claims": _series_payload(
+            _fred_point(svc, "ICSA"),
+            label="US initial claims",
+            unit="claims",
+            value_kind="count",
+        ),
+        "us_jolts_openings": _series_payload(
+            _fred_point(svc, "JTSJOL"),
+            label="US JOLTS openings level",
+            unit="thousands",
+            value_kind="level",
+        ),
     }
     return {
         "status": _aggregate_status([str(v.get("status", "unavailable")) for v in series.values()]),
@@ -142,10 +198,10 @@ def _build_rates_panel(svc: MacroDataService) -> dict[str, Any]:
     thirty = curve.get("DGS30")
     spread = _fred_point(svc, "T10Y2Y")
     series = {
-        "us_2y": _series_payload(two, label="US 2Y"),
-        "us_10y": _series_payload(ten, label="US 10Y"),
-        "us_30y": _series_payload(thirty, label="US 30Y"),
-        "spread_10y_2y": _series_payload(spread, label="10Y-2Y"),
+        "us_2y": _series_payload(two, label="US 2Y yield", unit="%", value_kind="rate_level"),
+        "us_10y": _series_payload(ten, label="US 10Y yield", unit="%", value_kind="rate_level"),
+        "us_30y": _series_payload(thirty, label="US 30Y yield", unit="%", value_kind="rate_level"),
+        "spread_10y_2y": _series_payload(spread, label="10Y-2Y spread", unit="pp", value_kind="spread"),
     }
     curve_shape = _curve_shape(two, ten, thirty)
     rate_impulse = _rate_impulse(ten)
@@ -171,12 +227,16 @@ def _build_calendar(*, settings: Settings, local_now: datetime) -> dict[str, Any
     }
 
 
-def _fred_point(svc: MacroDataService, series_id: str):
+def _fred_point(svc: MacroDataService, series_id: str, units: str | None = None):
     if svc is None:
         return None
     if not svc.fred or not svc.fred.is_configured():
         return None
-    return svc.fred.get_latest_observation(series_id)
+    try:
+        return svc.fred.get_latest_observation(series_id, units=units)
+    except TypeError:
+        # Backward compatibility with older provider signatures.
+        return svc.fred.get_latest_observation(series_id)
 
 
 def _safe_panel(builder, *, panel_name: str) -> dict[str, Any]:
@@ -201,7 +261,13 @@ def _panel_unavailable(note: str) -> dict[str, Any]:
     }
 
 
-def _series_payload(point, *, label: str) -> dict[str, Any]:
+def _series_payload(
+    point,
+    *,
+    label: str,
+    unit: str = "",
+    value_kind: str = "level",
+) -> dict[str, Any]:
     if point is None:
         return {
             "status": "unavailable",
@@ -210,11 +276,14 @@ def _series_payload(point, *, label: str) -> dict[str, Any]:
             "change": None,
             "change_percent": None,
             "date": "",
+            "latest_observation_date": "",
             "source": "",
+            "unit": unit,
+            "value_kind": value_kind,
             "freshness": "unavailable",
         }
     freshness = _freshness_label(point.date)
-    status = "ok" if freshness == "fresh" else "partial"
+    status = _status_from_freshness(freshness)
     return {
         "status": status,
         "label": label,
@@ -222,12 +291,46 @@ def _series_payload(point, *, label: str) -> dict[str, Any]:
         "change": point.change,
         "change_percent": point.change_percent,
         "date": point.date,
+        "latest_observation_date": point.date,
         "source": point.source,
+        "unit": unit,
+        "value_kind": value_kind,
         "freshness": freshness,
     }
 
 
+def _inflation_series_payload(
+    *,
+    transformed,
+    raw,
+    yoy_label: str,
+    raw_label: str,
+    raw_unit: str = "index",
+) -> dict[str, Any]:
+    if transformed is not None:
+        payload = _series_payload(
+            transformed,
+            label=yoy_label,
+            unit="%",
+            value_kind="rate_yoy",
+        )
+        payload["transformation"] = "fred_units_pc1"
+        return payload
+    payload = _series_payload(
+        raw,
+        label=raw_label,
+        unit=raw_unit,
+        value_kind="index_level",
+    )
+    if payload.get("status") != "unavailable":
+        payload["status"] = "partial"
+        payload["fallback_note"] = "YoY transform unavailable; showing index level."
+    return payload
+
+
 def _freshness_label(date_str: str) -> str:
+    if not date_str:
+        return "unknown"
     try:
         dt = datetime.strptime(str(date_str), "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except Exception:
@@ -240,13 +343,27 @@ def _freshness_label(date_str: str) -> str:
     return "old"
 
 
+def _status_from_freshness(freshness: str) -> str:
+    if freshness == "fresh":
+        return "ok"
+    if freshness in {"stale", "old"}:
+        return "stale"
+    if freshness == "unavailable":
+        return "unavailable"
+    return "partial"
+
+
 def _aggregate_status(statuses: list[str]) -> str:
     vals = [s for s in statuses if s]
     if not vals:
         return "unavailable"
     if all(s == "ok" for s in vals):
         return "ok"
+    if all(s == "stale" for s in vals):
+        return "stale"
     if any(s == "ok" for s in vals):
+        return "partial"
+    if any(s == "stale" for s in vals):
         return "partial"
     if any(s == "partial" for s in vals):
         return "partial"

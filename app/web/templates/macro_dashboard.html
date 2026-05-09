@@ -74,8 +74,8 @@
           <div class="row">
             <div class="name">{{ row.label if row.label is defined else key | upper }}</div>
             <div class="meta">
-              {{ row.value if row.value is not none else "unavailable" }}
-              · {{ row.date if row.date else "n/a" }}
+              {{ row.value if row.value is not none else "unavailable" }}{% if row.unit %} {{ row.unit }}{% endif %}
+              · {{ row.latest_observation_date if row.latest_observation_date else (row.date if row.date else "n/a") }}
               · {{ row.freshness if row.freshness else "unknown" }}
             </div>
           </div>
@@ -89,7 +89,12 @@
           {% for key, row in inf.get("series", {}).items() %}
           <div class="row">
             <div class="name">{{ row.label if row.label is defined else key }}</div>
-            <div class="meta">{{ row.value if row.value is not none else "unavailable" }} · {{ row.date if row.date else "n/a" }} · {{ row.freshness if row.freshness else "unknown" }}</div>
+            <div class="meta">
+              {{ row.value if row.value is not none else "unavailable" }}{% if row.unit %} {{ row.unit }}{% endif %}
+              · {{ row.latest_observation_date if row.latest_observation_date else (row.date if row.date else "n/a") }}
+              · {{ row.freshness if row.freshness else "unknown" }}
+              {% if row.fallback_note %} · {{ row.fallback_note }}{% endif %}
+            </div>
           </div>
           {% endfor %}
         </div>
@@ -101,7 +106,12 @@
           {% for key, row in lab.get("series", {}).items() %}
           <div class="row">
             <div class="name">{{ row.label if row.label is defined else key }}</div>
-            <div class="meta">{{ row.value if row.value is not none else "unavailable" }} · {{ row.date if row.date else "n/a" }} · {{ row.freshness if row.freshness else "unknown" }}</div>
+            <div class="meta">
+              {{ row.value if row.value is not none else "unavailable" }}{% if row.unit %} {{ row.unit }}{% endif %}
+              · {{ row.latest_observation_date if row.latest_observation_date else (row.date if row.date else "n/a") }}
+              · {{ row.freshness if row.freshness else "unknown" }}
+              {% if row.fallback_note %} · {{ row.fallback_note }}{% endif %}
+            </div>
           </div>
           {% endfor %}
         </div>
@@ -118,7 +128,11 @@
           {% for key, row in rates.get("series", {}).items() %}
           <div class="row">
             <div class="name">{{ row.label if row.label is defined else key }}</div>
-            <div class="meta">{{ row.value if row.value is not none else "unavailable" }} · {{ row.date if row.date else "n/a" }} · {{ row.freshness if row.freshness else "unknown" }}</div>
+            <div class="meta">
+              {{ row.value if row.value is not none else "unavailable" }}{% if row.unit %} {{ row.unit }}{% endif %}
+              · {{ row.latest_observation_date if row.latest_observation_date else (row.date if row.date else "n/a") }}
+              · {{ row.freshness if row.freshness else "unknown" }}
+            </div>
           </div>
           {% endfor %}
         </div>
