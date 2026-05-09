@@ -129,24 +129,28 @@ def _build_inflation_tracker(svc: MacroDataService) -> dict[str, Any]:
         "us_cpi": _inflation_series_payload(
             transformed=_fred_point(svc, "CPIAUCSL", units="pc1"),
             raw=_fred_point(svc, "CPIAUCSL"),
+            local_yoy=_fred_local_yoy_point(svc, "CPIAUCSL"),
             yoy_label="US CPI YoY",
             raw_label="US CPI index level",
         ),
         "us_core_cpi": _inflation_series_payload(
             transformed=_fred_point(svc, "CPILFESL", units="pc1"),
             raw=_fred_point(svc, "CPILFESL"),
+            local_yoy=_fred_local_yoy_point(svc, "CPILFESL"),
             yoy_label="US Core CPI YoY",
             raw_label="US Core CPI index level",
         ),
         "us_pce": _inflation_series_payload(
             transformed=_fred_point(svc, "PCEPI", units="pc1"),
             raw=_fred_point(svc, "PCEPI"),
+            local_yoy=_fred_local_yoy_point(svc, "PCEPI"),
             yoy_label="US PCE YoY",
             raw_label="US PCE index level",
         ),
         "us_core_pce": _inflation_series_payload(
             transformed=_fred_point(svc, "PCEPILFE", units="pc1"),
             raw=_fred_point(svc, "PCEPILFE"),
+            local_yoy=_fred_local_yoy_point(svc, "PCEPILFE"),
             yoy_label="US Core PCE YoY",
             raw_label="US Core PCE index level",
         ),
@@ -159,6 +163,7 @@ def _build_inflation_tracker(svc: MacroDataService) -> dict[str, Any]:
         "uk_cpi": _inflation_series_payload(
             transformed=_fred_point(svc, "GBRCPIALLMINMEI", units="pc1"),
             raw=_fred_point(svc, "GBRCPIALLMINMEI"),
+            local_yoy=_fred_local_yoy_point(svc, "GBRCPIALLMINMEI"),
             yoy_label="UK CPI YoY",
             raw_label="UK CPI index level",
         ),
@@ -189,6 +194,7 @@ def _build_labour_tracker(svc: MacroDataService) -> dict[str, Any]:
         "us_wage_growth": _inflation_series_payload(
             transformed=_fred_point(svc, "CES0500000003", units="pc1"),
             raw=_fred_point(svc, "CES0500000003"),
+            local_yoy=_fred_local_yoy_point(svc, "CES0500000003"),
             yoy_label="US average hourly earnings YoY",
             raw_label="US average hourly earnings level",
             raw_unit="USD/hour",
@@ -263,6 +269,19 @@ def _fred_point(svc: MacroDataService, series_id: str, units: str | None = None)
         return svc.fred.get_latest_observation(series_id)
 
 
+def _fred_local_yoy_point(svc: MacroDataService, series_id: str):
+    if svc is None or not svc.fred or not svc.fred.is_configured():
+        return None
+    provider = svc.fred
+    fn = getattr(provider, "get_local_yoy_observation", None)
+    if callable(fn):
+        try:
+            return fn(series_id)
+        except Exception:
+            return None
+    return None
+
+
 def _safe_panel(builder, *, panel_name: str) -> dict[str, Any]:
     try:
         payload = builder()
@@ -327,11 +346,13 @@ def _inflation_series_payload(
     *,
     transformed,
     raw,
+    local_yoy,
     yoy_label: str,
     raw_label: str,
     raw_unit: str = "index",
 ) -> dict[str, Any]:
-    if transformed is not None:
+    transformed_valid = transformed is not None and not _looks_like_raw_index_for_yoy(transformed=transformed, raw=raw)
+    if transformed_valid:
         payload = _series_payload(
             transformed,
             label=yoy_label,
@@ -339,6 +360,15 @@ def _inflation_series_payload(
             value_kind="rate_yoy",
         )
         payload["transformation"] = "fred_units_pc1"
+        return payload
+    if local_yoy is not None:
+        payload = _series_payload(
+            local_yoy,
+            label=yoy_label,
+            unit="%",
+            value_kind="rate_yoy",
+        )
+        payload["transformation"] = "local_yoy"
         return payload
     payload = _series_payload(
         raw,
@@ -349,7 +379,24 @@ def _inflation_series_payload(
     if payload.get("status") != "unavailable":
         payload["status"] = "partial"
         payload["fallback_note"] = "YoY transform unavailable; showing index level."
+        payload["note"] = "yoy_transform_unavailable"
+    payload["transformation"] = "raw_index_fallback"
     return payload
+
+
+def _looks_like_raw_index_for_yoy(*, transformed, raw) -> bool:
+    try:
+        t = float(getattr(transformed, "value", None))
+        r = float(getattr(raw, "value", None)) if raw is not None else None
+    except Exception:
+        return False
+    # If transformed value equals raw level, units transform likely ignored.
+    if r is not None and abs(t - r) < 1e-9:
+        return True
+    # Defensive sanity check: YoY inflation rates should not look like index levels.
+    if abs(t) > 60:
+        return True
+    return False
 
 
 def _freshness_label(date_str: str) -> str:

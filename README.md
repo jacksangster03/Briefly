@@ -872,6 +872,10 @@ Data correctness conventions:
 - Inflation and wage-growth metrics are shown as **YoY %** when available (FRED `units=pc1` transformation).
 - If a YoY transform is unavailable, the dashboard falls back to raw index/level values and labels them explicitly (for example, `index level`) to avoid implying an inflation rate.
 - Labour/rates units are explicit (`%`, `claims`, `thousands`, spread units), and each metric exposes its latest observation date.
+- Inflation transformation chain is deterministic and explicit per metric:
+  1. `fred_units_pc1` when provider transformation is valid,
+  2. `local_yoy` computed from raw latest vs ~12-month lookback when needed,
+  3. `raw_index_fallback` only when YoY is unavailable, with `note=yoy_transform_unavailable` and partial status.
 
 Deterministic Policy Signal conventions:
 

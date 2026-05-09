@@ -22,6 +22,7 @@ def test_macro_dashboard_ui_route_renders(validation_test_settings, monkeypatch)
                         "label": "US CPI YoY",
                         "value": 3.4,
                         "unit": "%",
+                        "transformation": "fred_units_pc1",
                         "latest_observation_date": "2026-05-01",
                         "freshness": "fresh",
                     }
@@ -64,6 +65,7 @@ def test_macro_dashboard_ui_route_renders(validation_test_settings, monkeypatch)
     assert "Policy Signal" in html
     assert "not a forecast" in html
     assert "US CPI YoY" in html
+    assert "fred_units_pc1" in html
     assert "%" in html
 
 
@@ -121,3 +123,41 @@ def test_macro_dashboard_api_handles_service_exception(validation_test_settings,
     payload = response.json()
     assert payload["status"] == "unavailable"
     assert "central_bank_policy" in payload
+
+
+def test_api_payload_raw_index_fallback_not_labelled_yoy(validation_test_settings, monkeypatch):
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+
+    monkeypatch.setattr(
+        "app.web.app.build_macro_policy_dashboard",
+        lambda **_kwargs: {
+            "generated_at": "2026-05-10T08:00:00+00:00",
+            "status": "partial",
+            "central_bank_policy": {"status": "partial", "series": {}},
+            "inflation_tracker": {
+                "status": "partial",
+                "series": {
+                    "uk_cpi": {
+                        "label": "UK CPI index level",
+                        "value": 136.1,
+                        "unit": "index",
+                        "value_kind": "index_level",
+                        "transformation": "raw_index_fallback",
+                    }
+                },
+            },
+            "labour_tracker": {"status": "partial", "series": {}},
+            "rates_yield_curve_panel": {"status": "partial", "series": {}, "curve_shape": "mixed curve", "rate_impulse": "neutral", "portfolio_interpretation": "balanced"},
+            "macro_catalyst_calendar": {"status": "partial", "events": []},
+            "portfolio_lens": {"status": "partial", "summary": "generic", "buckets": {}},
+            "policy_signals": {"status": "partial"},
+            "data_basis": {"macro_sources": "stub", "timezone": "Europe/Madrid", "freshness_note": "stub"},
+        },
+    )
+    response = client.get("/api/v1/profile/default_user/briefing/macro")
+    assert response.status_code == 200
+    uk = response.json()["inflation_tracker"]["series"]["uk_cpi"]
+    assert uk["label"] == "UK CPI index level"
+    assert uk["value_kind"] == "index_level"
+    assert uk["transformation"] == "raw_index_fallback"

@@ -152,6 +152,7 @@
               {{ row.value if row.value is not none else "unavailable" }}{% if row.unit %} {{ row.unit }}{% endif %}
               · {{ row.latest_observation_date if row.latest_observation_date else (row.date if row.date else "n/a") }}
               · {{ row.freshness if row.freshness else "unknown" }}
+              {% if row.transformation %} · {{ row.transformation }}{% endif %}
               {% if row.fallback_note %} · {{ row.fallback_note }}{% endif %}
             </div>
           </div>
@@ -169,6 +170,7 @@
               {{ row.value if row.value is not none else "unavailable" }}{% if row.unit %} {{ row.unit }}{% endif %}
               · {{ row.latest_observation_date if row.latest_observation_date else (row.date if row.date else "n/a") }}
               · {{ row.freshness if row.freshness else "unknown" }}
+              {% if row.transformation %} · {{ row.transformation }}{% endif %}
               {% if row.fallback_note %} · {{ row.fallback_note }}{% endif %}
             </div>
           </div>
