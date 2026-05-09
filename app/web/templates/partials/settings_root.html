@@ -105,6 +105,183 @@
     padding: 16px;
     scroll-margin-top: 86px;
   }
+  .verticals-shell {
+    display: grid;
+    gap: 14px;
+  }
+  .verticals-hero {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--card) 84%, transparent), color-mix(in srgb, var(--card) 70%, transparent));
+  }
+  .verticals-title {
+    margin: 0;
+    font-size: 1.2rem;
+    letter-spacing: 0.01em;
+  }
+  .verticals-subtitle {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+  .verticals-chip-row {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .vchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--card) 86%, transparent);
+    color: var(--text);
+    font-size: 0.74rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .vchip.status-active { border-color: color-mix(in srgb, #2fb170 60%, var(--border)); color: #2fb170; }
+  .vchip.status-inactive { border-color: color-mix(in srgb, #8e9ab0 60%, var(--border)); color: #8e9ab0; }
+  .vchip.status-error { border-color: color-mix(in srgb, #f26b6b 60%, var(--border)); color: #f26b6b; }
+  .vchip.mode-off { opacity: 0.8; }
+  .verticals-layout {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 14px;
+  }
+  .verticals-col {
+    display: grid;
+    gap: 14px;
+  }
+  .verticals-block {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--card);
+    padding: 14px;
+  }
+  .verticals-block h3 {
+    margin: 0 0 6px;
+    font-size: 0.98rem;
+  }
+  .verticals-block .muted { margin: 0 0 10px; }
+  .verticals-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .verticals-group {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    margin-top: 10px;
+  }
+  .verticals-group h4 {
+    margin: 0 0 8px;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .verticals-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .verticals-metric {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    background: color-mix(in srgb, var(--card) 88%, transparent);
+  }
+  .verticals-metric .k {
+    color: var(--muted);
+    font-size: 0.72rem;
+    margin-bottom: 4px;
+  }
+  .verticals-metric .v {
+    font-size: 0.95rem;
+    font-weight: 650;
+  }
+  .verticals-kv {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .verticals-kv-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+    border-bottom: 1px dashed var(--border);
+    padding-bottom: 6px;
+  }
+  .verticals-kv-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  .verticals-kv-row .label {
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  .verticals-kv-row .value {
+    font-size: 0.82rem;
+    text-align: right;
+  }
+  .source-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .source-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    background: color-mix(in srgb, var(--card) 90%, transparent);
+  }
+  .source-card .name {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .planned-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .planned-card {
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    opacity: 0.85;
+    background: color-mix(in srgb, var(--card) 92%, transparent);
+  }
+  .planned-card .title {
+    font-weight: 600;
+    font-size: 0.82rem;
+  }
+  .planned-card .tag {
+    margin-top: 6px;
+    display: inline-block;
+    font-size: 0.7rem;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 8px;
+  }
+  @media (max-width: 980px) {
+    .verticals-layout {
+      grid-template-columns: 1fr;
+    }
+    .planned-grid {
+      grid-template-columns: 1fr;
+    }
+  }
   .card h2 {
     margin: 0 0 8px;
     font-size: 1.05rem;
@@ -4541,84 +4718,172 @@
   {% set vdiag_rows = metadata.verticals_diagnostics if metadata.verticals_diagnostics is defined else [] %}
   {% set hdiag = (vdiag_rows | selectattr("vertical_key", "equalto", "healthcare") | list | first) %}
   <section class="card" id="section-verticals" data-module-section="section-verticals">
-    <h2>Market Briefing · Vertical Intelligence</h2>
-    <p class="muted">Phase 2A controls for deterministic vertical routing. Healthcare is the first plugin and official source ingestion remains disabled/stubbed in this phase.</p>
-    <form
-      hx-post="/ui/profile/{{ state.profile }}/save/verticals"
-      hx-target="#settings-root"
-      hx-swap="outerHTML"
-      method="post"
-      class="tracked-form"
-    >
-      <div class="inline-grid">
-        <div class="field">
-          <label>
-            Healthcare Mode
-            {% if "verticals.healthcare.mode" in state.overrides %}<span class="pill">override</span>{% endif %}
-          </label>
-          <select name="verticals_healthcare_mode" required>
-            {% for mode in ["off","watch","active","portfolio_linked"] %}
-              <option value="{{ mode }}" {% if vcfg.mode == mode %}selected{% endif %}>{{ mode }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="field">
-          <label>
-            Priority
-            {% if "verticals.healthcare.priority" in state.overrides %}<span class="pill">override</span>{% endif %}
-          </label>
-          <select name="verticals_healthcare_priority" required>
-            {% for p in ["low","normal","high"] %}
-              <option value="{{ p }}" {% if vcfg.priority == p %}selected{% endif %}>{{ p }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="field">
-          <label>
-            Minimum Severity
-            {% if "verticals.healthcare.min_severity" in state.overrides %}<span class="pill">override</span>{% endif %}
-          </label>
-          <select name="verticals_healthcare_min_severity" required>
-            {% for s in ["low","medium","high","critical"] %}
-              <option value="{{ s }}" {% if vcfg.min_severity == s %}selected{% endif %}>{{ s }}</option>
-            {% endfor %}
-          </select>
+    <div class="verticals-shell">
+      <div class="verticals-hero">
+        <h2 class="verticals-title">Vertical Intelligence</h2>
+        <p class="verticals-subtitle">Control sector-specific intelligence modules such as Healthcare, AI/Semis and Energy.</p>
+        <div class="verticals-chip-row">
+          <span class="vchip">Phase 2A</span>
+          <span class="vchip">Healthcare plugin</span>
+          <span class="vchip">Official sources stubbed</span>
         </div>
       </div>
-      <div class="inline-grid" style="margin-top:4px;">
-        <div class="field">
-          <label>Morning Max Items</label>
-          <input type="number" min="0" step="1" name="verticals_healthcare_max_items_morning" value="{{ vcfg.max_items_morning if vcfg.max_items_morning is defined else 4 }}">
-        </div>
-        <div class="field">
-          <label>Intraday Max Items</label>
-          <input type="number" min="0" step="1" name="verticals_healthcare_max_items_intraday" value="{{ vcfg.max_items_intraday if vcfg.max_items_intraday is defined else 3 }}">
-        </div>
-        <div class="field">
-          <label>Portfolio Exposure Threshold (%)</label>
-          <input type="number" min="0" step="0.1" name="verticals_healthcare_portfolio_weight_threshold" value="{{ vcfg.portfolio_weight_threshold if vcfg.portfolio_weight_threshold is defined else 0 }}">
-        </div>
-        <div class="field">
-          <label>Watchlist Count Threshold</label>
-          <input type="number" min="0" step="1" name="verticals_healthcare_watchlist_count_threshold" value="{{ vcfg.watchlist_count_threshold if vcfg.watchlist_count_threshold is defined else 1 }}">
-        </div>
-      </div>
-      <div class="actions">
-        <button type="submit">Save Vertical Preferences</button>
-      </div>
-    </form>
 
-    <div class="briefing-summary-card" style="margin-top:12px;">
-      <strong>Healthcare Diagnostics</strong>
-      {% if hdiag %}
-        <p>Registered: yes · Mode: {{ hdiag.mode or vcfg.mode }} · Status: {{ hdiag.activation_status or "unknown" }} · Reason: {{ hdiag.activation_reason or "-" }}</p>
-        <p>Portfolio/watchlist: {{ hdiag.portfolio_exposure_summary or "-" }} · {{ hdiag.watchlist_exposure_summary or "-" }}</p>
-        <p>Run metrics: candidates={{ hdiag.candidate_count if hdiag.candidate_count is not none else "unavailable" }}, included={{ hdiag.included_count if hdiag.included_count is not none else "unavailable" }}, suppressed={{ hdiag.suppressed_count if hdiag.suppressed_count is not none else "unavailable" }}</p>
-        <p>Last run: {{ hdiag.updated_at_utc or "unavailable" }}</p>
-        <p>Sources: {% if hdiag.source_status %}{{ hdiag.source_status | tojson }}{% else %}unavailable{% endif %}</p>
-      {% else %}
-        <p>Registered diagnostics unavailable.</p>
-      {% endif %}
+      <div class="verticals-layout">
+        <div class="verticals-col">
+          <div class="verticals-block">
+            <h3>Healthcare / Biotech</h3>
+            <p class="muted">Controls whether healthcare catalysts are scanned, scored and shown in briefings.</p>
+            <form
+              hx-post="/ui/profile/{{ state.profile }}/save/verticals"
+              hx-target="#settings-root"
+              hx-swap="outerHTML"
+              method="post"
+              class="tracked-form"
+            >
+              <div class="verticals-group">
+                <h4>Activation</h4>
+                <div class="verticals-form-grid">
+                  <div class="field">
+                    <label>
+                      Mode
+                      {% if "verticals.healthcare.mode" in state.overrides %}<span class="pill">override</span>{% endif %}
+                    </label>
+                    <select name="verticals_healthcare_mode" required>
+                      {% for mode in ["off","watch","active","portfolio_linked"] %}
+                        <option value="{{ mode }}" {% if vcfg.mode == mode %}selected{% endif %}>{{ mode }}</option>
+                      {% endfor %}
+                    </select>
+                    <p class="tiny">off: hidden · watch: high-signal only · active: always scan · portfolio_linked: exposure-driven.</p>
+                  </div>
+                  <div class="field">
+                    <label>
+                      Priority
+                      {% if "verticals.healthcare.priority" in state.overrides %}<span class="pill">override</span>{% endif %}
+                    </label>
+                    <select name="verticals_healthcare_priority" required>
+                      {% for p in ["low","normal","high"] %}
+                        <option value="{{ p }}" {% if vcfg.priority == p %}selected{% endif %}>{{ p }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label>
+                      Minimum Severity
+                      {% if "verticals.healthcare.min_severity" in state.overrides %}<span class="pill">override</span>{% endif %}
+                    </label>
+                    <select name="verticals_healthcare_min_severity" required>
+                      {% for s in ["low","medium","high","critical"] %}
+                        <option value="{{ s }}" {% if vcfg.min_severity == s %}selected{% endif %}>{{ s }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="verticals-group">
+                <h4>Item Limits</h4>
+                <div class="verticals-form-grid">
+                  <div class="field">
+                    <label>Morning Max Items</label>
+                    <input type="number" min="0" step="1" name="verticals_healthcare_max_items_morning" value="{{ vcfg.max_items_morning if vcfg.max_items_morning is defined else 4 }}">
+                  </div>
+                  <div class="field">
+                    <label>Intraday Max Items</label>
+                    <input type="number" min="0" step="1" name="verticals_healthcare_max_items_intraday" value="{{ vcfg.max_items_intraday if vcfg.max_items_intraday is defined else 3 }}">
+                  </div>
+                </div>
+              </div>
+
+              <div class="verticals-group">
+                <h4>Thresholds</h4>
+                <div class="verticals-form-grid">
+                  <div class="field">
+                    <label>Portfolio Exposure Threshold (%)</label>
+                    <input type="number" min="0" step="0.1" name="verticals_healthcare_portfolio_weight_threshold" value="{{ vcfg.portfolio_weight_threshold if vcfg.portfolio_weight_threshold is defined else 0 }}">
+                  </div>
+                  <div class="field">
+                    <label>Watchlist Count Threshold</label>
+                    <input type="number" min="0" step="1" name="verticals_healthcare_watchlist_count_threshold" value="{{ vcfg.watchlist_count_threshold if vcfg.watchlist_count_threshold is defined else 1 }}">
+                  </div>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button type="submit">Save Vertical Preferences</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="verticals-col">
+          <div class="verticals-block">
+            <h3>Healthcare Diagnostics</h3>
+            <p class="muted">Read-only runtime status for deterministic vertical routing.</p>
+            {% if hdiag %}
+              {% set status_class = "status-" ~ (hdiag.activation_status or "inactive") %}
+              {% set mode_class = "mode-" ~ (hdiag.mode or vcfg.mode or "off") %}
+              <div class="verticals-chip-row">
+                <span class="vchip">Registered: yes</span>
+                <span class="vchip {{ status_class }}">Status: {{ hdiag.activation_status or "unknown" }}</span>
+                <span class="vchip {{ mode_class }}">Mode: {{ hdiag.mode or vcfg.mode or "off" }}</span>
+                <span class="vchip">Reason: {{ hdiag.activation_reason or "-" }}</span>
+              </div>
+              <div class="verticals-metrics">
+                <div class="verticals-metric"><div class="k">Candidates</div><div class="v">{{ hdiag.candidate_count if hdiag.candidate_count is not none else "—" }}</div></div>
+                <div class="verticals-metric"><div class="k">Included</div><div class="v">{{ hdiag.included_count if hdiag.included_count is not none else "—" }}</div></div>
+                <div class="verticals-metric"><div class="k">Suppressed</div><div class="v">{{ hdiag.suppressed_count if hdiag.suppressed_count is not none else "—" }}</div></div>
+              </div>
+              <div class="verticals-kv">
+                <div class="verticals-kv-row"><span class="label">Portfolio overlap</span><span class="value">{{ hdiag.portfolio_exposure_summary or "unavailable" }}</span></div>
+                <div class="verticals-kv-row"><span class="label">Watchlist overlap</span><span class="value">{{ hdiag.watchlist_exposure_summary or "unavailable" }}</span></div>
+                <div class="verticals-kv-row"><span class="label">Last run</span><span class="value">{{ hdiag.updated_at_utc or "unavailable" }}</span></div>
+              </div>
+              <div class="source-grid">
+                {% set src = hdiag.source_status if hdiag.source_status is defined and hdiag.source_status else {} %}
+                {% for key, label in [("fda","FDA"),("clinicaltrials","ClinicalTrials.gov"),("ema","EMA"),("company_ir","Company IR")] %}
+                  {% set value = src.get(key, "unavailable") %}
+                  {% set badge_class = "status-inactive" if value in ["stub_inactive","disabled"] else ("status-active" if value == "active" else ("status-error" if value in ["error","degraded"] else "")) %}
+                  <div class="source-card">
+                    <div class="name">{{ label }}</div>
+                    <span class="vchip {{ badge_class }}">{{ value }}</span>
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p>Registered diagnostics unavailable.</p>
+            {% endif %}
+          </div>
+
+          <div class="verticals-block">
+            <h3>How Activation Works</h3>
+            <ul style="margin:0 0 0 18px;padding:0;">
+              <li>Manual mode has priority.</li>
+              <li><code>portfolio_linked</code> uses exposure/watchlist thresholds.</li>
+              <li><code>watch</code> waits for high-signal catalysts.</li>
+              <li>Official source ingestion is not enabled yet.</li>
+            </ul>
+          </div>
+
+          <div class="verticals-block">
+            <h3>Planned Verticals</h3>
+            <div class="planned-grid">
+              <div class="planned-card">
+                <div class="title">AI / Semiconductors</div>
+                <span class="tag">Planned</span>
+              </div>
+              <div class="planned-card">
+                <div class="title">Energy / Geopolitics</div>
+                <span class="tag">Planned</span>
+              </div>
+              <div class="planned-card">
+                <div class="title">Defence / Aerospace</div>
+                <span class="tag">Planned</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
   {% endif %}

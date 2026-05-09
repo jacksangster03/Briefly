@@ -137,8 +137,14 @@ def test_verticals_page_renders(validation_test_settings):
     assert response.status_code == 200
     html = response.text
     assert "Vertical Intelligence" in html
-    assert "Healthcare Mode" in html
+    assert "Healthcare / Biotech" in html
+    assert "Mode" in html
     assert "Healthcare Diagnostics" in html
+    assert "How Activation Works" in html
+    assert "Planned Verticals" in html
+    assert "AI / Semiconductors" in html
+    assert "Energy / Geopolitics" in html
+    assert "Defence / Aerospace" in html
 
 
 def test_verticals_healthcare_mode_preference_save_read(validation_isolated_db, validation_test_settings):
