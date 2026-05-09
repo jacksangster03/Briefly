@@ -5,13 +5,14 @@ from app.briefing.macro_policy_signals import build_policy_signals
 
 def _payload(*, cpi=2.2, core=2.3, pce=2.2, core_pce=2.3, unrate=4.5, claims=260000, wage=2.9, two_chg=-0.05, ten_chg=-0.04):
     return {
-        "central_bank_policy": {"series": {"ecb": {"status": "ok"}}},
+        "central_bank_policy": {"series": {"ecb": {"status": "ok", "value": 2.0}}},
         "inflation_tracker": {
             "series": {
                 "us_cpi": {"value": cpi, "status": "ok"},
                 "us_core_cpi": {"value": core, "status": "ok"},
                 "us_pce": {"value": pce, "status": "ok"},
                 "us_core_pce": {"value": core_pce, "status": "ok"},
+                "eurozone_hicp": {"value": 2.1, "status": "ok"},
             }
         },
         "labour_tracker": {
@@ -21,6 +22,7 @@ def _payload(*, cpi=2.2, core=2.3, pce=2.2, core_pce=2.3, unrate=4.5, claims=260
                 "us_wage_growth": {"value": wage, "status": "ok"},
                 "us_payrolls": {"change": -40, "status": "ok"},
                 "us_jolts_openings": {"change": -20, "status": "ok"},
+                "euro_area_unemployment_rate": {"value": 6.7, "status": "ok"},
             }
         },
         "rates_yield_curve_panel": {
@@ -56,3 +58,22 @@ def test_missing_data_returns_partial_or_uncertain():
     sig = build_policy_signals({})
     assert sig["status"] in {"partial", "unavailable"}
     assert sig["fed_bias"]["label"] == "uncertain"
+
+
+def test_fed_and_ecb_drivers_not_identical_with_us_only_rich():
+    payload = _payload()
+    payload["inflation_tracker"]["series"].pop("eurozone_hicp", None)
+    payload["labour_tracker"]["series"].pop("euro_area_unemployment_rate", None)
+    sig = build_policy_signals(payload)
+    fed_drivers = sig["fed_bias"]["drivers"]
+    ecb_drivers = sig["ecb_bias"]["drivers"]
+    assert fed_drivers != ecb_drivers
+    assert sig["ecb_bias"]["label"] == "uncertain"
+    assert "eurozone_hicp" in sig["ecb_bias"]["missing"]
+
+
+def test_ecb_uses_eurozone_hicp_when_available():
+    sig = build_policy_signals(_payload())
+    joined = " ".join(sig["ecb_bias"]["drivers"]).lower()
+    assert "eurozone hicp" in joined
+    assert sig["ecb_bias"]["label"] in {"cut_leaning", "hold", "hike_leaning", "uncertain"}

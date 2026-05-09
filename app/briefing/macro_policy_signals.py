@@ -10,18 +10,14 @@ def build_policy_signals(dashboard_payload: dict[str, Any]) -> dict[str, Any]:
     inflation = classify_inflation_pressure(payload.get("inflation_tracker", {}) or {})
     labour = classify_labour_pressure(payload.get("labour_tracker", {}) or {})
     rates = classify_rates_pressure(payload.get("rates_yield_curve_panel", {}) or {})
-    fed = classify_policy_bias(
-        central_bank="fed",
+    fed = classify_fed_policy_bias(
         inflation_pressure=inflation,
         labour_pressure=labour,
         rates_pressure=rates,
-        policy_panel=payload.get("central_bank_policy", {}) or {},
     )
-    ecb = classify_policy_bias(
-        central_bank="ecb",
-        inflation_pressure=inflation,
-        labour_pressure=labour,
-        rates_pressure=rates,
+    ecb = classify_ecb_policy_bias(
+        inflation_panel=payload.get("inflation_tracker", {}) or {},
+        labour_panel=payload.get("labour_tracker", {}) or {},
         policy_panel=payload.get("central_bank_policy", {}) or {},
     )
     implications = build_portfolio_implications(
@@ -169,16 +165,14 @@ def classify_rates_pressure(rates_panel: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def classify_policy_bias(
+def classify_fed_policy_bias(
     *,
-    central_bank: str,
     inflation_pressure: dict[str, Any],
     labour_pressure: dict[str, Any],
     rates_pressure: dict[str, Any],
-    policy_panel: dict[str, Any],
 ) -> dict[str, Any]:
     drivers: list[str] = []
-    missing = []
+    missing: list[str] = []
     infl = inflation_pressure.get("label", "uncertain")
     lab = labour_pressure.get("label", "uncertain")
     rat = rates_pressure.get("label", "uncertain")
@@ -193,12 +187,6 @@ def classify_policy_bias(
     else:
         label = "hold"
         drivers.append("Cross-signals mixed; deterministic hold bias.")
-    if central_bank == "ecb":
-        ecb = (policy_panel.get("series", {}) or {}).get("ecb", {})
-        if ecb.get("status") == "unavailable":
-            missing.append("ecb_policy_rate")
-            if label != "hike_leaning":
-                label = "uncertain"
     confidence = _bias_confidence(label, inflation_pressure, labour_pressure, rates_pressure, missing)
     risks = [
         "Deterministic policy bias is not a market-implied probability.",
@@ -210,6 +198,69 @@ def classify_policy_bias(
         "confidence": confidence,
         "drivers": drivers + _collect_driver_snippets(inflation_pressure, labour_pressure, rates_pressure),
         "missing": missing,
+        "risks": risks,
+    }
+
+
+def classify_ecb_policy_bias(
+    *,
+    inflation_panel: dict[str, Any],
+    labour_panel: dict[str, Any],
+    policy_panel: dict[str, Any],
+) -> dict[str, Any]:
+    inf_series = inflation_panel.get("series", {}) if isinstance(inflation_panel, dict) else {}
+    lab_series = labour_panel.get("series", {}) if isinstance(labour_panel, dict) else {}
+    cb_series = policy_panel.get("series", {}) if isinstance(policy_panel, dict) else {}
+
+    hicp = _as_float((inf_series.get("eurozone_hicp") or {}).get("value"))
+    ecb_rate = _as_float((cb_series.get("ecb") or {}).get("value"))
+    euro_unrate = _as_float((lab_series.get("euro_area_unemployment_rate") or {}).get("value"))
+
+    missing: list[str] = []
+    if hicp is None:
+        missing.append("eurozone_hicp")
+    if ecb_rate is None:
+        missing.append("ecb_deposit_rate")
+    if euro_unrate is None:
+        missing.append("euro_area_unemployment_rate")
+
+    drivers: list[str] = []
+    label = "uncertain"
+    confidence = "low"
+
+    if hicp is not None:
+        drivers.append(f"Eurozone HICP at {hicp:.1f}% YoY.")
+    if ecb_rate is not None:
+        drivers.append(f"ECB deposit facility at {ecb_rate:.2f}%.")
+    if euro_unrate is not None:
+        drivers.append(f"Euro area unemployment at {euro_unrate:.1f}%.")
+
+    if hicp is not None and ecb_rate is not None:
+        if hicp <= 2.2 and (euro_unrate is None or euro_unrate >= 6.5):
+            label = "cut_leaning"
+            confidence = "medium" if euro_unrate is not None else "low"
+            drivers.append("Disinflation plus softer labour backdrop supports easing bias.")
+        elif hicp >= 2.8 and (euro_unrate is None or euro_unrate <= 6.0):
+            label = "hike_leaning"
+            confidence = "medium" if euro_unrate is not None else "low"
+            drivers.append("Inflation pressure with firm labour backdrop supports tighter bias.")
+        else:
+            label = "hold"
+            confidence = "medium" if euro_unrate is not None else "low"
+            drivers.append("Eurozone inputs are mixed; deterministic hold bias.")
+
+    # Explicitly constrain ECB to Eurozone data and only mention US as spillover context.
+    drivers.append("US inflation/labour are treated as spillover context, not direct ECB drivers.")
+    risks = [
+        "Deterministic policy bias is not a market-implied probability.",
+        "Signal is not a forecast and can flip on new releases.",
+    ]
+    return {
+        "status": _status_for_signal(missing),
+        "label": label,
+        "confidence": confidence,
+        "drivers": drivers[:5],
+        "missing": missing[:6],
         "risks": risks,
     }
 

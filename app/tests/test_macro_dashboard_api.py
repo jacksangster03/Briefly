@@ -41,7 +41,7 @@ def test_macro_dashboard_ui_route_renders(validation_test_settings, monkeypatch)
             "policy_signals": {
                 "status": "partial",
                 "fed_bias": {"label": "hold", "confidence": "medium", "drivers": ["mixed inputs"], "missing": [], "risks": []},
-                "ecb_bias": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["ecb_policy_rate"], "risks": []},
+                "ecb_bias": {"label": "uncertain", "confidence": "low", "drivers": ["Eurozone data incomplete"], "missing": ["eurozone_hicp"], "risks": []},
                 "inflation_pressure": {"label": "sticky", "confidence": "medium", "drivers": [], "missing": []},
                 "labour_pressure": {"label": "balanced", "confidence": "medium", "drivers": [], "missing": []},
                 "rates_pressure": {"label": "neutral", "confidence": "medium", "drivers": [], "missing": []},
@@ -64,6 +64,7 @@ def test_macro_dashboard_ui_route_renders(validation_test_settings, monkeypatch)
     assert "Data Basis" in html
     assert "Policy Signal" in html
     assert "not a forecast" in html
+    assert "Eurozone data incomplete" in html
     assert "US CPI YoY" in html
     assert "fred_units_pc1" in html
     assert "%" in html

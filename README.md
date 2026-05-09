@@ -880,6 +880,10 @@ Data correctness conventions:
 Deterministic Policy Signal conventions:
 
 - Signals are deterministic classification outputs, not market-implied probabilities.
+- Fed and ECB policy-bias tracks are region-separated by design:
+  - Fed bias uses US inflation/labour/rates inputs.
+  - ECB bias uses Eurozone HICP + ECB policy rate + Euro-area labour when available.
+  - If Eurozone inputs are incomplete, ECB signal degrades to partial/uncertain with explicit missing fields.
 - Signal labels are bias descriptors (`cut_leaning`, `hold`, `hike_leaning`, `uncertain`) and pressure states (`easing`, `sticky`, `reaccelerating`, `cooling`, `tight`, `neutral`).
 - Each signal includes:
   - drivers (what pushed the label)
