@@ -886,6 +886,9 @@ Deterministic Policy Signal conventions:
   - missing-data caveats
   - confidence tier (`low|medium|high`)
   - risk note explicitly stating this is **not a forecast**.
+- Dashboard change semantics avoid misleading percentage compounding:
+  - rate/signal metrics (YoY rates, policy rates, yields, spreads) are interpreted as percentage-point style changes,
+  - not as “+X% of X%” compounding moves.
 
 Design constraints:
 

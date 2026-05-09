@@ -311,6 +311,7 @@ def _series_payload(
     unit: str = "",
     value_kind: str = "level",
 ) -> dict[str, Any]:
+    change_unit = _change_unit_for_value_kind(value_kind)
     if point is None:
         return {
             "status": "unavailable",
@@ -318,6 +319,7 @@ def _series_payload(
             "value": None,
             "change": None,
             "change_percent": None,
+            "change_unit": change_unit,
             "date": "",
             "latest_observation_date": "",
             "source": "",
@@ -333,6 +335,7 @@ def _series_payload(
         "value": point.value,
         "change": point.change,
         "change_percent": point.change_percent,
+        "change_unit": change_unit,
         "date": point.date,
         "latest_observation_date": point.date,
         "source": point.source,
@@ -422,6 +425,17 @@ def _status_from_freshness(freshness: str) -> str:
     if freshness == "unavailable":
         return "unavailable"
     return "partial"
+
+
+def _change_unit_for_value_kind(value_kind: str) -> str:
+    kind = (value_kind or "").strip().lower()
+    if kind in {"rate_yoy", "rate_level", "spread"}:
+        return "pp"
+    if kind == "count":
+        return "count"
+    if kind in {"index_level", "level"}:
+        return "level"
+    return ""
 
 
 def _aggregate_status(statuses: list[str]) -> str:

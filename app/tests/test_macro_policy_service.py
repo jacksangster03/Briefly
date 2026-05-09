@@ -305,6 +305,7 @@ def test_missing_date_and_stale_status_handling(validation_test_settings):
     ten = payload["rates_yield_curve_panel"]["series"]["us_10y"]
     assert ten["status"] in {"stale", "partial"}
     assert ten["unit"] == "%"
+    assert ten["change_unit"] == "pp"
 
 
 def test_signal_engine_failure_is_non_fatal(validation_test_settings, monkeypatch):

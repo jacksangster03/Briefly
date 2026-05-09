@@ -144,6 +144,9 @@
 
       <section class="card">
         <h2>Inflation Tracker <span class="badge {{ inf.get('status', 'unavailable') }}">{{ inf.get("status", "unavailable") }}</span></h2>
+        <div class="meta" style="margin-bottom:8px;">
+          Change semantics: rate metrics use percentage-point interpretation (not compounding % change).
+        </div>
         <div class="rows">
           {% for key, row in inf.get("series", {}).items() %}
           <div class="row">
@@ -162,6 +165,9 @@
 
       <section class="card">
         <h2>Labour Market <span class="badge {{ lab.get('status', 'unavailable') }}">{{ lab.get("status", "unavailable") }}</span></h2>
+        <div class="meta" style="margin-bottom:8px;">
+          Units are explicit by metric (% rate, claims count, or level series).
+        </div>
         <div class="rows">
           {% for key, row in lab.get("series", {}).items() %}
           <div class="row">
@@ -184,6 +190,7 @@
           Shape: <strong>{{ rates.get("curve_shape", "unavailable") }}</strong> ·
           Impulse: <strong>{{ rates.get("rate_impulse", "unavailable") }}</strong>
         </div>
+        <div class="meta" style="margin-bottom:8px;">Yield/rate changes should be read as percentage-point moves (or basis-point equivalent), not compounding percent changes.</div>
         <div class="meta" style="margin-bottom:8px;">{{ rates.get("portfolio_interpretation", "unavailable") }}</div>
         <div class="rows">
           {% for key, row in rates.get("series", {}).items() %}
