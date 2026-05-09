@@ -4,12 +4,18 @@ from click.testing import CliRunner
 from fastapi.testclient import TestClient
 
 from app.cli import cli
+from app.db.models import VerticalRunDiagnostics
+from app.db.session import get_session
 from app.healthcare.section_builder import build_healthcare_section
 from app.personalization.user_profile import UserProfile
 from app.web.app import create_web_app
 from app.web.control_plane_service import apply_preference_updates, build_profile_state
 from app.schemas.events import NormalisedEvent
-from app.verticals.engine import build_vertical_section, verticals_status_for_profile
+from app.verticals.engine import (
+    build_vertical_section,
+    vertical_diagnostics_history,
+    verticals_status_for_profile,
+)
 from app.verticals.registry import load_vertical_plugins
 
 
@@ -193,3 +199,58 @@ def test_vertical_diagnostics_render_off_and_active(monkeypatch, validation_test
     resp_active = client.get("/ui/briefing/verticals?profile=default_user")
     assert resp_active.status_code == 200
     assert "Mode:" in resp_active.text
+
+
+def test_vertical_diagnostics_persisted_best_effort(validation_isolated_db):
+    profile = _profile(enabled=True)
+    _ = build_vertical_section(
+        profile=profile,
+        vertical_key="healthcare",
+        session_key="morning",
+        candidate_events=[_event()],
+    )
+    with get_session() as db:
+        row = (
+            db.query(VerticalRunDiagnostics)
+            .filter(VerticalRunDiagnostics.profile_name == profile.name)
+            .first()
+        )
+        assert row is not None
+        assert row.vertical_key == "healthcare"
+        assert row.session_key == "morning"
+
+
+def test_verticals_status_verbose_and_history_cli(validation_isolated_db, monkeypatch):
+    profile = _profile(enabled=True)
+    _ = build_vertical_section(
+        profile=profile,
+        vertical_key="healthcare",
+        session_key="morning",
+        candidate_events=[_event()],
+    )
+
+    runner = CliRunner()
+    monkeypatch.setattr("app.cli.init_db", lambda: None)
+    monkeypatch.setattr("app.personalization.user_profile.load_user_profile", lambda *_a, **_k: profile)
+    out_verbose = runner.invoke(cli, ["verticals-status", "--verbose"])
+    assert out_verbose.exit_code == 0
+    assert "last_session=" in out_verbose.output
+    assert "source_status=" in out_verbose.output
+
+    out_hist = runner.invoke(cli, ["verticals-history", "--to", "today", "--limit", "10"])
+    assert out_hist.exit_code == 0
+    assert "VERTICALS HISTORY" in out_hist.output
+    assert "healthcare" in out_hist.output.lower()
+
+
+def test_vertical_diagnostics_history_function(validation_isolated_db):
+    profile = _profile(enabled=True)
+    _ = build_vertical_section(
+        profile=profile,
+        vertical_key="healthcare",
+        session_key="morning",
+        candidate_events=[_event()],
+    )
+    rows = vertical_diagnostics_history(profile_name=profile.name, limit=5)
+    assert rows
+    assert rows[0]["vertical_key"] == "healthcare"

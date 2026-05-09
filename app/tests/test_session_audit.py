@@ -9,6 +9,7 @@ from app.personalization.user_profile import UserProfile
 from app.schemas.events import NormalisedEvent
 from app.settings import Settings
 from app.db.models import NewsClassifierLabel
+from app.db.models import VerticalRunDiagnostics
 from app.db.session import get_session
 
 
@@ -222,3 +223,50 @@ def test_session_audit_live_check_persists_dataset_rows(validation_isolated_db, 
     with get_session() as db:
         rows = db.query(NewsClassifierLabel).all()
         assert rows
+
+
+def test_session_audit_prints_vertical_diagnostics_when_available(validation_isolated_db):
+    with get_session() as db:
+        db.add(
+            VerticalRunDiagnostics(
+                profile_name="default_user",
+                local_date=date.today(),
+                session_key="morning",
+                vertical_key="healthcare",
+                mode="watch",
+                status="inactive",
+                activation_reason="insufficient_signal",
+                candidate_count=12,
+                included_count=0,
+                suppressed_count=12,
+                source_status_json={
+                    "fda": "stub_inactive",
+                    "clinicaltrials": "stub_inactive",
+                    "ema": "stub_inactive",
+                    "company_ir": "stub_inactive",
+                },
+                portfolio_exposure_summary="healthcare_ticker_overlap=2 (LLY, NVO)",
+                watchlist_exposure_summary="watchlist_overlap=2 (LLY, NVO)",
+            )
+        )
+    out = run_session_audit(Settings(), target_date_str="today", profile_name="default_user", live_check=False, vertical_details=True)
+    assert "verticals:" in out
+    assert "healthcare:" in out
+    assert "activation_reason: insufficient_signal" in out
+    assert "sources: fda=stub_inactive" in out
+
+
+def test_session_audit_vertical_diagnostics_unavailable_is_safe(monkeypatch):
+    monkeypatch.setattr("app.main.init_db", lambda: None)
+    monkeypatch.setattr("app.main.load_user_profile", lambda *_args, **_kwargs: _profile())
+
+    @contextmanager
+    def _fake_db():
+        db = MagicMock()
+        db.query.return_value.filter.return_value.all.return_value = []
+        yield db
+
+    monkeypatch.setattr("app.main.get_session", _fake_db)
+    monkeypatch.setattr("app.main.get_session_snapshot", lambda *_a, **_k: None)
+    out = run_session_audit(Settings(), target_date_str="today", profile_name="default_user", live_check=False, vertical_details=True)
+    assert "diagnostics unavailable for this session" in out

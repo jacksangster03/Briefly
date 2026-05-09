@@ -355,8 +355,14 @@ def prefs_show(profile_name: str):
     show_default=True,
     help="Profile name to inspect.",
 )
+@click.option(
+    "--verbose",
+    is_flag=True,
+    default=False,
+    help="Show extended source/error diagnostics.",
+)
 @click.pass_context
-def verticals_status(ctx, profile_name: str):
+def verticals_status(ctx, profile_name: str, verbose: bool):
     """Show registered vertical plugins and current activation/config diagnostics."""
     import json
 
@@ -384,15 +390,73 @@ def verticals_status(ctx, profile_name: str):
         )
         click.echo(
             f"  candidates={row.get('candidate_count')} included={row.get('included_count')} "
-            f"suppressed={row.get('suppressed_count')} error={row.get('plugin_error') or '-'}"
+            f"suppressed={row.get('suppressed_count')} "
+            f"last_session={row.get('last_session_key') or '-'} "
+            f"last_run={row.get('last_updated_at_utc') or '-'} "
+            f"error={row.get('plugin_error') or '-'}"
         )
         source_status = row.get("source_status") or {}
-        if source_status:
+        if source_status and verbose:
             click.echo(f"  source_status={json.dumps(source_status, sort_keys=True)}")
+        if row.get("plugin_error") and verbose:
+            click.echo(f"  error_detail={row.get('plugin_error')}")
         if row.get("portfolio_exposure_summary"):
             click.echo(f"  portfolio={row.get('portfolio_exposure_summary')}")
         if row.get("watchlist_exposure_summary"):
             click.echo(f"  watchlist={row.get('watchlist_exposure_summary')}")
+
+
+@cli.command("verticals-history")
+@click.option("--from", "from_date", default=None, help="Start date YYYY-MM-DD.")
+@click.option("--to", "to_date", default="today", show_default=True, help="End date: today|yesterday|YYYY-MM-DD.")
+@click.option("--profile", "profile_name", default="default_user", show_default=True, help="Profile name.")
+@click.option("--vertical", "vertical_key", default="", help="Optional vertical key filter (e.g. healthcare).")
+@click.option("--limit", default=50, show_default=True, type=int, help="Max rows.")
+@click.pass_context
+def verticals_history(ctx, from_date: str | None, to_date: str, profile_name: str, vertical_key: str, limit: int):
+    """Show persisted vertical diagnostics history rows."""
+    from datetime import datetime, timedelta, timezone
+    from zoneinfo import ZoneInfo
+
+    from app.verticals.engine import vertical_diagnostics_history
+
+    init_db()
+    settings = ctx.obj["settings"]
+    tz = ZoneInfo(settings.timezone or "Europe/Madrid")
+    local_now = datetime.now(timezone.utc).astimezone(tz)
+
+    def _parse(value: str | None):
+        if not value:
+            return None
+        s = value.strip().lower()
+        if s == "today":
+            return local_now.date()
+        if s == "yesterday":
+            return (local_now - timedelta(days=1)).date()
+        from datetime import date as _date
+        return _date.fromisoformat(s)
+
+    d_from = _parse(from_date)
+    d_to = _parse(to_date)
+    rows = vertical_diagnostics_history(
+        profile_name=profile_name,
+        from_date=d_from,
+        to_date=d_to,
+        vertical_key=(vertical_key or "").strip() or None,
+        limit=limit,
+    )
+    click.echo(
+        f"VERTICALS HISTORY | profile={profile_name} | from={d_from or '-'} to={d_to or '-'} "
+        f"| vertical={vertical_key or 'all'} | rows={len(rows)}"
+    )
+    for row in rows:
+        click.echo(
+            f"{row.get('local_date')} | {row.get('session_key')} | {row.get('vertical_key')} | "
+            f"mode={row.get('mode') or '-'} status={row.get('activation_status') or '-'} "
+            f"reason={row.get('activation_reason') or '-'} "
+            f"candidates={row.get('candidate_count')} included={row.get('included_count')} "
+            f"suppressed={row.get('suppressed_count')} error={row.get('plugin_error') or '-'}"
+        )
 
 
 @cli.command("prefs-set")
@@ -1397,8 +1461,21 @@ def daily_summary(ctx, target_date: str, profile_name: str):
     default=False,
     help="With --live-check, print compact classifier examples (included/suppressed/rejected).",
 )
+@click.option(
+    "--vertical-details",
+    is_flag=True,
+    default=False,
+    help="Show vertical diagnostics block even when all vertical modes are off.",
+)
 @click.pass_context
-def session_audit(ctx, target_date: str, profile_name: str, live_check: bool, classifier_details: bool):
+def session_audit(
+    ctx,
+    target_date: str,
+    profile_name: str,
+    live_check: bool,
+    classifier_details: bool,
+    vertical_details: bool,
+):
     """Audit incremental session behavior, freshness basis, and section modes."""
     from app.main import run_session_audit
     report = run_session_audit(
@@ -1407,6 +1484,7 @@ def session_audit(ctx, target_date: str, profile_name: str, live_check: bool, cl
         profile_name=profile_name,
         live_check=live_check,
         classifier_details=classifier_details,
+        vertical_details=vertical_details,
     )
     click.echo(report)
 

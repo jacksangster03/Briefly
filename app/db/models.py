@@ -855,3 +855,36 @@ class NewsClassifierShadowRun(Base):
     agreement = Column(Boolean, nullable=False, default=False, index=True)
     disagreement_reason = Column(String(160), nullable=True, index=True)
     created_at = Column(DateTime, default=_utcnow, index=True)
+
+
+class VerticalRunDiagnostics(Base):
+    """Best-effort audit trail for vertical engine runs (non-delivery state)."""
+
+    __tablename__ = "vertical_run_diagnostics"
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_name",
+            "local_date",
+            "session_key",
+            "vertical_key",
+            name="uq_vertical_diag_profile_date_session_key",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_name = Column(String(80), nullable=False, index=True)
+    local_date = Column(Date, nullable=False, index=True)
+    session_key = Column(String(80), nullable=False, index=True)
+    vertical_key = Column(String(80), nullable=False, index=True)
+    mode = Column(String(40), nullable=True, index=True)
+    status = Column(String(40), nullable=True, index=True)
+    activation_reason = Column(String(120), nullable=True)
+    candidate_count = Column(Integer, nullable=True)
+    included_count = Column(Integer, nullable=True)
+    suppressed_count = Column(Integer, nullable=True)
+    source_status_json = Column(JSON, nullable=True)
+    portfolio_exposure_summary = Column(Text, nullable=True)
+    watchlist_exposure_summary = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)
+    updated_at = Column(DateTime, default=_utcnow, index=True)

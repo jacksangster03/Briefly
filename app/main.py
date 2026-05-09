@@ -65,7 +65,13 @@ from app.db.models import BreakingStoryState
 from app.db.models import NewsClassifierShadowRun, SentMessage, SessionSendState
 from app.db.session import get_session, init_db
 from app.logger import get_logger
-from app.verticals.engine import vertical_breaking_candidates, verticals_status_for_profile
+from app.verticals.engine import (
+    persisted_vertical_diagnostics_for_date,
+    registered_verticals,
+    vertical_breaking_candidates,
+    vertical_mode_for_profile,
+    verticals_status_for_profile,
+)
 from app.messaging.email import EmailMessenger
 from app.messaging.telegram import TelegramMessenger
 from app.personalization.user_profile import UserProfile, load_user_profile
@@ -1639,6 +1645,7 @@ def run_session_audit(
     profile_name: str = "default_user",
     live_check: bool = False,
     classifier_details: bool = False,
+    vertical_details: bool = False,
 ) -> str:
     """Deterministic session audit for freshness + incremental behavior."""
     settings = settings or get_settings()
@@ -1695,6 +1702,7 @@ def run_session_audit(
             .all()
         )
     state_map: dict[tuple[str, str], SessionSendState] = {(r.session_key, r.channel): r for r in rows}
+    persisted_verticals = persisted_vertical_diagnostics_for_date(profile_name=profile_name, local_date=target_date)
 
     if live_check:
         universe = load_sector_universe(settings)
@@ -1923,6 +1931,41 @@ def run_session_audit(
                     )
         lines.append(f"  quote_basis={freshness_counts or {'unavailable': 0}}")
         lines.append(f"  sections={section_mode}")
+        show_verticals = bool(vertical_details or classifier_details)
+        if not show_verticals:
+            # Show when any vertical is configured non-off.
+            for vkey in registered_verticals().keys():
+                if vertical_mode_for_profile(profile=profile, vertical_key=vkey) != "off":
+                    show_verticals = True
+                    break
+        if show_verticals:
+            lines.append("  verticals:")
+            found_any = False
+            for vkey in registered_verticals().keys():
+                diag = persisted_verticals.get(f"{item.key}:{vkey}")
+                if diag is None:
+                    lines.append(f"    {vkey}: diagnostics unavailable for this session")
+                    continue
+                found_any = True
+                source_status = diag.get("source_status") or {}
+                source_line = ", ".join(
+                    f"{name}={source_status.get(name, 'unknown')}"
+                    for name in ("fda", "clinicaltrials", "ema", "company_ir")
+                )
+                lines.append(f"    {vkey}:")
+                lines.append(f"      mode: {diag.get('mode') or '-'}")
+                lines.append(f"      status: {diag.get('activation_status') or '-'}")
+                lines.append(f"      activation_reason: {diag.get('activation_reason') or '-'}")
+                lines.append(f"      candidates: {diag.get('candidate_count') if diag.get('candidate_count') is not None else 'unavailable'}")
+                lines.append(f"      included: {diag.get('included_count') if diag.get('included_count') is not None else 'unavailable'}")
+                lines.append(f"      suppressed: {diag.get('suppressed_count') if diag.get('suppressed_count') is not None else 'unavailable'}")
+                lines.append(f"      portfolio: {diag.get('portfolio_exposure_summary') or '-'}")
+                lines.append(f"      watchlist: {diag.get('watchlist_exposure_summary') or '-'}")
+                lines.append(f"      sources: {source_line or 'unavailable'}")
+                if diag.get("plugin_error"):
+                    lines.append(f"      error: {diag.get('plugin_error')}")
+            if not found_any and not registered_verticals():
+                lines.append("    none: no registered vertical plugins")
         if warnings:
             lines.append(f"  warnings={warnings}")
         lines.append("")
