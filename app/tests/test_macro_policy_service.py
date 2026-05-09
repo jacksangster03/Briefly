@@ -90,6 +90,7 @@ def test_macro_policy_dashboard_schema_is_stable(validation_test_settings):
         "data_basis",
         "generated_at",
         "status",
+        "policy_signals",
     ):
         assert key in payload
     assert payload["rates_yield_curve_panel"]["curve_shape"] == "normal curve"
@@ -198,6 +199,7 @@ def test_macro_policy_dashboard_handles_provider_failures(validation_test_settin
     assert payload["status"] in {"partial", "unavailable"}
     assert payload["central_bank_policy"]["status"] in {"partial", "unavailable"}
     assert payload["rates_yield_curve_panel"]["status"] == "unavailable"
+    assert "policy_signals" in payload
 
 
 def test_missing_date_and_stale_status_handling(validation_test_settings):
@@ -221,3 +223,19 @@ def test_missing_date_and_stale_status_handling(validation_test_settings):
     ten = payload["rates_yield_curve_panel"]["series"]["us_10y"]
     assert ten["status"] in {"stale", "partial"}
     assert ten["unit"] == "%"
+
+
+def test_signal_engine_failure_is_non_fatal(validation_test_settings, monkeypatch):
+    profile = load_user_profile(validation_test_settings)
+    svc = _FakeMacroService(points={}, curve=[], ecb=[])
+
+    def _boom(_payload):
+        raise RuntimeError("signal failure")
+
+    monkeypatch.setattr("app.briefing.macro_policy_service.build_policy_signals", _boom)
+    payload = build_macro_policy_dashboard(
+        profile=profile,
+        settings=validation_test_settings,
+        macro_data_service=svc,  # type: ignore[arg-type]
+    )
+    assert payload["policy_signals"]["status"] == "unavailable"

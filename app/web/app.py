@@ -488,6 +488,16 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 },
                 "macro_catalyst_calendar": {"status": "unavailable", "events": [], "data_basis": "dashboard fallback"},
                 "portfolio_lens": {"status": "partial", "summary": "Portfolio lens unavailable.", "buckets": {}, "data_basis": "dashboard fallback"},
+                "policy_signals": {
+                    "status": "unavailable",
+                    "fed_bias": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["dashboard_fallback"], "risks": []},
+                    "ecb_bias": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["dashboard_fallback"], "risks": []},
+                    "inflation_pressure": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["dashboard_fallback"]},
+                    "labour_pressure": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["dashboard_fallback"]},
+                    "rates_pressure": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["dashboard_fallback"]},
+                    "portfolio_implications": ["Policy signal unavailable in dashboard fallback mode."],
+                    "methodology_note": "Deterministic signal unavailable in fallback mode.",
+                },
                 "data_basis": {
                     "macro_sources": "dashboard fallback",
                     "timezone": str(user_profile.timezone or settings.timezone),
@@ -2154,6 +2164,16 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 },
                 "macro_catalyst_calendar": {"status": "unavailable", "events": []},
                 "portfolio_lens": {"status": "partial", "summary": "Portfolio lens unavailable.", "buckets": {}},
+                "policy_signals": {
+                    "status": "unavailable",
+                    "fed_bias": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["api_fallback"], "risks": []},
+                    "ecb_bias": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["api_fallback"], "risks": []},
+                    "inflation_pressure": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["api_fallback"]},
+                    "labour_pressure": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["api_fallback"]},
+                    "rates_pressure": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["api_fallback"]},
+                    "portfolio_implications": ["Policy signal unavailable in API fallback mode."],
+                    "methodology_note": "Deterministic signal unavailable in fallback mode.",
+                },
                 "data_basis": {
                     "macro_sources": "dashboard fallback",
                     "timezone": str(user_profile.timezone or settings.timezone),

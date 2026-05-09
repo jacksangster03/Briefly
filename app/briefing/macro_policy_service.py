@@ -8,6 +8,7 @@ from typing import Any
 
 from app.briefing.macro_policy_calendar import load_macro_policy_calendar, upcoming_macro_events
 from app.briefing.macro_policy_lens import build_macro_portfolio_lens
+from app.briefing.macro_policy_signals import build_policy_signals
 from app.data_sources.macro_data import MacroDataService
 from app.personalization.user_profile import UserProfile
 from app.settings import Settings
@@ -34,7 +35,29 @@ def build_macro_policy_dashboard(
     calendar = _safe_panel(lambda: _build_calendar(settings=settings, local_now=local_now), panel_name="macro_catalyst_calendar")
     lens = _safe_panel(lambda: build_macro_portfolio_lens(profile), panel_name="portfolio_lens")
 
-    panels = [policy, inflation, labour, rates, calendar, lens]
+    try:
+        policy_signals = build_policy_signals(
+            {
+                "central_bank_policy": policy,
+                "inflation_tracker": inflation,
+                "labour_tracker": labour,
+                "rates_yield_curve_panel": rates,
+                "portfolio_lens": lens,
+            }
+        )
+    except Exception:
+        policy_signals = {
+            "status": "unavailable",
+            "fed_bias": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["signal_engine_error"], "risks": []},
+            "ecb_bias": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["signal_engine_error"], "risks": []},
+            "inflation_pressure": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["signal_engine_error"]},
+            "labour_pressure": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["signal_engine_error"]},
+            "rates_pressure": {"label": "uncertain", "confidence": "low", "drivers": [], "missing": ["signal_engine_error"]},
+            "portfolio_implications": ["Policy signal unavailable due to partial data or service error."],
+            "methodology_note": "Deterministic signal unavailable. Not a forecast.",
+        }
+
+    panels = [policy, inflation, labour, rates, calendar, lens, policy_signals]
     overall_status = _aggregate_status([str(panel.get("status", "unavailable")) for panel in panels])
     return {
         "generated_at": now_utc.isoformat(),
@@ -45,6 +68,7 @@ def build_macro_policy_dashboard(
         "rates_yield_curve_panel": rates,
         "macro_catalyst_calendar": calendar,
         "portfolio_lens": lens,
+        "policy_signals": policy_signals,
         "data_basis": {
             "macro_sources": "FRED + ECB + Eurostat + local deterministic calendar seed",
             "timezone": str(local_tz.key) if hasattr(local_tz, "key") else (profile.timezone or settings.timezone),

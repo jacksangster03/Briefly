@@ -865,12 +865,23 @@ Scope in Phase 1:
 - Rates/yield curve panel (2Y/10Y/30Y + 10Y-2Y + deterministic curve/impulse labels)
 - Macro catalyst calendar from local config seed: `configs/macro_calendar.yaml`
 - Portfolio macro lens from deterministic holdings/watchlist heuristics
+- Deterministic Macro Policy Signal block (policy bias + inflation/labour/rates pressure with explicit caveats)
 
 Data correctness conventions:
 
 - Inflation and wage-growth metrics are shown as **YoY %** when available (FRED `units=pc1` transformation).
 - If a YoY transform is unavailable, the dashboard falls back to raw index/level values and labels them explicitly (for example, `index level`) to avoid implying an inflation rate.
 - Labour/rates units are explicit (`%`, `claims`, `thousands`, spread units), and each metric exposes its latest observation date.
+
+Deterministic Policy Signal conventions:
+
+- Signals are deterministic classification outputs, not market-implied probabilities.
+- Signal labels are bias descriptors (`cut_leaning`, `hold`, `hike_leaning`, `uncertain`) and pressure states (`easing`, `sticky`, `reaccelerating`, `cooling`, `tight`, `neutral`).
+- Each signal includes:
+  - drivers (what pushed the label)
+  - missing-data caveats
+  - confidence tier (`low|medium|high`)
+  - risk note explicitly stating this is **not a forecast**.
 
 Design constraints:
 
