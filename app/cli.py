@@ -361,8 +361,14 @@ def prefs_show(profile_name: str):
     default=False,
     help="Show extended source/error diagnostics.",
 )
+@click.option(
+    "--show-history",
+    is_flag=True,
+    default=False,
+    help="Show latest stored diagnostic block even when it differs from current mode.",
+)
 @click.pass_context
-def verticals_status(ctx, profile_name: str, verbose: bool):
+def verticals_status(ctx, profile_name: str, verbose: bool, show_history: bool):
     """Show registered vertical plugins and current activation/config diagnostics."""
     import json
 
@@ -384,6 +390,11 @@ def verticals_status(ctx, profile_name: str, verbose: bool):
         click.echo("No registered vertical plugins.")
         return
     for row in rows:
+        latest = row.get("latest_stored_diagnostic") or {}
+        current_mode = str(row.get("mode") or "").strip().lower()
+        latest_mode = str(latest.get("mode") or "").strip().lower()
+        mode_mismatch = bool(latest and latest_mode and current_mode != latest_mode)
+
         click.echo(
             f"- {row.get('vertical_key')} ({row.get('display_name')}) "
             f"mode={row.get('mode')} status={row.get('activation_status')} reason={row.get('activation_reason')}"
@@ -404,6 +415,17 @@ def verticals_status(ctx, profile_name: str, verbose: bool):
             click.echo(f"  portfolio={row.get('portfolio_exposure_summary')}")
         if row.get("watchlist_exposure_summary"):
             click.echo(f"  watchlist={row.get('watchlist_exposure_summary')}")
+        if latest and (show_history or verbose or mode_mismatch):
+            click.echo("  Latest stored diagnostic, not current active state:")
+            click.echo(
+                f"    mode={latest.get('mode') or '-'} session={latest.get('session_key') or '-'} "
+                f"date={latest.get('local_date') or '-'} at={latest.get('updated_at_utc') or '-'}"
+            )
+            click.echo(
+                f"    status={latest.get('activation_status') or '-'} reason={latest.get('activation_reason') or '-'} "
+                f"candidates={latest.get('candidate_count')} included={latest.get('included_count')} "
+                f"suppressed={latest.get('suppressed_count')} error={latest.get('plugin_error') or '-'}"
+            )
 
 
 @cli.command("verticals-history")

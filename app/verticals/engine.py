@@ -428,19 +428,30 @@ def verticals_status_for_profile(*, profile) -> list[dict[str, Any]]:
                 base[k] = v
         latest = latest_persisted_vertical_diagnostics(profile_name=profile.name, vertical_key=key)
         if latest:
+            base["latest_stored_diagnostic"] = latest
             base["last_session_key"] = latest.get("session_key")
             base["last_local_date"] = latest.get("local_date")
             base["last_updated_at_utc"] = latest.get("updated_at_utc")
-            for field in (
-                "candidate_count",
-                "included_count",
-                "suppressed_count",
-                "activation_reason",
-                "source_status",
-                "plugin_error",
-            ):
-                val = latest.get(field)
-                if val not in (None, ""):
-                    base[field] = val
+            # Only merge latest-run metrics into current status when modes align
+            # and current mode is not explicitly off.
+            latest_mode = str(latest.get("mode") or "").strip().lower()
+            current_mode = str(mode or "").strip().lower()
+            merge_latest_into_current = bool(
+                current_mode != "off"
+                and latest_mode
+                and latest_mode == current_mode
+            )
+            if merge_latest_into_current:
+                for field in (
+                    "candidate_count",
+                    "included_count",
+                    "suppressed_count",
+                    "activation_reason",
+                    "source_status",
+                    "plugin_error",
+                ):
+                    val = latest.get(field)
+                    if val not in (None, ""):
+                        base[field] = val
         out.append(base)
     return out

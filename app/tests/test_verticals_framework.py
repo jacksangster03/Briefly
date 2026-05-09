@@ -236,6 +236,7 @@ def test_verticals_status_verbose_and_history_cli(validation_isolated_db, monkey
     assert out_verbose.exit_code == 0
     assert "last_session=" in out_verbose.output
     assert "source_status=" in out_verbose.output
+    assert "Latest stored diagnostic, not current active state" in out_verbose.output
 
     out_hist = runner.invoke(cli, ["verticals-history", "--to", "today", "--limit", "10"])
     assert out_hist.exit_code == 0
@@ -254,3 +255,47 @@ def test_vertical_diagnostics_history_function(validation_isolated_db):
     rows = vertical_diagnostics_history(profile_name=profile.name, limit=5)
     assert rows
     assert rows[0]["vertical_key"] == "healthcare"
+
+
+def test_verticals_status_off_does_not_show_stale_error_as_current(monkeypatch):
+    profile = _profile(enabled=False)
+    runner = CliRunner()
+    monkeypatch.setattr("app.cli.init_db", lambda: None)
+    monkeypatch.setattr("app.personalization.user_profile.load_user_profile", lambda *_a, **_k: profile)
+
+    def _fake_latest(*, profile_name: str, vertical_key: str):
+        return {
+            "profile_name": profile_name,
+            "vertical_key": vertical_key,
+            "mode": "active",
+            "session_key": "morning",
+            "local_date": "2026-05-09",
+            "updated_at_utc": "2026-05-09T08:00:00+00:00",
+            "activation_status": "error",
+            "activation_reason": "active_mode",
+            "candidate_count": 12,
+            "included_count": 2,
+            "suppressed_count": 10,
+            "plugin_error": "boom",
+        }
+
+    monkeypatch.setattr("app.verticals.engine.latest_persisted_vertical_diagnostics", _fake_latest)
+    out = runner.invoke(cli, ["verticals-status", "--verbose"])
+    assert out.exit_code == 0
+    assert "mode=off status=inactive reason=mode_off" in out.output
+    # Current status line should not inherit stale error.
+    current_line = next((line for line in out.output.splitlines() if "candidates=" in line and "last_session=" in line), "")
+    assert "error=boom" not in current_line
+    # Stale/latest block should be clearly labeled.
+    assert "Latest stored diagnostic, not current active state" in out.output
+    assert "status=error reason=active_mode" in out.output
+
+
+def test_verticals_status_active_mode_shows_current_normally(monkeypatch):
+    profile = _profile(enabled=True)
+    runner = CliRunner()
+    monkeypatch.setattr("app.cli.init_db", lambda: None)
+    monkeypatch.setattr("app.personalization.user_profile.load_user_profile", lambda *_a, **_k: profile)
+    out = runner.invoke(cli, ["verticals-status"])
+    assert out.exit_code == 0
+    assert "mode=active" in out.output
