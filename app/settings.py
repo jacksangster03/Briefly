@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     fda_openfda_api_key: str = ""
     clinicaltrials_base_url: str = "https://clinicaltrials.gov/api/v2"
     ema_medicines_base_url: str = "https://www.ema.europa.eu/en/medicines"
+    enable_healthcare_official_sources: bool = False
+    enable_healthcare_sec_source: bool = True
+    enable_healthcare_openfda_source: bool = False
+    enable_healthcare_clinicaltrials_source: bool = False
+    enable_healthcare_ema_source: bool = False
+    healthcare_sec_daily_call_budget: int = 100
+    healthcare_openfda_daily_call_budget: int = 100
+    healthcare_clinicaltrials_daily_call_budget: int = 100
+    healthcare_ema_daily_call_budget: int = 50
+    healthcare_source_timeout_seconds: int = 20
     polygon_api_key: str = ""
     alpaca_api_key: str = ""
     alpaca_api_secret: str = ""

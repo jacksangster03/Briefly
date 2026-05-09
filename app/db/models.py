@@ -888,3 +888,38 @@ class VerticalRunDiagnostics(Base):
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, default=_utcnow, index=True)
     updated_at = Column(DateTime, default=_utcnow, index=True)
+
+
+class HealthcareSourceEventRecord(Base):
+    """Persisted normalized official healthcare source events."""
+
+    __tablename__ = "healthcare_source_events"
+    __table_args__ = (
+        UniqueConstraint("source_key", "stable_event_key", name="uq_healthcare_source_stable_event"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_key = Column(String(80), nullable=False, index=True)
+    source_tier = Column(String(40), nullable=False, default="official", index=True)
+    source_event_id = Column(String(160), nullable=True, index=True)
+    stable_event_key = Column(String(80), nullable=False, index=True)
+    title = Column(Text, nullable=False, default="")
+    summary = Column(Text, nullable=False, default="")
+    source_url = Column(Text, nullable=True)
+    published_at = Column(DateTime, nullable=True, index=True)
+    discovered_at = Column(DateTime, nullable=True, index=True)
+    company_name = Column(String(200), nullable=True)
+    tickers_json = Column(JSON, nullable=True)
+    drug_name = Column(String(200), nullable=True)
+    condition = Column(String(200), nullable=True)
+    regulator = Column(String(80), nullable=True)
+    healthcare_event_type = Column(String(80), nullable=True, index=True)
+    trial_phase = Column(String(80), nullable=True)
+    trial_status = Column(String(80), nullable=True)
+    severity = Column(String(40), nullable=True, index=True)
+    confidence = Column(Float, nullable=True)
+    freshness_state = Column(String(40), nullable=True, index=True)
+    suppress_reason = Column(String(160), nullable=True, index=True)
+    raw_data_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)
+    updated_at = Column(DateTime, default=_utcnow, index=True)

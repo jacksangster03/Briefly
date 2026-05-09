@@ -66,6 +66,43 @@ def test_vertical_engine_off_mode_returns_no_section():
     assert section is None
 
 
+def test_vertical_engine_off_mode_ignores_official_candidates(monkeypatch):
+    profile = _profile(enabled=False)
+
+    class _FakePlugin:
+        vertical_key = "healthcare"
+        display_name = "Healthcare / Biotech"
+
+        def resolve_mode(self, *, profile):
+            return "off"
+
+        def activation_state(self, *, profile, mode, session_key, candidate_events):
+            return False, "mode_off"
+
+        def build_section(self, *, profile, session_key, candidate_events):
+            raise AssertionError("build_section should not run in off mode")
+
+        def audit_metrics(self, *, profile, session_key, candidate_events=None):
+            return {
+                "vertical_key": "healthcare",
+                "candidate_count": 3,
+                "official_candidate_count": 2,
+                "source_status": {"sec": {"status": "ok", "normalized_count": 2}},
+            }
+
+        def breaking_candidates(self, *, profile, events):
+            return []
+
+    monkeypatch.setattr("app.verticals.engine.registered_verticals", lambda: {"healthcare": _FakePlugin()})
+    section = build_vertical_section(
+        profile=profile,
+        vertical_key="healthcare",
+        session_key="morning",
+        candidate_events=[_event()],
+    )
+    assert section is None
+
+
 def test_vertical_engine_healthcare_enabled_matches_existing_behavior():
     profile = _profile(enabled=True)
     events = [_event()]

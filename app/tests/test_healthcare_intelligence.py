@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from app.briefing.formatter import TelegramFormatter
 from app.healthcare.classifier import classify_healthcare_event
+from app.healthcare.schemas import HealthcareSourceEvent
 from app.healthcare.scorer import score_healthcare_event
 from app.healthcare.section_builder import build_healthcare_section, filter_breaking_healthcare_events
+from app.healthcare.sources.clinicaltrials import fetch_clinicaltrials_source_events
+from app.healthcare.sources.company_ir import fetch_sec_healthcare_source_events
+from app.healthcare.sources.fda import fetch_openfda_source_events
 from app.healthcare.schemas import HealthcareBriefingSection
 from app.personalization.user_profile import UserProfile
 from app.schemas.briefings import MorningBriefing
 from app.schemas.events import NormalisedEvent
+from app.verticals.plugins.healthcare import HealthcareVerticalPlugin
 
 
 def _profile(enabled: bool = True) -> UserProfile:
@@ -237,3 +243,162 @@ def test_renderer_includes_healthcare_section_lines():
     assert "HEALTHCARE / BIOTECH INTELLIGENCE" in rendered
     assert "Why market-relevant" in rendered
     assert "Portfolio lens" in rendered
+
+
+def test_sec_healthcare_keyword_detection_normalizes_event(monkeypatch):
+    class _StubSECProvider:
+        def __init__(self, **_kwargs):
+            pass
+
+        def is_configured(self):
+            return True
+
+        def search_filings(self, **_kwargs):
+            return [
+                _evt(
+                    "8-K: LLY reports FDA approval update",
+                    "FDA approval and Phase 3 endpoint update included in filing.",
+                    source="sec_edgar",
+                    tickers=["LLY"],
+                ),
+                _evt(
+                    "8-K: META EX-1.1",
+                    "Routine filing update with no operating catalyst.",
+                    source="sec_edgar",
+                    tickers=["META"],
+                ),
+            ]
+
+    monkeypatch.setattr("app.healthcare.sources.company_ir.SECProvider", _StubSECProvider)
+    settings = SimpleNamespace(
+        enable_healthcare_official_sources=True,
+        enable_healthcare_sec_source=True,
+        sec_user_agent="Briefly test@example.com",
+        healthcare_source_timeout_seconds=5,
+    )
+    events, health = fetch_sec_healthcare_source_events(settings=settings, profile=_profile(), budget_allowed=True, limit=10)
+    assert len(events) == 1
+    assert events[0].source_key == "sec"
+    assert events[0].healthcare_event_type in {"fda_approval", "clinical_trial_result", "sec_filing"}
+    assert health.suppressed_count >= 1
+
+
+def test_clinicaltrials_parser_normalizes_trial_event(monkeypatch):
+    payload = {
+        "studies": [
+            {
+                "protocolSection": {
+                    "identificationModule": {"nctId": "NCT12345678", "briefTitle": "Phase 3 obesity readout"},
+                    "statusModule": {"overallStatus": "Completed", "hasResults": True, "lastUpdatePostDate": "2026-05-08"},
+                    "designModule": {"phases": ["Phase 3"]},
+                    "descriptionModule": {"briefSummary": "Topline endpoint met."},
+                    "conditionsModule": {"conditions": ["Obesity"]},
+                    "sponsorCollaboratorsModule": {"leadSponsor": {"name": "Eli Lilly"}},
+                }
+            }
+        ]
+    }
+
+    def _fake_fetch_payload(**_kwargs):
+        return payload
+
+    monkeypatch.setattr("app.healthcare.sources.clinicaltrials._fetch_payload", _fake_fetch_payload)
+    settings = SimpleNamespace(
+        enable_healthcare_official_sources=True,
+        enable_healthcare_clinicaltrials_source=True,
+        clinicaltrials_base_url="https://clinicaltrials.gov/api/v2",
+        healthcare_source_timeout_seconds=5,
+    )
+    events, health = fetch_clinicaltrials_source_events(settings=settings, profile=_profile(), budget_allowed=True, limit=10)
+    assert events
+    assert events[0].source_key == "clinicaltrials"
+    assert events[0].healthcare_event_type in {"clinical_trial_result", "clinical_trial_start", "clinical_trial_update"}
+    assert health.status == "ok"
+
+
+def test_openfda_parser_normalizes_safety_event(monkeypatch):
+    payload = {
+        "results": [
+            {
+                "classification": "Class II",
+                "reason_for_recall": "Labeling issue discovered",
+                "product_description": "Drug injection",
+                "recall_number": "D-1234-2026",
+                "report_date": "20260508",
+                "status": "Ongoing",
+                "recalling_firm": "Example Pharma",
+            }
+        ]
+    }
+
+    def _fake_fetch(**_kwargs):
+        return payload
+
+    monkeypatch.setattr("app.healthcare.sources.fda._fetch_enforcement_payload", _fake_fetch)
+    settings = SimpleNamespace(
+        enable_healthcare_official_sources=True,
+        enable_healthcare_openfda_source=True,
+        fda_openfda_base_url="https://api.fda.gov",
+        fda_openfda_api_key="",
+        healthcare_source_timeout_seconds=5,
+    )
+    events, health = fetch_openfda_source_events(settings=settings, budget_allowed=True, limit=10)
+    assert events
+    assert events[0].source_key == "openfda"
+    assert events[0].healthcare_event_type in {"drug_safety_warning", "label_update"}
+    assert health.status == "ok"
+
+
+def test_disabled_official_sources_are_not_called(monkeypatch):
+    called = {"value": False}
+
+    def _explode(*_args, **_kwargs):
+        called["value"] = True
+        raise AssertionError("network should not be called when source disabled")
+
+    monkeypatch.setattr("app.healthcare.sources.fda._fetch_enforcement_payload", _explode)
+    settings = SimpleNamespace(
+        enable_healthcare_official_sources=False,
+        enable_healthcare_openfda_source=True,
+        fda_openfda_base_url="https://api.fda.gov",
+        fda_openfda_api_key="",
+    )
+    events, health = fetch_openfda_source_events(settings=settings, budget_allowed=True, limit=10)
+    assert events == []
+    assert health.status == "disabled"
+    assert called["value"] is False
+
+
+def test_source_failure_is_non_blocking_and_reported(monkeypatch):
+    def _fail(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("app.healthcare.sources.fda._fetch_enforcement_payload", _fail)
+    settings = SimpleNamespace(
+        enable_healthcare_official_sources=True,
+        enable_healthcare_openfda_source=True,
+        fda_openfda_base_url="https://api.fda.gov",
+        fda_openfda_api_key="",
+        healthcare_source_timeout_seconds=5,
+    )
+    events, health = fetch_openfda_source_events(settings=settings, budget_allowed=True, limit=10)
+    assert events == []
+    assert health.status == "error"
+    assert "boom" in (health.last_error or "")
+
+
+def test_healthcare_plugin_active_mode_tracks_official_candidates_in_diagnostics():
+    plugin = HealthcareVerticalPlugin()
+    profile = _profile(enabled=True)
+    plugin._last_source_health = {
+        "sec": {"status": "ok", "fetched_count": 2, "normalized_count": 1, "suppressed_count": 1},
+        "clinicaltrials": {"status": "disabled", "fetched_count": 0, "normalized_count": 0, "suppressed_count": 0},
+        "openfda": {"status": "disabled", "fetched_count": 0, "normalized_count": 0, "suppressed_count": 0},
+        "ema": {"status": "stub_inactive", "fetched_count": 0, "normalized_count": 0, "suppressed_count": 0},
+    }
+    plugin._last_official_candidate_count = 1
+    plugin._last_official_suppressed_count = 1
+    plugin._last_official_fetch_at = datetime.now(timezone.utc)
+    metrics = plugin.audit_metrics(profile=profile, session_key="morning", candidate_events=[_evt("FDA update", "FDA update", tickers=["LLY"])])
+    assert metrics["official_candidate_count"] == 1
+    assert metrics["official_suppressed_count"] == 1
