@@ -79,6 +79,18 @@ def test_ecb_uses_eurozone_hicp_when_available():
     assert sig["ecb_bias"]["label"] in {"cut_leaning", "hold", "hike_leaning", "uncertain"}
 
 
+def test_ecb_missing_labour_does_not_claim_softer_labour_backdrop():
+    payload = _payload()
+    payload["labour_tracker"]["series"].pop("euro_area_unemployment_rate", None)
+    sig = build_policy_signals(payload)
+    joined = " ".join(sig["ecb_bias"]["drivers"]).lower()
+    assert "softer labour backdrop" not in joined
+    assert "labour confirmation is unavailable" in joined
+    assert "euro_area_unemployment_rate" in sig["ecb_bias"]["missing"]
+    assert sig["status"] == "partial"
+    assert sig["ecb_bias"]["confidence"] == "low"
+
+
 def test_regions_schema_includes_placeholders_and_spain_country_lens():
     sig = build_policy_signals(_payload())
     regions = sig["regions"]

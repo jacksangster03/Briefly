@@ -884,6 +884,7 @@ Deterministic Policy Signal conventions:
   - Fed bias uses US inflation/labour/rates inputs.
   - ECB bias uses Eurozone HICP + ECB policy rate + Euro-area labour when available.
   - If Eurozone inputs are incomplete, ECB signal degrades to partial/uncertain with explicit missing fields.
+  - ECB driver text avoids claiming labour softness/tightness when Euro-area labour confirmation is missing.
 - Regional signal scaffolding is included for expansion:
   - `regions.us` and `regions.eurozone` are active deterministic tracks.
   - `regions.uk`, `regions.japan`, and `regions.china` are explicit Phase 1 placeholders (`unavailable` / `not_wired`).

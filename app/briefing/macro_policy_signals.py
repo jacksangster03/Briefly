@@ -247,11 +247,17 @@ def classify_ecb_policy_bias(
         if hicp <= 2.2 and (euro_unrate is None or euro_unrate >= 6.5):
             label = "cut_leaning"
             confidence = "medium" if euro_unrate is not None else "low"
-            drivers.append("Disinflation plus softer labour backdrop supports easing bias.")
+            if euro_unrate is not None:
+                drivers.append("Disinflation plus softer labour backdrop supports easing bias.")
+            else:
+                drivers.append("Eurozone disinflation supports an easing bias, but labour confirmation is unavailable.")
         elif hicp >= 2.8 and (euro_unrate is None or euro_unrate <= 6.0):
             label = "hike_leaning"
             confidence = "medium" if euro_unrate is not None else "low"
-            drivers.append("Inflation pressure with firm labour backdrop supports tighter bias.")
+            if euro_unrate is not None:
+                drivers.append("Inflation pressure with firm labour backdrop supports tighter bias.")
+            else:
+                drivers.append("Inflation pressure supports tighter bias, but labour confirmation is unavailable.")
         else:
             label = "hold"
             confidence = "medium" if euro_unrate is not None else "low"
