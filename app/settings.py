@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     llm_monthly_budget_usd: float = 0.0
     # all | telegram | email
     delivery_channel: str = "all"
+    delivery_failure_alerts_enabled: bool = True
+    # Comma-separated channel list: "email", "telegram", "telegram,email", or empty.
+    # Telegram is intentionally excluded by default to prevent user-facing spam loops.
+    delivery_failure_alert_channels: str = "email"
+    delivery_failure_alert_cooldown_minutes: int = 360
     web_host: str = "127.0.0.1"
     web_port: int = 8080
     web_public_base_url: str = ""

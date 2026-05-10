@@ -172,6 +172,36 @@ class UserProfile:
         return raw if raw in {"material_only", "always_short"} else "material_only"
 
     @property
+    def delivery_failure_alerts_enabled(self) -> bool:
+        return bool(self.delivery.get("failure_alerts_enabled", True))
+
+    @property
+    def delivery_failure_alert_channels(self) -> list[str]:
+        raw = self.delivery.get("failure_alert_channels", ["email"])
+        if isinstance(raw, str):
+            channels = [item.strip().lower() for item in raw.split(",") if item.strip()]
+        elif isinstance(raw, list):
+            channels = [str(item).strip().lower() for item in raw if str(item).strip()]
+        else:
+            channels = ["email"]
+        allowed = {"telegram", "email"}
+        out: list[str] = []
+        seen: set[str] = set()
+        for channel in channels:
+            if channel in allowed and channel not in seen:
+                seen.add(channel)
+                out.append(channel)
+        return out
+
+    @property
+    def delivery_failure_alert_cooldown_minutes(self) -> int:
+        try:
+            value = int(self.delivery.get("failure_alert_cooldown_minutes", 360))
+        except Exception:
+            return 360
+        return max(0, value)
+
+    @property
     def quiet_hours(self) -> tuple[str, str]:
         return (
             self.delivery.get("quiet_hours_start", "23:00"),
@@ -474,6 +504,9 @@ def _load_profile_overrides(profile: UserProfile) -> None:
             "delivery.suppress_low_materiality",
             "delivery.weekend_mode",
             "delivery.sunday_news_materiality",
+            "delivery.failure_alerts_enabled",
+            "delivery.failure_alert_channels",
+            "delivery.failure_alert_cooldown_minutes",
         }:
             profile.delivery[key.replace("delivery.", "")] = value
             continue

@@ -219,6 +219,51 @@ def _delivery_failed_channels_hash(
     return hashlib.sha256(key.encode()).hexdigest()[:24]
 
 
+def _normalize_failure_alert_channels(value: object) -> list[str]:
+    if isinstance(value, str):
+        channels = [item.strip().lower() for item in value.split(",") if item.strip()]
+    elif isinstance(value, list):
+        channels = [str(item).strip().lower() for item in value if str(item).strip()]
+    else:
+        channels = []
+    allowed = {"telegram", "email"}
+    unique: list[str] = []
+    seen: set[str] = set()
+    for channel in channels:
+        if channel in allowed and channel not in seen:
+            seen.add(channel)
+            unique.append(channel)
+    return unique
+
+
+def _resolve_failure_alert_controls(
+    *,
+    settings: Settings,
+    failure_alerts_enabled: bool | None,
+    failure_alert_channels: list[str] | str | None,
+    failure_alert_cooldown_minutes: int | None,
+) -> tuple[bool, list[str], int]:
+    enabled = (
+        bool(failure_alerts_enabled)
+        if failure_alerts_enabled is not None
+        else bool(getattr(settings, "delivery_failure_alerts_enabled", True))
+    )
+    channels = (
+        _normalize_failure_alert_channels(failure_alert_channels)
+        if failure_alert_channels is not None
+        else _normalize_failure_alert_channels(getattr(settings, "delivery_failure_alert_channels", "email"))
+    )
+    try:
+        cooldown = int(
+            failure_alert_cooldown_minutes
+            if failure_alert_cooldown_minutes is not None
+            else getattr(settings, "delivery_failure_alert_cooldown_minutes", _ALERT_COOLDOWN_MINUTES)
+        )
+    except Exception:
+        cooldown = _ALERT_COOLDOWN_MINUTES
+    return enabled, channels, max(0, cooldown)
+
+
 def _success_session_key_aliases(session_key: str) -> list[str]:
     key = str(session_key or "").strip().lower()
     aliases = [key]
@@ -294,6 +339,7 @@ def _should_emit_delivery_failure_alert(
     local_date: "date",
     unresolved_failed_channels: list[str],
     now_utc: datetime,
+    cooldown_minutes: int = _ALERT_COOLDOWN_MINUTES,
 ) -> tuple[bool, str]:
     failed_hash = _delivery_failed_channels_hash(
         profile_name=profile_name,
@@ -302,7 +348,7 @@ def _should_emit_delivery_failure_alert(
         failed_channels=unresolved_failed_channels,
     )
     legacy_alert_hash = _delivery_alert_hash(profile_name, session_key, local_date)
-    cooldown_cutoff = now_utc - timedelta(minutes=_ALERT_COOLDOWN_MINUTES)
+    cooldown_cutoff = now_utc - timedelta(minutes=max(0, int(cooldown_minutes)))
     # Primary durable dedupe against prior alert attempts in SentMessage.
     # We intentionally suppress repeated user-facing alerts even if the prior
     # alert transport failed, to prevent recursive spam loops.
@@ -330,6 +376,7 @@ def _should_emit_delivery_failure_alert(
         unresolved_failed_channels=unresolved_failed_channels,
         failed_hash=failed_hash,
         now_utc=now_utc,
+        cooldown_minutes=cooldown_minutes,
     ):
         return False, "cooldown"
     return True, failed_hash
@@ -343,9 +390,10 @@ def _claim_delivery_failure_alert_slot(
     unresolved_failed_channels: list[str],
     failed_hash: str,
     now_utc: datetime,
+    cooldown_minutes: int,
 ) -> bool:
     """Atomically claim alert emission rights for this cooldown scope."""
-    cooldown_cutoff = now_utc - timedelta(minutes=_ALERT_COOLDOWN_MINUTES)
+    cooldown_cutoff = now_utc - timedelta(minutes=max(0, int(cooldown_minutes)))
     try:
         with get_session() as db_sess:
             row = (
@@ -440,6 +488,9 @@ def _send_delivery_failure_alert(
     generated_local_date: "date | None" = None,
     allow_stale_historical_alert: bool = False,
     manual_context_label: str = "",
+    failure_alerts_enabled: bool | None = None,
+    failure_alert_channels: list[str] | str | None = None,
+    failure_alert_cooldown_minutes: int | None = None,
 ) -> None:
     """Send a Telegram self-alert when the scheduler fails to deliver a session.
 
@@ -447,6 +498,12 @@ def _send_delivery_failure_alert(
     profile/date/session + failed-channel set.
     """
     try:
+        enabled, alert_channels, cooldown_minutes = _resolve_failure_alert_controls(
+            settings=settings,
+            failure_alerts_enabled=failure_alerts_enabled,
+            failure_alert_channels=failure_alert_channels,
+            failure_alert_cooldown_minutes=failure_alert_cooldown_minutes,
+        )
         failed = [str(ch).lower() for ch, st in channel_status.items() if st == "failed"]
         sent_ok = [ch for ch, st in channel_status.items() if st == "sent"]
         if not failed:
@@ -494,6 +551,7 @@ def _send_delivery_failure_alert(
             local_date=local_date,
             unresolved_failed_channels=unresolved_failed,
             now_utc=now_utc,
+            cooldown_minutes=cooldown_minutes,
         )
         if not should_emit:
             logger.info(
@@ -532,24 +590,36 @@ def _send_delivery_failure_alert(
             f"Sent channels:\n{sent_lines}\n\n"
             f"{retry_lines}".rstrip()
         )
-
-        messenger = TelegramMessenger(settings)
-        if not messenger.is_configured():
-            logger.debug("Delivery failure alert skipped: Telegram not configured.")
-            return
-
-        success = messenger.send_messages([alert_text])
-        with get_session() as db_sess:
-            db_sess.add(SentMessage(
-                message_type=_ALERT_MESSAGE_TYPE,
-                channel="telegram",
-                event_ids=[f"alert:{session_key}:{local_date.isoformat()}"],
-                content_preview=alert_text[:500],
-                content_hash=failed_hash,
-                sent_at=datetime.now(timezone.utc),
-                success=bool(success),
-                error_message=None if success else str(getattr(messenger, "last_error", "") or "alert send failed"),
-            ))
+        transport_attempted = False
+        any_alert_send_success = False
+        if enabled and alert_channels:
+            for channel in alert_channels:
+                messenger = TelegramMessenger(settings) if channel == "telegram" else EmailMessenger(settings)
+                if not messenger.is_configured():
+                    logger.debug("Delivery failure alert skipped: %s not configured.", channel)
+                    continue
+                transport_attempted = True
+                channel_success = bool(messenger.send_messages([alert_text]))
+                any_alert_send_success = any_alert_send_success or channel_success
+                with get_session() as db_sess:
+                    db_sess.add(SentMessage(
+                        message_type=_ALERT_MESSAGE_TYPE,
+                        channel=channel,
+                        event_ids=[f"alert:{session_key}:{local_date.isoformat()}"],
+                        content_preview=alert_text[:500],
+                        content_hash=failed_hash,
+                        sent_at=datetime.now(timezone.utc),
+                        success=channel_success,
+                        error_message=None if channel_success else str(getattr(messenger, "last_error", "") or "alert send failed"),
+                    ))
+        else:
+            logger.info(
+                "Delivery failure user-alert suppressed by config | enabled=%s channels=%s profile=%s session=%s",
+                enabled,
+                ",".join(alert_channels) if alert_channels else "(none)",
+                profile_name,
+                session_key,
+            )
         # Record dedupe/cooldown state regardless of alert-send outcome to avoid
         # recursive user-facing alert loops when Telegram transport is flaky.
         _record_delivery_failure_alert_state(
@@ -560,7 +630,7 @@ def _send_delivery_failure_alert(
             failed_hash=failed_hash,
             now_utc=now_utc,
         )
-        if success:
+        if any_alert_send_success:
             logger.info(
                 "Delivery failure alert emitted for unresolved channels: %s | session=%s date=%s",
                 ",".join(sorted(unresolved_failed)),
@@ -568,10 +638,11 @@ def _send_delivery_failure_alert(
                 local_date,
             )
         else:
-            logger.warning(
-                "Delivery failure alert itself failed to send | session=%s failed_channels=%s",
-                session_key, unresolved_failed,
-            )
+            if transport_attempted:
+                logger.warning(
+                    "Delivery failure alert itself failed to send | session=%s failed_channels=%s",
+                    session_key, unresolved_failed,
+                )
     except Exception:
         logger.debug("Delivery failure alert raised unexpectedly (non-blocking)", exc_info=True)
 
@@ -1523,6 +1594,9 @@ def run_morning_briefing(
             timezone_name=profile.timezone or settings.timezone,
             channel_status=channel_status,
             channel_reason=channel_reason,
+            failure_alerts_enabled=profile.delivery_failure_alerts_enabled,
+            failure_alert_channels=profile.delivery_failure_alert_channels,
+            failure_alert_cooldown_minutes=profile.delivery_failure_alert_cooldown_minutes,
         )
 
     if respect_cadence and delivered_ok and not settings.dry_run:

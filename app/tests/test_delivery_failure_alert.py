@@ -25,6 +25,9 @@ from app.settings import Settings
 def _settings(dry_run: bool = False) -> Settings:
     s = Settings()
     s.dry_run = dry_run
+    s.delivery_failure_alerts_enabled = True
+    s.delivery_failure_alert_channels = "telegram"
+    s.delivery_failure_alert_cooldown_minutes = _ALERT_COOLDOWN_MINUTES
     return s
 
 
@@ -507,3 +510,83 @@ def test_should_emit_atomic_claim_suppresses_second_process_like_call(validation
     assert first_ok is True
     assert second_ok is False
     assert reason == "cooldown"
+
+
+def test_failure_alert_channels_excluding_telegram_do_not_send_telegram(validation_isolated_db):
+    kwargs = _alert_kwargs(
+        settings=Settings(
+            delivery_failure_alerts_enabled=True,
+            delivery_failure_alert_channels="email",
+            delivery_failure_alert_cooldown_minutes=360,
+        )
+    )
+    with patch("app.main._authoritative_success_channels", return_value=set()), \
+         patch("app.main._should_emit_delivery_failure_alert", return_value=(True, "hashx")), \
+         patch("app.main.TelegramMessenger") as mock_tg, \
+         patch("app.main.EmailMessenger") as mock_email:
+        email = MagicMock()
+        email.is_configured.return_value = False
+        mock_email.return_value = email
+        _send_delivery_failure_alert(**kwargs)
+    mock_tg.assert_not_called()
+
+
+def test_failure_alerts_disabled_suppresses_user_facing_alert_but_records_state(validation_isolated_db):
+    today = datetime.now(timezone.utc).date()
+    kwargs = _alert_kwargs(
+        settings=Settings(
+            delivery_failure_alerts_enabled=False,
+            delivery_failure_alert_channels="telegram,email",
+            delivery_failure_alert_cooldown_minutes=360,
+        ),
+        local_date=today,
+    )
+    with patch("app.main._authoritative_success_channels", return_value=set()), \
+         patch("app.main._should_emit_delivery_failure_alert", return_value=(True, "hashx")), \
+         patch("app.main.TelegramMessenger") as mock_tg, \
+         patch("app.main.EmailMessenger") as mock_email:
+        _send_delivery_failure_alert(**kwargs)
+    mock_tg.assert_not_called()
+    mock_email.assert_not_called()
+    with get_session() as s:
+        state = s.query(DeliveryFailureAlertState).filter(
+            DeliveryFailureAlertState.profile_name == "default",
+            DeliveryFailureAlertState.session_key == "morning",
+            DeliveryFailureAlertState.local_date == today,
+        ).first()
+        assert state is not None
+
+
+def test_email_failure_alert_only_sends_when_email_channel_enabled(validation_isolated_db):
+    settings = Settings(
+        delivery_failure_alerts_enabled=True,
+        delivery_failure_alert_channels="email",
+        delivery_failure_alert_cooldown_minutes=360,
+    )
+    kwargs = _alert_kwargs(settings=settings)
+    email = MagicMock()
+    email.is_configured.return_value = True
+    email.send_messages.return_value = True
+    with patch("app.main._authoritative_success_channels", return_value=set()), \
+         patch("app.main._should_emit_delivery_failure_alert", return_value=(True, "hashx")), \
+         patch("app.main.EmailMessenger", return_value=email), \
+         patch("app.main.TelegramMessenger") as mock_tg:
+        _send_delivery_failure_alert(**kwargs)
+    mock_tg.assert_not_called()
+    email.send_messages.assert_called_once()
+
+
+def test_zero_failure_alert_channels_suppresses_user_alert_send(validation_isolated_db):
+    settings = Settings(
+        delivery_failure_alerts_enabled=True,
+        delivery_failure_alert_channels="",
+        delivery_failure_alert_cooldown_minutes=360,
+    )
+    kwargs = _alert_kwargs(settings=settings)
+    with patch("app.main._authoritative_success_channels", return_value=set()), \
+         patch("app.main._should_emit_delivery_failure_alert", return_value=(True, "hashx")), \
+         patch("app.main.TelegramMessenger") as mock_tg, \
+         patch("app.main.EmailMessenger") as mock_email:
+        _send_delivery_failure_alert(**kwargs)
+    mock_tg.assert_not_called()
+    mock_email.assert_not_called()

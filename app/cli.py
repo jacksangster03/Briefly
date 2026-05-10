@@ -1405,6 +1405,10 @@ def schedule_status(ctx, profile_name: str):
     click.echo(f"    suppress_low_materiality: {profile.suppress_low_materiality}")
     click.echo(f"    weekend_mode:             {profile.weekend_mode}")
     click.echo(f"    sunday_news_materiality:  {profile.sunday_news_materiality}")
+    click.echo(f"    failure_alerts_enabled:   {profile.delivery_failure_alerts_enabled}")
+    channels = profile.delivery_failure_alert_channels
+    click.echo(f"    failure_alert_channels:   {', '.join(channels) if channels else '(none)'}")
+    click.echo(f"    failure_alert_cooldown:   {profile.delivery_failure_alert_cooldown_minutes} minutes")
     if local_now.weekday() >= 5:
         weekday_sessions = _allowed_sessions_for_mode("active")
         suppressed = sorted(weekday_sessions - set(allowed))
