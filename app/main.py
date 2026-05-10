@@ -393,6 +393,8 @@ def _send_delivery_failure_alert(
     timezone_name: str,
     channel_status: dict[str, str],
     channel_reason: dict[str, str],
+    allow_stale_historical_alert: bool = False,
+    manual_context_label: str = "",
 ) -> None:
     """Send a Telegram self-alert when the scheduler fails to deliver a session.
 
@@ -403,6 +405,23 @@ def _send_delivery_failure_alert(
         failed = [str(ch).lower() for ch, st in channel_status.items() if st == "failed"]
         sent_ok = [ch for ch, st in channel_status.items() if st == "sent"]
         if not failed:
+            return
+        # Guardrail: suppress user-facing alerts for stale historical sessions
+        # during automatic scheduler runs. We still log these internally.
+        try:
+            tz = ZoneInfo(timezone_name or "Europe/Madrid")
+        except Exception:
+            tz = ZoneInfo("Europe/Madrid")
+        today_local = datetime.now(timezone.utc).astimezone(tz).date()
+        is_stale_historical = local_date < today_local
+        if is_stale_historical and not allow_stale_historical_alert:
+            logger.info(
+                "Suppressed stale historical delivery failure alert | profile=%s session=%s local_date=%s today=%s",
+                profile_name,
+                session_key,
+                local_date,
+                today_local,
+            )
             return
         requested_channels = {str(ch).lower() for ch in channel_status.keys()}
         success_channels = _authoritative_success_channels(
@@ -452,10 +471,15 @@ def _send_delivery_failure_alert(
                 f"To resend immediately:\n"
                 f"  python -m app.cli session-send --session {session_key} --force"
             )
+        context_line = ""
+        if is_stale_historical and allow_stale_historical_alert:
+            label = (manual_context_label or "manual backfill/recovery context").strip()
+            context_line = f"Context: historical session alert allowed ({label}).\n\n"
         alert_text = (
             "[DELIVERY FAILURE] Briefly scheduler alert\n\n"
             f"Session: {session_title} ({session_key})\n"
             f"Date: {local_date.isoformat()}  Generated: {generated_at_str} {timezone_name}\n\n"
+            f"{context_line}"
             f"Failed channels:\n{failed_lines}\n\n"
             f"Sent channels:\n{sent_lines}\n\n"
             f"{retry_lines}".rstrip()

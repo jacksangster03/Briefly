@@ -29,12 +29,13 @@ def _settings(dry_run: bool = False) -> Settings:
 
 
 def _alert_kwargs(**overrides):
+    today = datetime.now(timezone.utc).date()
     base = dict(
         settings=_settings(),
         profile_name="default",
         session_key="morning",
         session_title="Morning Brief",
-        local_date=date(2026, 5, 6),
+        local_date=today,
         generated_at_str="2026-05-06 07:30",
         timezone_name="Europe/Madrid",
         channel_status={"telegram": "failed", "email": "skipped"},
@@ -321,6 +322,62 @@ class TestSendDeliveryFailureAlert:
             _send_delivery_failure_alert(**kwargs)
         mock_tg.assert_not_called()
 
+    def test_stale_historical_failure_does_not_alert(self):
+        make_cm, _ = self._mock_db_session()
+        mock_messenger = MagicMock()
+        mock_messenger.is_configured.return_value = True
+        mock_messenger.send_messages.return_value = True
+        kwargs = _alert_kwargs(local_date=date(2026, 5, 6), timezone_name="Europe/Madrid")
+        fake_now = datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc)
+        with patch("app.main.datetime") as mock_dt, \
+             patch("app.main._authoritative_success_channels", return_value=set()), \
+             patch("app.main.get_session", side_effect=make_cm), \
+             patch("app.main.TelegramMessenger", return_value=mock_messenger):
+            mock_dt.now.return_value = fake_now
+            mock_dt.combine = datetime.combine
+            _send_delivery_failure_alert(**kwargs)
+        mock_messenger.send_messages.assert_not_called()
+
+    def test_current_day_failure_can_alert_once(self):
+        make_cm, _ = self._mock_db_session()
+        mock_messenger = MagicMock()
+        mock_messenger.is_configured.return_value = True
+        mock_messenger.send_messages.return_value = True
+        kwargs = _alert_kwargs(local_date=date(2026, 5, 9), timezone_name="Europe/Madrid")
+        fake_now = datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc)
+        with patch("app.main.datetime") as mock_dt, \
+             patch("app.main._authoritative_success_channels", return_value=set()), \
+             patch("app.main._should_emit_delivery_failure_alert", return_value=(True, "hashx")), \
+             patch("app.main.get_session", side_effect=make_cm), \
+             patch("app.main.TelegramMessenger", return_value=mock_messenger):
+            mock_dt.now.return_value = fake_now
+            mock_dt.combine = datetime.combine
+            _send_delivery_failure_alert(**kwargs)
+        mock_messenger.send_messages.assert_called_once()
+
+    def test_manual_backfill_context_can_allow_stale_alert_with_label(self):
+        make_cm, _ = self._mock_db_session()
+        mock_messenger = MagicMock()
+        mock_messenger.is_configured.return_value = True
+        mock_messenger.send_messages.return_value = True
+        kwargs = _alert_kwargs(local_date=date(2026, 5, 6), timezone_name="Europe/Madrid")
+        fake_now = datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc)
+        with patch("app.main.datetime") as mock_dt, \
+             patch("app.main._authoritative_success_channels", return_value=set()), \
+             patch("app.main._should_emit_delivery_failure_alert", return_value=(True, "hashx")), \
+             patch("app.main.get_session", side_effect=make_cm), \
+             patch("app.main.TelegramMessenger", return_value=mock_messenger):
+            mock_dt.now.return_value = fake_now
+            mock_dt.combine = datetime.combine
+            _send_delivery_failure_alert(
+                **kwargs,
+                allow_stale_historical_alert=True,
+                manual_context_label="manual force replay",
+            )
+        sent_text = mock_messenger.send_messages.call_args[0][0][0]
+        assert "historical session alert allowed" in sent_text
+        assert "manual force replay" in sent_text
+
 
 def test_should_emit_suppresses_on_recent_failed_alert_attempt(validation_isolated_db):
     now = datetime.now(timezone.utc)
@@ -356,6 +413,7 @@ def test_should_emit_suppresses_on_recent_failed_alert_attempt(validation_isolat
 
 
 def test_send_failure_alert_records_state_even_when_alert_send_fails(validation_isolated_db):
+    today = datetime.now(timezone.utc).date()
     class _FailingTelegram:
         def __init__(self, _settings):
             self.last_error = "simulated alert transport fail"
@@ -367,6 +425,7 @@ def test_send_failure_alert_records_state_even_when_alert_send_fails(validation_
             return False
 
     kwargs = _alert_kwargs(
+        local_date=today,
         channel_status={"telegram": "failed", "email": "failed"},
         channel_reason={"telegram": "tg fail", "email": "smtp fail"},
     )
@@ -378,13 +437,14 @@ def test_send_failure_alert_records_state_even_when_alert_send_fails(validation_
         state = s.query(DeliveryFailureAlertState).filter(
             DeliveryFailureAlertState.profile_name == "default",
             DeliveryFailureAlertState.session_key == "morning",
-            DeliveryFailureAlertState.local_date == date(2026, 5, 6),
+            DeliveryFailureAlertState.local_date == today,
         ).first()
         assert state is not None
         assert state.alert_count >= 1
 
 
 def test_send_failure_alert_dedupes_within_cooldown(validation_isolated_db):
+    today = datetime.now(timezone.utc).date()
     calls: list[str] = []
 
     class _OkTelegram:
@@ -399,6 +459,7 @@ def test_send_failure_alert_dedupes_within_cooldown(validation_isolated_db):
             return True
 
     kwargs = _alert_kwargs(
+        local_date=today,
         channel_status={"telegram": "failed", "email": "failed"},
         channel_reason={"telegram": "tg fail", "email": "smtp fail"},
     )
