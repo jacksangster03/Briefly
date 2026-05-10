@@ -535,7 +535,7 @@ class MorningBriefingGenerator:
             session_key=briefing.session_key,
             candidate_events=healthcare_candidates,
         )
-        if bool(self.profile.delivery.get("include_macro_policy_watch", False)):
+        if bool(self.profile.delivery.get("include_macro_policy_watch", False)) and (briefing.session_key or "morning").lower() == "morning":
             try:
                 macro_payload = build_macro_policy_dashboard(
                     profile=self.profile,

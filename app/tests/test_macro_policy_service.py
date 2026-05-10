@@ -254,14 +254,24 @@ def test_macro_calendar_loader_handles_missing_and_malformed(tmp_path):
 def test_macro_policy_watch_summary_handles_partial():
     summary = build_macro_policy_watch_summary(
         {
-            "rates_yield_curve_panel": {"curve_shape": "mixed curve", "rate_impulse": "neutral impulse"},
-            "inflation_tracker": {"series": {"us_cpi": {"value": None}}},
-            "labour_tracker": {"series": {"us_unemployment_rate": {"value": 4.1, "change": 0.0}}},
-            "macro_catalyst_calendar": {"events": [{"title": "Fed Meeting", "date": "2026-06-17"}]},
+            "policy_signals": {
+                "fed_bias": {"label": "hold"},
+                "ecb_bias": {"label": "uncertain", "confidence": "low"},
+                "inflation_pressure": {"label": "uncertain"},
+                "labour_pressure": {"label": "balanced"},
+                "rates_pressure": {"label": "neutral"},
+                "regions": {
+                    "uk": {"status": "partial"},
+                    "spain": {"status": "partial"},
+                    "japan": {"status": "unavailable"},
+                    "china": {"status": "unavailable"},
+                },
+                "portfolio_implications": ["mixed macro posture"],
+            }
         }
     )
-    assert "Macro Policy Watch:" in summary
-    assert "Fed Meeting" in summary
+    assert "MACRO POLICY WATCH" in summary
+    assert "Fed: hold" in summary
 
 
 class _BoomMacroService:

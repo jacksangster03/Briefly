@@ -129,10 +129,23 @@
             {% for rkey, r in sig.get("regions", {}).items() %}
             <div class="row">
               <div class="name">{{ r.get("region_label", rkey|upper) }}</div>
-              <div class="meta">Status: {{ r.get("status", "unavailable") }}</div>
+              <div class="meta">Scope: {{ r.get("scope", "regional") }} · Status: {{ r.get("status", "unavailable") }}</div>
+              {% if r.get("scope") == "country_lens" %}
+              <div class="meta">Lens: {{ r.get("country_lens", {}).get("label", "country_macro_lens") }} ({{ r.get("country_lens", {}).get("confidence", "low") }})</div>
+              {% if r.get("policy_anchor") %}
+              <div class="meta">Anchor: {{ r.get("policy_anchor") }}</div>
+              {% endif %}
+              {% if r.get("country_lens", {}).get("missing") %}
+              <div class="meta">Missing: {{ r.get("country_lens", {}).get("missing", []) | join(", ") }}</div>
+              {% endif %}
+              {% else %}
               <div class="meta">Bias: {{ r.get("policy_bias", {}).get("label", "uncertain") }} ({{ r.get("policy_bias", {}).get("confidence", "low") }})</div>
               {% if r.get("policy_bias", {}).get("missing") %}
               <div class="meta">Missing: {{ r.get("policy_bias", {}).get("missing", []) | join(", ") }}</div>
+              {% endif %}
+              {% endif %}
+              {% if r.get("drivers") %}
+              <div class="meta">Driver: {{ r.get("drivers", [])[0] }}</div>
               {% endif %}
             </div>
             {% endfor %}

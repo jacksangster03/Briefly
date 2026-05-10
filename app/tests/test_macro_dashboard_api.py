@@ -77,6 +77,8 @@ def test_macro_dashboard_ui_route_renders(validation_test_settings, monkeypatch)
     assert "Regional Coverage" in html
     assert "United Kingdom" in html
     assert "Spain" in html
+    assert "Japan" in html
+    assert "China" in html
     assert "US CPI YoY" in html
     assert "fred_units_pc1" in html
     assert "%" in html

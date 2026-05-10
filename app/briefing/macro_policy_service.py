@@ -95,23 +95,37 @@ def build_macro_policy_watch_summary(payload: dict[str, Any]) -> str:
     """Compact deterministic summary string for optional briefing inclusion."""
     if not payload:
         return "Macro Policy Watch unavailable."
-    rates = payload.get("rates_yield_curve_panel", {}) or {}
-    inflation = payload.get("inflation_tracker", {}) or {}
-    labour = payload.get("labour_tracker", {}) or {}
-    calendar = payload.get("macro_catalyst_calendar", {}) or {}
-    curve = str(rates.get("curve_shape", "mixed curve"))
-    impulse = str(rates.get("rate_impulse", "neutral rates impulse"))
-    cpi = _value_line(inflation.get("series", {}).get("us_cpi"))
-    unrate = _value_line(labour.get("series", {}).get("us_unemployment_rate"))
-    next_evt = ""
-    events = list(calendar.get("events", []) or [])
-    if events:
-        evt = events[0]
-        next_evt = f"Next catalyst: {evt.get('title', 'macro event')} ({evt.get('date', '')})."
-    return (
-        f"Macro Policy Watch: {curve}; {impulse}. "
-        f"US CPI {cpi}; US unemployment {unrate}. "
-        f"{next_evt}".strip()
+    sig = payload.get("policy_signals", {}) or {}
+    if not sig:
+        return "MACRO POLICY WATCH\nSignal payload unavailable (partial data).\nDeterministic signal, not a forecast."
+
+    fed = ((sig.get("fed_bias") or {}).get("label") or "uncertain").replace("_", "-")
+    ecb = ((sig.get("ecb_bias") or {}).get("label") or "uncertain").replace("_", "-")
+    ecb_conf = (sig.get("ecb_bias") or {}).get("confidence") or "low"
+    inflation = ((sig.get("inflation_pressure") or {}).get("label") or "uncertain").replace("_", "-")
+    labour = ((sig.get("labour_pressure") or {}).get("label") or "uncertain").replace("_", "-")
+    rates = ((sig.get("rates_pressure") or {}).get("label") or "uncertain").replace("_", "-")
+
+    regions = sig.get("regions", {}) or {}
+    uk_status = (regions.get("uk") or {}).get("status", "unavailable")
+    spain_status = (regions.get("spain") or {}).get("status", "partial")
+    jp_status = (regions.get("japan") or {}).get("status", "unavailable")
+    cn_status = (regions.get("china") or {}).get("status", "unavailable")
+
+    portfolio_line = "Portfolio: keep sizing disciplined; monitor duration and valuation-sensitive growth."
+    implications = list(sig.get("portfolio_implications", []) or [])
+    if implications:
+        portfolio_line = f"Portfolio: {implications[0]}"
+
+    return "\n".join(
+        [
+            "MACRO POLICY WATCH",
+            f"Fed: {fed} · ECB: {ecb} ({ecb_conf} confidence)",
+            f"Inflation: {inflation} · Labour: {labour} · Rates: {rates}",
+            f"Regional: UK {uk_status} · Spain ECB-linked ({spain_status}) · Japan {jp_status} · China {cn_status}",
+            portfolio_line,
+            "Deterministic signal, not a forecast or market-implied probability.",
+        ]
     )
 
 
@@ -124,14 +138,30 @@ def _build_central_bank_policy(svc: MacroDataService) -> dict[str, Any]:
     banks = {
         "fed": _series_payload(fed, label="Fed policy rate (effective)"),
         "ecb": _series_payload(ecb, label="ECB deposit facility"),
-        "boe": _placeholder("not_wired"),
-        "boj": _placeholder("not_wired"),
+        "boe": _series_payload(
+            _fred_point(svc, "IR3TIB01GBM156N"),
+            label="BoE policy proxy (UK 3M interbank)",
+            unit="%",
+            value_kind="rate_level",
+        ),
+        "boj": _series_payload(
+            _fred_point(svc, "IRSTCB01JPM156N"),
+            label="BoJ policy proxy (short-term rate)",
+            unit="%",
+            value_kind="rate_level",
+        ),
+        "pboc": _series_payload(
+            _fred_point(svc, "IRSTCB01CNM156N"),
+            label="PBoC policy proxy (short-term rate)",
+            unit="%",
+            value_kind="rate_level",
+        ),
         "snb": _placeholder("not_wired"),
     }
     return {
         "status": _aggregate_status([str(v.get("status", "unavailable")) for v in banks.values()]),
         "series": banks,
-        "data_basis": "Fed from FRED; ECB from ECB SDMX; BoE/BoJ/SNB placeholders in Phase 1",
+        "data_basis": "Fed from FRED; ECB from ECB SDMX; UK/BoJ/PBoC policy proxies via FRED when available; SNB placeholder.",
     }
 
 
@@ -181,6 +211,27 @@ def _build_inflation_tracker(svc: MacroDataService) -> dict[str, Any]:
             yoy_label="UK CPI YoY",
             raw_label="UK CPI index level",
         ),
+        "spain_cpi": _inflation_series_payload(
+            transformed=_fred_point(svc, "ESPCPIALLMINMEI", units="pc1"),
+            raw=_fred_point(svc, "ESPCPIALLMINMEI"),
+            local_yoy=_fred_local_yoy_point(svc, "ESPCPIALLMINMEI"),
+            yoy_label="Spain CPI YoY",
+            raw_label="Spain CPI index level",
+        ),
+        "japan_cpi": _inflation_series_payload(
+            transformed=_fred_point(svc, "JPNCPIALLMINMEI", units="pc1"),
+            raw=_fred_point(svc, "JPNCPIALLMINMEI"),
+            local_yoy=_fred_local_yoy_point(svc, "JPNCPIALLMINMEI"),
+            yoy_label="Japan CPI YoY",
+            raw_label="Japan CPI index level",
+        ),
+        "china_cpi": _inflation_series_payload(
+            transformed=_fred_point(svc, "CHNCPIALLMINMEI", units="pc1"),
+            raw=_fred_point(svc, "CHNCPIALLMINMEI"),
+            local_yoy=_fred_local_yoy_point(svc, "CHNCPIALLMINMEI"),
+            yoy_label="China CPI YoY",
+            raw_label="China CPI index level",
+        ),
     }
     return {
         "status": _aggregate_status([str(v.get("status", "unavailable")) for v in series.values()]),
@@ -224,6 +275,36 @@ def _build_labour_tracker(svc: MacroDataService) -> dict[str, Any]:
             label="US JOLTS openings level",
             unit="thousands",
             value_kind="level",
+        ),
+        "uk_unemployment_rate": _series_payload(
+            _fred_point(svc, "LRHUTTTTGBM156S"),
+            label="UK unemployment rate",
+            unit="%",
+            value_kind="rate_level",
+        ),
+        "euro_area_unemployment_rate": _series_payload(
+            _fred_point(svc, "LRHUTTTTEZM156S"),
+            label="Euro area unemployment rate",
+            unit="%",
+            value_kind="rate_level",
+        ),
+        "spain_unemployment_rate": _series_payload(
+            _fred_point(svc, "LRHUTTTTESM156S"),
+            label="Spain unemployment rate",
+            unit="%",
+            value_kind="rate_level",
+        ),
+        "japan_unemployment_rate": _series_payload(
+            _fred_point(svc, "LRHUTTTTJPM156S"),
+            label="Japan unemployment rate",
+            unit="%",
+            value_kind="rate_level",
+        ),
+        "china_unemployment_rate": _series_payload(
+            _fred_point(svc, "LRHUTTTTCNM156S"),
+            label="China unemployment rate",
+            unit="%",
+            value_kind="rate_level",
         ),
     }
     return {

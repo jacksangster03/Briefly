@@ -403,6 +403,8 @@ def _build_region_signals(
 ) -> dict[str, Any]:
     inflation_series = ((payload.get("inflation_tracker") or {}).get("series") or {})
     labour_series = ((payload.get("labour_tracker") or {}).get("series") or {})
+    policy_series = ((payload.get("central_bank_policy") or {}).get("series") or {})
+    rates_series = ((payload.get("rates_yield_curve_panel") or {}).get("series") or {})
 
     us = {
         "region_key": "us",
@@ -411,7 +413,15 @@ def _build_region_signals(
         "central_bank": "Fed",
         "status": fed_bias.get("status", "partial"),
         "policy_bias": _strip_status(fed_bias),
+        "inflation_pressure": {"label": "linked_global", "drivers": ["Uses US CPI/Core CPI/PCE/Core PCE deterministic stack."], "missing": []},
+        "labour_pressure": {"label": "linked_global", "drivers": ["Uses US unemployment/claims/wages deterministic stack."], "missing": []},
+        "rates_pressure": {"label": "linked_global", "drivers": ["Uses US Treasury 2Y/10Y moves."], "missing": []},
+        "drivers": list((_strip_status(fed_bias).get("drivers") or [])[:3]),
+        "missing": list((_strip_status(fed_bias).get("missing") or [])[:6]),
+        "risks": list((_strip_status(fed_bias).get("risks") or [])[:3]),
+        "data_basis": "US macro deterministic stack (FRED + Treasury yields).",
     }
+
     eurozone = {
         "region_key": "eurozone",
         "region_label": "Eurozone",
@@ -419,46 +429,56 @@ def _build_region_signals(
         "central_bank": "ECB",
         "status": ecb_bias.get("status", "partial"),
         "policy_bias": _strip_status(ecb_bias),
+        "inflation_pressure": {"label": "regional", "drivers": ["Eurozone HICP and ECB policy anchor."], "missing": []},
+        "labour_pressure": {"label": "regional", "drivers": ["Euro area unemployment when available."], "missing": []},
+        "rates_pressure": {"label": "regional", "drivers": ["ECB rate anchor; market rates proxies limited in Phase 1."], "missing": ["eurozone_rates_proxy"]},
+        "drivers": list((_strip_status(ecb_bias).get("drivers") or [])[:3]),
+        "missing": list((_strip_status(ecb_bias).get("missing") or [])[:6]),
+        "risks": list((_strip_status(ecb_bias).get("risks") or [])[:3]),
+        "data_basis": "Eurozone deterministic stack (ECB + Eurozone HICP + Euro labour when available).",
     }
 
-    placeholders = {
-        "uk": _region_placeholder("uk", "United Kingdom", "BoE"),
-        "japan": _region_placeholder("japan", "Japan", "BoJ"),
-        "china": _region_placeholder("china", "China", "PBoC"),
-    }
-
-    spain_missing: list[str] = []
-    hicp = _as_float((inflation_series.get("eurozone_hicp") or {}).get("value"))
-    if hicp is None:
-        spain_missing.append("eurozone_hicp_proxy")
-    ibex = _as_float((labour_series.get("spain_ibex_proxy") or {}).get("value"))
-    if ibex is None:
-        spain_missing.append("spain_market_proxy")
-    spain = {
-        "region_key": "spain",
-        "region_label": "Spain",
-        "scope": "country_lens",
-        "status": "partial",
-        "policy_bias": {
-            "label": "uncertain",
-            "confidence": "low",
-            "drivers": [
-                "Spain is modeled as a country lens inside Eurozone policy, not a standalone central bank bias."
-            ],
-            "missing": spain_missing or ["country_specific_policy_inputs"],
-            "risks": ["Use Eurozone ECB signal as primary policy anchor for Spain in Phase 1."],
-        },
-    }
-
-    regions: dict[str, Any] = {
+    uk = _build_uk_region(
+        inflation_series=inflation_series,
+        labour_series=labour_series,
+        policy_series=policy_series,
+    )
+    spain = _build_spain_region(
+        inflation_series=inflation_series,
+        labour_series=labour_series,
+        rates_series=rates_series,
+        ecb_bias=_strip_status(ecb_bias),
+    )
+    japan = _build_asia_central_bank_region(
+        key="japan",
+        label="Japan",
+        central_bank="BoJ",
+        inflation_series_key="japan_cpi",
+        labour_series_key="japan_unemployment_rate",
+        policy_series_key="boj",
+        inflation_series=inflation_series,
+        labour_series=labour_series,
+        policy_series=policy_series,
+    )
+    china = _build_asia_central_bank_region(
+        key="china",
+        label="China",
+        central_bank="PBoC",
+        inflation_series_key="china_cpi",
+        labour_series_key="china_unemployment_rate",
+        policy_series_key="pboc",
+        inflation_series=inflation_series,
+        labour_series=labour_series,
+        policy_series=policy_series,
+    )
+    return {
         "us": us,
         "eurozone": eurozone,
-        "uk": placeholders["uk"],
-        "japan": placeholders["japan"],
-        "china": placeholders["china"],
+        "uk": uk,
+        "japan": japan,
+        "china": china,
         "spain": spain,
     }
-    return regions
 
 
 def _region_placeholder(key: str, label: str, central_bank: str) -> dict[str, Any]:
@@ -475,6 +495,210 @@ def _region_placeholder(key: str, label: str, central_bank: str) -> dict[str, An
             "missing": [f"{key}_inflation", f"{key}_labour", f"{key}_policy_rate"],
             "risks": ["Placeholder only; no regional deterministic bias yet."],
         },
+    }
+
+
+def _build_uk_region(
+    *,
+    inflation_series: dict[str, Any],
+    labour_series: dict[str, Any],
+    policy_series: dict[str, Any],
+) -> dict[str, Any]:
+    uk_cpi = _as_float((inflation_series.get("uk_cpi") or {}).get("value"))
+    uk_unrate = _as_float((labour_series.get("uk_unemployment_rate") or {}).get("value"))
+    boe_rate = _as_float((policy_series.get("boe") or {}).get("value"))
+    missing: list[str] = []
+    if uk_cpi is None:
+        missing.append("uk_cpi")
+    if uk_unrate is None:
+        missing.append("uk_unemployment_rate")
+    if boe_rate is None:
+        missing.append("boe_policy_rate")
+    if uk_cpi is None and uk_unrate is None and boe_rate is None:
+        return _region_placeholder("uk", "United Kingdom", "BoE")
+
+    inflation_label = "uncertain"
+    inflation_drivers: list[str] = []
+    if uk_cpi is not None:
+        if uk_cpi <= 2.4:
+            inflation_label = "easing"
+        elif uk_cpi >= 3.0:
+            inflation_label = "reaccelerating"
+        else:
+            inflation_label = "sticky"
+        inflation_drivers.append(f"UK CPI at {uk_cpi:.1f}% YoY.")
+    labour_label = "uncertain"
+    labour_drivers: list[str] = []
+    if uk_unrate is not None:
+        if uk_unrate >= 4.8:
+            labour_label = "cooling"
+        elif uk_unrate <= 4.0:
+            labour_label = "tight"
+        else:
+            labour_label = "balanced"
+        labour_drivers.append(f"UK unemployment at {uk_unrate:.1f}%.")
+    rates_label = "uncertain"
+    rates_drivers: list[str] = []
+    if boe_rate is not None:
+        if boe_rate >= 4.5:
+            rates_label = "tightening"
+        elif boe_rate <= 2.5:
+            rates_label = "easing"
+        else:
+            rates_label = "neutral"
+        rates_drivers.append(f"BoE policy proxy at {boe_rate:.2f}%.")
+
+    drivers: list[str] = []
+    if uk_cpi is not None and uk_cpi <= 2.4:
+        if uk_unrate is not None:
+            drivers.append("UK disinflation with softer labour supports easing bias.")
+        else:
+            drivers.append("UK disinflation supports easing bias, but labour confirmation is unavailable.")
+        policy_label = "cut_leaning"
+    elif uk_cpi is not None and uk_cpi >= 3.0 and uk_unrate is not None and uk_unrate <= 4.0 and boe_rate is not None and boe_rate >= 4.5:
+        drivers.append("UK inflation pressure with tighter labour backdrop supports tighter bias.")
+        policy_label = "hike_leaning"
+    elif uk_cpi is not None:
+        drivers.append("UK inputs are mixed; deterministic hold bias.")
+        policy_label = "hold"
+    else:
+        policy_label = "uncertain"
+
+    confidence = "high" if not missing else ("medium" if len(missing) == 1 else "low")
+    status = "ok" if not missing else "partial"
+    return {
+        "region_key": "uk",
+        "region_label": "United Kingdom",
+        "scope": "central_bank",
+        "central_bank": "BoE",
+        "status": status,
+        "policy_bias": {
+            "label": policy_label,
+            "confidence": confidence,
+            "drivers": drivers[:4],
+            "missing": missing[:6],
+            "risks": ["Deterministic bias, not a forecast or implied probability."],
+        },
+        "inflation_pressure": {"label": inflation_label, "drivers": inflation_drivers[:3], "missing": ["uk_cpi"] if uk_cpi is None else []},
+        "labour_pressure": {"label": labour_label, "drivers": labour_drivers[:3], "missing": ["uk_unemployment_rate"] if uk_unrate is None else []},
+        "rates_pressure": {"label": rates_label, "drivers": rates_drivers[:3], "missing": ["boe_policy_rate"] if boe_rate is None else []},
+        "drivers": drivers[:4],
+        "missing": missing[:6],
+        "risks": ["UK signal uses UK-specific inputs only; US data is not used as direct UK driver."],
+        "data_basis": "UK CPI + UK unemployment + BoE policy proxy when available.",
+    }
+
+
+def _build_spain_region(
+    *,
+    inflation_series: dict[str, Any],
+    labour_series: dict[str, Any],
+    rates_series: dict[str, Any],
+    ecb_bias: dict[str, Any],
+) -> dict[str, Any]:
+    spain_cpi = _as_float((inflation_series.get("spain_cpi") or {}).get("value"))
+    spain_unrate = _as_float((labour_series.get("spain_unemployment_rate") or {}).get("value"))
+    spain_rates = _as_float((rates_series.get("spain_10y") or {}).get("value"))
+
+    missing: list[str] = []
+    if spain_cpi is None:
+        missing.append("spain_cpi")
+    if spain_unrate is None:
+        missing.append("spain_unemployment_rate")
+    if spain_rates is None:
+        missing.append("spain_rates_proxy")
+
+    drivers: list[str] = [
+        "Spain is modeled as a country macro lens under the ECB policy anchor (not a standalone central bank bias)."
+    ]
+    if spain_cpi is not None:
+        drivers.append(f"Spain CPI at {spain_cpi:.1f}% YoY.")
+    if spain_unrate is not None:
+        drivers.append(f"Spain unemployment at {spain_unrate:.1f}%.")
+    if spain_cpi is None and spain_unrate is None:
+        drivers.append("Spain-specific inflation/labour fields are unavailable; using Eurozone policy anchor context.")
+
+    lens_confidence = "high" if (spain_cpi is not None and spain_unrate is not None) else "low"
+    status = "ok" if not missing else "partial"
+    return {
+        "region_key": "spain",
+        "region_label": "Spain",
+        "scope": "country_lens",
+        "policy_anchor": "ECB",
+        "status": status,
+        "country_lens": {
+            "label": "country_macro_lens",
+            "confidence": lens_confidence,
+            "drivers": drivers[:4],
+            "missing": missing[:6],
+            "risks": ["Country lens only; refer to ECB for policy-bias anchor."],
+        },
+        "inflation_pressure": {"label": "uncertain" if spain_cpi is None else ("reaccelerating" if spain_cpi >= 3.0 else "easing"), "drivers": drivers[:2], "missing": ["spain_cpi"] if spain_cpi is None else []},
+        "labour_pressure": {"label": "uncertain" if spain_unrate is None else ("cooling" if spain_unrate >= 11.5 else "balanced"), "drivers": drivers[:3], "missing": ["spain_unemployment_rate"] if spain_unrate is None else []},
+        "rates_pressure": {"label": "uncertain", "drivers": ["Spain rates proxy limited in Phase 1."], "missing": ["spain_rates_proxy"] if spain_rates is None else []},
+        "drivers": drivers[:4],
+        "missing": missing[:6],
+        "risks": ["Uses ECB anchor when Spain-specific fields are partial."],
+        "data_basis": "Spain CPI/unemployment when available + ECB anchor.",
+    }
+
+
+def _build_asia_central_bank_region(
+    *,
+    key: str,
+    label: str,
+    central_bank: str,
+    inflation_series_key: str,
+    labour_series_key: str,
+    policy_series_key: str,
+    inflation_series: dict[str, Any],
+    labour_series: dict[str, Any],
+    policy_series: dict[str, Any],
+) -> dict[str, Any]:
+    cpi = _as_float((inflation_series.get(inflation_series_key) or {}).get("value"))
+    unrate = _as_float((labour_series.get(labour_series_key) or {}).get("value"))
+    policy_rate = _as_float((policy_series.get(policy_series_key) or {}).get("value"))
+    missing: list[str] = []
+    if cpi is None:
+        missing.append(f"{key}_cpi")
+    if unrate is None:
+        missing.append(f"{key}_unemployment_rate")
+    if policy_rate is None:
+        missing.append(f"{key}_policy_rate")
+    if cpi is None and unrate is None and policy_rate is None:
+        return _region_placeholder(key, label, central_bank)
+
+    drivers: list[str] = []
+    if cpi is not None:
+        drivers.append(f"{label} CPI at {cpi:.1f}% YoY.")
+    if unrate is not None:
+        drivers.append(f"{label} unemployment at {unrate:.1f}%.")
+    if policy_rate is not None:
+        drivers.append(f"{central_bank} policy proxy at {policy_rate:.2f}%.")
+
+    policy_label = "hold" if cpi is not None else "uncertain"
+    status = "ok" if not missing else "partial"
+    confidence = "high" if not missing else "low"
+    return {
+        "region_key": key,
+        "region_label": label,
+        "scope": "central_bank",
+        "central_bank": central_bank,
+        "status": status,
+        "policy_bias": {
+            "label": policy_label,
+            "confidence": confidence,
+            "drivers": drivers[:4] or [f"{label} inputs remain partial in Phase 1."],
+            "missing": missing[:6],
+            "risks": ["Deterministic regional lens; partial data can reduce confidence."],
+        },
+        "inflation_pressure": {"label": "uncertain" if cpi is None else ("reaccelerating" if cpi >= 3.0 else "easing"), "drivers": drivers[:2], "missing": [f"{key}_cpi"] if cpi is None else []},
+        "labour_pressure": {"label": "uncertain" if unrate is None else ("cooling" if unrate >= 4.0 else "balanced"), "drivers": drivers[:3], "missing": [f"{key}_unemployment_rate"] if unrate is None else []},
+        "rates_pressure": {"label": "uncertain" if policy_rate is None else "neutral", "drivers": drivers[:3], "missing": [f"{key}_policy_rate"] if policy_rate is None else []},
+        "drivers": drivers[:4],
+        "missing": missing[:6],
+        "risks": ["No implied probabilities; not a forecast."],
+        "data_basis": f"{label} CPI/labour/policy proxies where available.",
     }
 
 

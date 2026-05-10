@@ -99,7 +99,7 @@ def test_regions_schema_includes_placeholders_and_spain_country_lens():
     assert regions["japan"]["status"] == "unavailable"
     assert regions["china"]["status"] == "unavailable"
     assert regions["spain"]["scope"] == "country_lens"
-    assert regions["spain"]["policy_bias"]["label"] == "uncertain"
+    assert regions["spain"]["country_lens"]["label"] == "country_macro_lens"
 
 
 def test_backward_compatibility_top_level_bias_fields_remain():
@@ -108,3 +108,43 @@ def test_backward_compatibility_top_level_bias_fields_remain():
     assert "ecb_bias" in sig
     assert "regions" in sig
     assert "global_summary" in sig
+
+
+def test_uk_region_uses_uk_inputs_and_not_us_as_direct_driver():
+    payload = _payload(cpi=3.9, core=4.0, pce=3.8, core_pce=3.9, unrate=3.6, claims=210000, wage=4.2)
+    payload["inflation_tracker"]["series"]["uk_cpi"] = {"value": 2.2, "status": "ok"}
+    payload["labour_tracker"]["series"]["uk_unemployment_rate"] = {"value": 4.9, "status": "ok"}
+    payload["central_bank_policy"]["series"]["boe"] = {"value": 4.5, "status": "ok"}
+    sig = build_policy_signals(payload)
+    uk = sig["regions"]["uk"]
+    assert uk["status"] in {"ok", "partial"}
+    joined = " ".join(uk.get("drivers", [])).lower()
+    assert "uk" in joined
+    assert "us unemployment" not in joined
+
+
+def test_uk_partial_when_labour_and_policy_missing():
+    payload = _payload()
+    payload["inflation_tracker"]["series"]["uk_cpi"] = {"value": 2.1, "status": "ok"}
+    payload["labour_tracker"]["series"].pop("uk_unemployment_rate", None)
+    payload["central_bank_policy"]["series"].pop("boe", None)
+    sig = build_policy_signals(payload)
+    uk = sig["regions"]["uk"]
+    assert uk["status"] == "partial"
+    assert "uk_unemployment_rate" in uk["missing"]
+    assert "boe_policy_rate" in uk["missing"]
+
+
+def test_spain_is_country_lens_with_ecb_anchor():
+    sig = build_policy_signals(_payload())
+    spain = sig["regions"]["spain"]
+    assert spain["scope"] == "country_lens"
+    assert spain["policy_anchor"] == "ECB"
+    assert "policy_bias" not in spain
+    assert spain["country_lens"]["label"] == "country_macro_lens"
+
+
+def test_japan_china_placeholders_do_not_crash_and_are_explicit():
+    sig = build_policy_signals(_payload())
+    assert sig["regions"]["japan"]["status"] in {"unavailable", "partial", "ok"}
+    assert sig["regions"]["china"]["status"] in {"unavailable", "partial", "ok"}

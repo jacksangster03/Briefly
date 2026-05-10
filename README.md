@@ -887,8 +887,9 @@ Deterministic Policy Signal conventions:
   - ECB driver text avoids claiming labour softness/tightness when Euro-area labour confirmation is missing.
 - Regional signal scaffolding is included for expansion:
   - `regions.us` and `regions.eurozone` are active deterministic tracks.
-  - `regions.uk`, `regions.japan`, and `regions.china` are explicit Phase 1 placeholders (`unavailable` / `not_wired`).
-  - `regions.spain` is a country lens under Eurozone policy context, not a standalone central bank track.
+  - `regions.uk` now uses UK CPI + UK labour + BoE policy proxy when available; otherwise it degrades to partial with explicit missing fields.
+  - `regions.spain` is a country lens (ECB-anchored), not a standalone central bank bias.
+  - `regions.japan` and `regions.china` attempt deterministic public-data inputs and degrade to explicit unavailable/partial when data is missing.
   - Backward compatibility is preserved with top-level `fed_bias` and `ecb_bias` fields.
 - Signal labels are bias descriptors (`cut_leaning`, `hold`, `hike_leaning`, `uncertain`) and pressure states (`easing`, `sticky`, `reaccelerating`, `cooling`, `tight`, `neutral`).
 - Each signal includes:
@@ -911,7 +912,8 @@ Optional briefing helper:
 
 - Preference key: `briefing.include_macro_policy_watch`
 - Default: `false`
-- When enabled, Briefly adds a compact deterministic **Macro Policy Watch** line to briefing output
+- When enabled, Briefly adds a compact deterministic **Macro Policy Watch** block to Morning Briefing output (Telegram/email formatting paths).
+- Non-morning sessions stay unchanged by default.
 - Default briefing output remains unchanged unless the preference is enabled
 
 Operational resilience:
