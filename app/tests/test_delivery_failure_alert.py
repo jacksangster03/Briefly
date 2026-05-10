@@ -490,3 +490,20 @@ def test_send_failure_alert_dedupes_within_cooldown(validation_isolated_db):
         _send_delivery_failure_alert(**kwargs)
         _send_delivery_failure_alert(**kwargs)
     assert len(calls) == 1
+
+
+def test_should_emit_atomic_claim_suppresses_second_process_like_call(validation_isolated_db):
+    now = datetime.now(timezone.utc)
+    local_day = now.date()
+    args = dict(
+        profile_name="default",
+        session_key="morning",
+        local_date=local_day,
+        unresolved_failed_channels=["telegram"],
+        now_utc=now,
+    )
+    first_ok, _ = _should_emit_delivery_failure_alert(**args)
+    second_ok, reason = _should_emit_delivery_failure_alert(**args)
+    assert first_ok is True
+    assert second_ok is False
+    assert reason == "cooldown"

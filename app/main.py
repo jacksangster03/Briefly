@@ -15,6 +15,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from sqlalchemy.exc import IntegrityError
 
 try:
     import fcntl
@@ -321,7 +322,30 @@ def _should_emit_delivery_failure_alert(
     except Exception:
         logger.debug("Failed SentMessage delivery-failure dedupe lookup (non-fatal)", exc_info=True)
 
-    # Secondary dedupe via explicit alert-state table.
+    # Secondary dedupe via explicit alert-state table with atomic claim.
+    if not _claim_delivery_failure_alert_slot(
+        profile_name=profile_name,
+        session_key=session_key,
+        local_date=local_date,
+        unresolved_failed_channels=unresolved_failed_channels,
+        failed_hash=failed_hash,
+        now_utc=now_utc,
+    ):
+        return False, "cooldown"
+    return True, failed_hash
+
+
+def _claim_delivery_failure_alert_slot(
+    *,
+    profile_name: str,
+    session_key: str,
+    local_date: "date",
+    unresolved_failed_channels: list[str],
+    failed_hash: str,
+    now_utc: datetime,
+) -> bool:
+    """Atomically claim alert emission rights for this cooldown scope."""
+    cooldown_cutoff = now_utc - timedelta(minutes=_ALERT_COOLDOWN_MINUTES)
     try:
         with get_session() as db_sess:
             row = (
@@ -334,11 +358,31 @@ def _should_emit_delivery_failure_alert(
                 )
                 .one_or_none()
             )
-            if row and row.last_alerted_at and row.last_alerted_at >= cooldown_cutoff:
-                return False, "cooldown"
+            if row is None:
+                db_sess.add(
+                    DeliveryFailureAlertState(
+                        profile_name=profile_name,
+                        local_date=local_date,
+                        session_key=session_key,
+                        failed_channels_hash=failed_hash,
+                        failed_channels_json=sorted({str(ch).lower() for ch in unresolved_failed_channels}),
+                        first_alerted_at=now_utc,
+                        last_alerted_at=now_utc,
+                        alert_count=0,
+                    )
+                )
+                return True
+            if row.last_alerted_at and row.last_alerted_at >= cooldown_cutoff:
+                return False
+            row.failed_channels_json = sorted({str(ch).lower() for ch in unresolved_failed_channels})
+            row.last_alerted_at = now_utc
+            return True
+    except IntegrityError:
+        # Unique key race: another scheduler process has already claimed.
+        return False
     except Exception:
-        logger.debug("Failed alert-state delivery-failure dedupe lookup (non-fatal)", exc_info=True)
-    return True, failed_hash
+        logger.debug("Failed alert-state claim for delivery-failure dedupe (non-fatal)", exc_info=True)
+        return False
 
 
 def _record_delivery_failure_alert_state(
