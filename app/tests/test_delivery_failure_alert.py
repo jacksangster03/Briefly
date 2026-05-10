@@ -36,7 +36,8 @@ def _alert_kwargs(**overrides):
         session_key="morning",
         session_title="Morning Brief",
         local_date=today,
-        generated_at_str="2026-05-06 07:30",
+        generated_at_str=f"{today.isoformat()} 07:30",
+        generated_local_date=today,
         timezone_name="Europe/Madrid",
         channel_status={"telegram": "failed", "email": "skipped"},
         channel_reason={"telegram": "ConnectionError", "email": "not configured"},
@@ -328,6 +329,27 @@ class TestSendDeliveryFailureAlert:
         mock_messenger.is_configured.return_value = True
         mock_messenger.send_messages.return_value = True
         kwargs = _alert_kwargs(local_date=date(2026, 5, 6), timezone_name="Europe/Madrid")
+        fake_now = datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc)
+        with patch("app.main.datetime") as mock_dt, \
+             patch("app.main._authoritative_success_channels", return_value=set()), \
+             patch("app.main.get_session", side_effect=make_cm), \
+             patch("app.main.TelegramMessenger", return_value=mock_messenger):
+            mock_dt.now.return_value = fake_now
+            mock_dt.combine = datetime.combine
+            _send_delivery_failure_alert(**kwargs)
+        mock_messenger.send_messages.assert_not_called()
+
+    def test_stale_generated_payload_does_not_alert_even_if_local_date_is_today(self):
+        make_cm, _ = self._mock_db_session()
+        mock_messenger = MagicMock()
+        mock_messenger.is_configured.return_value = True
+        mock_messenger.send_messages.return_value = True
+        kwargs = _alert_kwargs(
+            local_date=date(2026, 5, 9),
+            generated_at_str="2026-05-06 07:30",
+            generated_local_date=date(2026, 5, 6),
+            timezone_name="Europe/Madrid",
+        )
         fake_now = datetime(2026, 5, 9, 12, 0, tzinfo=timezone.utc)
         with patch("app.main.datetime") as mock_dt, \
              patch("app.main._authoritative_success_channels", return_value=set()), \

@@ -393,6 +393,7 @@ def _send_delivery_failure_alert(
     timezone_name: str,
     channel_status: dict[str, str],
     channel_reason: dict[str, str],
+    generated_local_date: "date | None" = None,
     allow_stale_historical_alert: bool = False,
     manual_context_label: str = "",
 ) -> None:
@@ -414,12 +415,15 @@ def _send_delivery_failure_alert(
             tz = ZoneInfo("Europe/Madrid")
         today_local = datetime.now(timezone.utc).astimezone(tz).date()
         is_stale_historical = local_date < today_local
-        if is_stale_historical and not allow_stale_historical_alert:
+        stale_generated_payload = bool(generated_local_date and generated_local_date < today_local)
+        stale_guard_hit = is_stale_historical or stale_generated_payload
+        if stale_guard_hit and not allow_stale_historical_alert:
             logger.info(
-                "Suppressed stale historical delivery failure alert | profile=%s session=%s local_date=%s today=%s",
+                "Suppressed stale historical delivery failure alert | profile=%s session=%s local_date=%s generated_local_date=%s today=%s",
                 profile_name,
                 session_key,
                 local_date,
+                generated_local_date,
                 today_local,
             )
             return
@@ -472,7 +476,7 @@ def _send_delivery_failure_alert(
                 f"  python -m app.cli session-send --session {session_key} --force"
             )
         context_line = ""
-        if is_stale_historical and allow_stale_historical_alert:
+        if stale_guard_hit and allow_stale_historical_alert:
             label = (manual_context_label or "manual backfill/recovery context").strip()
             context_line = f"Context: historical session alert allowed ({label}).\n\n"
         alert_text = (
@@ -1455,7 +1459,8 @@ def run_morning_briefing(
             session_key=canonical_session_key,
             session_title=briefing.session_title or session_title,
             local_date=idempotency_date,
-            generated_at_str=local_now.strftime("%Y-%m-%d %H:%M"),
+            generated_at_str=generated_at.astimezone(local_tz).strftime("%Y-%m-%d %H:%M"),
+            generated_local_date=generated_at.astimezone(local_tz).date(),
             timezone_name=profile.timezone or settings.timezone,
             channel_status=channel_status,
             channel_reason=channel_reason,
