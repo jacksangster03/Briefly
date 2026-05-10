@@ -1885,6 +1885,7 @@ def run_daily_summary(
             db_sess.query(SentMessage)
             .filter(
                 SentMessage.message_type == "breaking",
+                SentMessage.channel.in_(("telegram", "email")),
                 SentMessage.success.is_(True),
                 SentMessage.sent_at >= day_start_utc,
                 SentMessage.sent_at < day_end_utc,
