@@ -77,6 +77,40 @@ def brief(ctx):
     run_session_brief(ctx.obj["settings"])
 
 
+@cli.command("session-preview")
+@click.option(
+    "--session",
+    "session_key",
+    required=True,
+    type=click.Choice(
+        ["morning", "europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"],
+        case_sensitive=False,
+    ),
+    help="Canonical session key to preview exactly (no auto-routing).",
+)
+@click.pass_context
+def session_preview(ctx, session_key: str):
+    """Dry-run QA preview for a specific canonical session key (no live writes)."""
+    from app.main import run_morning_briefing
+
+    settings = ctx.obj["settings"]
+    # Hard safety: preview is always non-live and should never persist dry-run snapshots.
+    settings.dry_run = True
+    settings.persist_dry_run_session_snapshots = False
+
+    click.echo(
+        f"QA SESSION PREVIEW, NOT LIVE | session={session_key.lower()} | "
+        "no delivery/no idempotency writes/no snapshot writes"
+    )
+    run_morning_briefing(
+        settings,
+        auto_route_session=False,
+        session_override=session_key.lower(),
+        command_source="cli:session-preview",
+        qa_session_preview=True,
+    )
+
+
 @cli.command("day-replay")
 @click.option(
     "--date",

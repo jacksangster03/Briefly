@@ -250,6 +250,39 @@ def test_cli_brief_dispatches_to_session_brief(monkeypatch):
     assert called["count"] == 1
 
 
+def test_cli_session_preview_forces_requested_session_key(monkeypatch):
+    called: dict = {}
+
+    def _fake_run(settings, **kwargs):
+        called["settings"] = settings
+        called["kwargs"] = kwargs
+
+    monkeypatch.setattr("app.main.run_morning_briefing", _fake_run)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["session-preview", "--session", "morning"])
+    assert result.exit_code == 0, result.output
+    assert "QA SESSION PREVIEW, NOT LIVE" in result.output
+    assert called["kwargs"].get("auto_route_session") is False
+    assert called["kwargs"].get("session_override") == "morning"
+    assert called["kwargs"].get("qa_session_preview") is True
+    assert called["kwargs"].get("command_source") == "cli:session-preview"
+    assert bool(called["settings"].dry_run) is True
+    assert bool(getattr(called["settings"], "persist_dry_run_session_snapshots", True)) is False
+
+
+def test_cli_session_preview_preopen_forces_us_pre_open(monkeypatch):
+    called: dict = {}
+
+    def _fake_run(settings, **kwargs):
+        called["kwargs"] = kwargs
+
+    monkeypatch.setattr("app.main.run_morning_briefing", _fake_run)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["session-preview", "--session", "us_pre_open"])
+    assert result.exit_code == 0, result.output
+    assert called["kwargs"].get("session_override") == "us_pre_open"
+
+
 # ---------------------------------------------------------------------------
 # Idempotency cross-session tests (tasks a-j)
 # ---------------------------------------------------------------------------

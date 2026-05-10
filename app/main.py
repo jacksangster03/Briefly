@@ -1133,6 +1133,7 @@ def run_morning_briefing(
     force_send: bool = False,
     override_suppress_materiality: bool = False,
     backfill_context: BackfillContext | None = None,
+    qa_session_preview: bool = False,
 ) -> None:
     """Generate and deliver the morning briefing."""
     settings = settings or get_settings()
@@ -1240,6 +1241,20 @@ def run_morning_briefing(
             session_template_item=_clock_item,
         )
     _apply_morning_section_preferences(briefing, profile)
+    if qa_session_preview:
+        # Explicit non-live preview label for operator safety.
+        caveat = "QA SESSION PREVIEW, NOT LIVE."
+        if caveat not in briefing.data_basis_lines:
+            briefing.data_basis_lines.insert(0, caveat)
+        forced_outside_schedule = session_override and session_window.key != session_key
+        if local_now_pre.weekday() >= 5 and session_key in {
+            "morning", "europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"
+        }:
+            forced_outside_schedule = True
+        if forced_outside_schedule:
+            preview_caveat = "QA preview: session key forced outside normal schedule."
+            if preview_caveat not in briefing.data_basis_lines:
+                briefing.data_basis_lines.insert(1, preview_caveat)
     previous_ts, previous_snapshot = load_previous_snapshot(
         profile_name=profile.name,
         session_key=briefing.session_key,
