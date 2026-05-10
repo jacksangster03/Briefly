@@ -17,6 +17,7 @@ from app.briefing.market_setup_interpreter import interpret_market_setup
 from app.briefing.macro_policy_service import (
     build_macro_policy_dashboard,
     build_macro_policy_watch_summary,
+    should_include_macro_policy_watch,
 )
 from app.briefing.portfolio_impact import build_portfolio_impact
 from app.briefing.regime_context import build_regime_context, compute_geo_risk_level
@@ -535,14 +536,21 @@ class MorningBriefingGenerator:
             session_key=briefing.session_key,
             candidate_events=healthcare_candidates,
         )
-        if bool(self.profile.delivery.get("include_macro_policy_watch", False)) and (briefing.session_key or "morning").lower() == "morning":
+        if should_include_macro_policy_watch(
+            profile=self.profile,
+            session_key=briefing.session_key or "morning",
+        ):
             try:
                 macro_payload = build_macro_policy_dashboard(
                     profile=self.profile,
                     settings=self.settings,
                     macro_data_service=self.macro_svc,
                 )
-                briefing.macro_policy_watch = build_macro_policy_watch_summary(macro_payload)
+                briefing.macro_policy_watch = build_macro_policy_watch_summary(
+                    macro_payload,
+                    profile=self.profile,
+                    session_key=briefing.session_key or "morning",
+                )
             except Exception:
                 logger.debug("macro policy watch helper unavailable", exc_info=True)
         self._apply_session_profile(briefing)

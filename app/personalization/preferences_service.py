@@ -40,6 +40,12 @@ ALLOWED_VERTICAL_MODES = {"off", "watch", "active", "portfolio_linked"}
 ALLOWED_VERTICAL_PRIORITIES = {"low", "normal", "high"}
 ALLOWED_WEEKEND_MODES = {"off", "saturday_only", "saturday_and_sunday_news"}
 ALLOWED_SUNDAY_NEWS_MATERIALITY = {"material_only", "always_short"}
+ALLOWED_MACRO_POLICY_WATCH_SESSIONS = {
+    "morning",
+    "us_pre_open",
+    "saturday_weekend_briefing",
+    "sunday_weekend_watch",
+}
 
 
 def _normalize_profile(profile_name: str) -> str:
@@ -205,6 +211,37 @@ def _normalize_session_key_list(value: Any) -> list[str]:
     return unique
 
 
+def _normalize_macro_policy_watch_sessions(value: Any) -> list[str]:
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                candidates = [str(item).strip().lower() for item in parsed if str(item).strip()]
+            else:
+                candidates = [item.strip().lower() for item in value.split(",") if item.strip()]
+        except Exception:
+            candidates = [item.strip().lower() for item in value.split(",") if item.strip()]
+    elif isinstance(value, list):
+        candidates = [str(item).strip().lower() for item in value if str(item).strip()]
+    else:
+        raise ValueError("macro_policy_watch_sessions must be a comma-separated string or JSON array")
+    if not candidates:
+        return ["morning"]
+    invalid = [k for k in candidates if k not in ALLOWED_MACRO_POLICY_WATCH_SESSIONS]
+    if invalid:
+        raise ValueError(
+            f"Unsupported macro_policy_watch session(s): {', '.join(invalid)}. "
+            f"Allowed: {', '.join(sorted(ALLOWED_MACRO_POLICY_WATCH_SESSIONS))}"
+        )
+    seen: set[str] = set()
+    unique: list[str] = []
+    for key in candidates:
+        if key not in seen:
+            seen.add(key)
+            unique.append(key)
+    return unique
+
+
 def _normalize_healthcare_severity(value: Any) -> str:
     severity = str(value).strip().lower()
     if severity not in ALLOWED_HEALTHCARE_SEVERITIES:
@@ -316,6 +353,7 @@ PREFERENCE_NORMALIZERS: dict[str, Callable[[Any], Any]] = {
     "sections.morning.watchlist": _normalize_bool,
     "sections.morning.watchlist_snapshot": _normalize_bool,
     "briefing.include_macro_policy_watch": _normalize_bool,
+    "briefing.macro_policy_watch_sessions": _normalize_macro_policy_watch_sessions,
     "sections.global_news": _normalize_bool,
     "healthcare.enabled": _normalize_bool,
     "healthcare.mode": _normalize_vertical_mode,

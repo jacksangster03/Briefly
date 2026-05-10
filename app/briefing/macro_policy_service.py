@@ -13,6 +13,13 @@ from app.data_sources.macro_data import MacroDataService
 from app.personalization.user_profile import UserProfile
 from app.settings import Settings
 
+ALLOWED_MACRO_POLICY_WATCH_SESSIONS = {
+    "morning",
+    "us_pre_open",
+    "saturday_weekend_briefing",
+    "sunday_weekend_watch",
+}
+
 
 def build_macro_policy_dashboard(
     *,
@@ -91,7 +98,78 @@ def build_macro_policy_dashboard(
     }
 
 
-def build_macro_policy_watch_summary(payload: dict[str, Any]) -> str:
+def macro_policy_watch_sessions_for_profile(profile: UserProfile) -> list[str]:
+    raw = profile.delivery.get("macro_policy_watch_sessions", ["morning"])
+    if isinstance(raw, str):
+        candidates = [item.strip().lower() for item in raw.split(",") if item.strip()]
+    elif isinstance(raw, list):
+        candidates = [str(item).strip().lower() for item in raw if str(item).strip()]
+    else:
+        candidates = ["morning"]
+    filtered = [k for k in candidates if k in ALLOWED_MACRO_POLICY_WATCH_SESSIONS]
+    return filtered or ["morning"]
+
+
+def should_include_macro_policy_watch(*, profile: UserProfile, session_key: str) -> bool:
+    if not bool(profile.delivery.get("include_macro_policy_watch", False)):
+        return False
+    key = (session_key or "morning").strip().lower()
+    allowed = set(macro_policy_watch_sessions_for_profile(profile))
+    return key in allowed
+
+
+def select_macro_watch_regions(
+    *,
+    policy_signals: dict[str, Any],
+    profile: UserProfile,
+    session_key: str,
+) -> list[str]:
+    regions = (policy_signals or {}).get("regions", {}) or {}
+    selected: list[str] = []
+
+    # Always keep US + Eurozone anchors when present.
+    if regions.get("us"):
+        selected.append("us")
+    if regions.get("eurozone"):
+        selected.append("eurozone")
+
+    country = (profile.country or "").strip().lower()
+    home_region = (profile.home_region or "").strip().lower()
+    market_focus = (profile.market_focus_region or "").strip().lower()
+    watchlist_blob = " ".join((profile.all_watchlist_tickers or [])).upper()
+    portfolio_blob = " ".join((profile.portfolio_symbols or [])).upper()
+
+    if country in {"spain"} or home_region in {"spain", "eurozone", "europe"} or "emea" in market_focus:
+        if regions.get("spain"):
+            selected.append("spain")
+    if country in {"uk", "united kingdom"} or "uk" in home_region or "emea" in market_focus:
+        if regions.get("uk"):
+            selected.append("uk")
+    if any(t in watchlist_blob or t in portfolio_blob for t in ("AZN", "GSK", "HSBA", "BP", "SHEL")) and regions.get("uk"):
+        selected.append("uk")
+
+    # APAC only when meaningful or in APAC-like context.
+    key = (session_key or "").lower()
+    apac_context = key in {"sunday_weekend_watch", "saturday_weekend_briefing"} or "asia" in home_region or "apac" in market_focus
+    for rk in ("japan", "china"):
+        region = regions.get(rk) or {}
+        status = str(region.get("status", "unavailable")).lower()
+        has_driver = bool(region.get("drivers"))
+        if status != "unavailable" or has_driver or apac_context:
+            selected.append(rk)
+
+    # Preserve order + de-dupe.
+    out: list[str] = []
+    seen: set[str] = set()
+    for key in selected:
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def build_macro_policy_watch_summary(payload: dict[str, Any], *, profile: UserProfile | None = None, session_key: str = "morning") -> str:
     """Compact deterministic summary string for optional briefing inclusion."""
     if not payload:
         return "Macro Policy Watch unavailable."
@@ -106,23 +184,57 @@ def build_macro_policy_watch_summary(payload: dict[str, Any]) -> str:
     labour = ((sig.get("labour_pressure") or {}).get("label") or "uncertain").replace("_", "-")
     rates = ((sig.get("rates_pressure") or {}).get("label") or "uncertain").replace("_", "-")
 
+    mode = "us_pre_open" if (session_key or "").lower() == "us_pre_open" else "morning"
     regions = sig.get("regions", {}) or {}
-    uk_status = (regions.get("uk") or {}).get("status", "unavailable")
-    spain_status = (regions.get("spain") or {}).get("status", "partial")
-    jp_status = (regions.get("japan") or {}).get("status", "unavailable")
-    cn_status = (regions.get("china") or {}).get("status", "unavailable")
+    selected_regions = select_macro_watch_regions(
+        policy_signals=sig,
+        profile=profile or UserProfile(),
+        session_key=session_key,
+    )
+
+    def _region_token(region_key: str) -> str:
+        region = regions.get(region_key) or {}
+        status = str(region.get("status", "unavailable")).lower()
+        if region_key == "spain":
+            if status == "unavailable":
+                return "Spain unavailable"
+            return "Spain ECB-linked"
+        if region_key == "uk":
+            return f"UK {status}"
+        if region_key == "japan":
+            return "Japan not wired" if status == "unavailable" else f"Japan {status}"
+        if region_key == "china":
+            return "China not wired" if status == "unavailable" else f"China {status}"
+        if region_key == "eurozone":
+            return f"Eurozone {status}"
+        if region_key == "us":
+            return f"US {status}"
+        return f"{region_key.upper()} {status}"
 
     portfolio_line = "Portfolio: keep sizing disciplined; monitor duration and valuation-sensitive growth."
     implications = list(sig.get("portfolio_implications", []) or [])
     if implications:
         portfolio_line = f"Portfolio: {implications[0]}"
-
+    if mode == "us_pre_open":
+        return "\n".join(
+            [
+                "MACRO POLICY WATCH",
+                f"Fed: {fed} · Inflation {inflation} · Rates {rates}",
+                portfolio_line,
+                "Deterministic signal, not a forecast or market-implied probability.",
+            ]
+        )
+    region_tokens = [_region_token(key) for key in selected_regions if key in regions]
+    if not region_tokens:
+        region_line = "Regional: limited regional signal coverage."
+    else:
+        region_line = "Regional: " + " · ".join(region_tokens[:4])
     return "\n".join(
         [
             "MACRO POLICY WATCH",
             f"Fed: {fed} · ECB: {ecb} ({ecb_conf} confidence)",
             f"Inflation: {inflation} · Labour: {labour} · Rates: {rates}",
-            f"Regional: UK {uk_status} · Spain ECB-linked ({spain_status}) · Japan {jp_status} · China {cn_status}",
+            region_line,
             portfolio_line,
             "Deterministic signal, not a forecast or market-implied probability.",
         ]

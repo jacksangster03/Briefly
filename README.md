@@ -912,8 +912,12 @@ Optional briefing helper:
 
 - Preference key: `briefing.include_macro_policy_watch`
 - Default: `false`
-- When enabled, Briefly adds a compact deterministic **Macro Policy Watch** block to Morning Briefing output (Telegram/email formatting paths).
-- Non-morning sessions stay unchanged by default.
+- Session preference key: `briefing.macro_policy_watch_sessions`
+- Default sessions: `["morning"]`
+- Allowed sessions: `morning`, `us_pre_open`, `saturday_weekend_briefing`, `sunday_weekend_watch`
+- Recommended default is Morning only; US Pre-Open is opt-in.
+- When enabled, Briefly adds a compact deterministic **Macro Policy Watch** block using profile/session-aware regional selection.
+- Non-configured sessions stay unchanged by default.
 - Default briefing output remains unchanged unless the preference is enabled
 
 Operational resilience:
