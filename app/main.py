@@ -300,7 +300,28 @@ def _should_emit_delivery_failure_alert(
         local_date=local_date,
         failed_channels=unresolved_failed_channels,
     )
+    legacy_alert_hash = _delivery_alert_hash(profile_name, session_key, local_date)
     cooldown_cutoff = now_utc - timedelta(minutes=_ALERT_COOLDOWN_MINUTES)
+    # Primary durable dedupe against prior alert attempts in SentMessage.
+    # We intentionally suppress repeated user-facing alerts even if the prior
+    # alert transport failed, to prevent recursive spam loops.
+    try:
+        with get_session() as db_sess:
+            recent_alert = (
+                db_sess.query(SentMessage)
+                .filter(
+                    SentMessage.message_type == _ALERT_MESSAGE_TYPE,
+                    SentMessage.content_hash.in_([failed_hash, legacy_alert_hash]),
+                    SentMessage.sent_at >= cooldown_cutoff,
+                )
+                .first()
+            )
+            if recent_alert is not None:
+                return False, "cooldown"
+    except Exception:
+        logger.debug("Failed SentMessage delivery-failure dedupe lookup (non-fatal)", exc_info=True)
+
+    # Secondary dedupe via explicit alert-state table.
     try:
         with get_session() as db_sess:
             row = (
@@ -315,23 +336,8 @@ def _should_emit_delivery_failure_alert(
             )
             if row and row.last_alerted_at and row.last_alerted_at >= cooldown_cutoff:
                 return False, "cooldown"
-            # Fallback dedupe if alert-state rows are unavailable/stale: reuse
-            # existing sent-message alerts keyed by session/date.
-            legacy_alert_hash = _delivery_alert_hash(profile_name, session_key, local_date)
-            recent_alert = (
-                db_sess.query(SentMessage)
-                .filter(
-                    SentMessage.message_type == _ALERT_MESSAGE_TYPE,
-                    SentMessage.content_hash == legacy_alert_hash,
-                    SentMessage.sent_at >= cooldown_cutoff,
-                    SentMessage.success.is_(True),
-                )
-                .first()
-            )
-            if recent_alert is not None:
-                return False, "cooldown"
     except Exception:
-        logger.debug("Failed delivery-failure alert dedupe lookup (non-fatal)", exc_info=True)
+        logger.debug("Failed alert-state delivery-failure dedupe lookup (non-fatal)", exc_info=True)
     return True, failed_hash
 
 
@@ -461,27 +467,28 @@ def _send_delivery_failure_alert(
             return
 
         success = messenger.send_messages([alert_text])
-        alert_hash = _delivery_alert_hash(profile_name, session_key, local_date)
         with get_session() as db_sess:
             db_sess.add(SentMessage(
                 message_type=_ALERT_MESSAGE_TYPE,
                 channel="telegram",
                 event_ids=[f"alert:{session_key}:{local_date.isoformat()}"],
                 content_preview=alert_text[:500],
-                content_hash=alert_hash,
+                content_hash=failed_hash,
                 sent_at=datetime.now(timezone.utc),
                 success=bool(success),
                 error_message=None if success else str(getattr(messenger, "last_error", "") or "alert send failed"),
             ))
+        # Record dedupe/cooldown state regardless of alert-send outcome to avoid
+        # recursive user-facing alert loops when Telegram transport is flaky.
+        _record_delivery_failure_alert_state(
+            profile_name=profile_name,
+            session_key=session_key,
+            local_date=local_date,
+            unresolved_failed_channels=unresolved_failed,
+            failed_hash=failed_hash,
+            now_utc=now_utc,
+        )
         if success:
-            _record_delivery_failure_alert_state(
-                profile_name=profile_name,
-                session_key=session_key,
-                local_date=local_date,
-                unresolved_failed_channels=unresolved_failed,
-                failed_hash=failed_hash,
-                now_utc=now_utc,
-            )
             logger.info(
                 "Delivery failure alert emitted for unresolved channels: %s | session=%s date=%s",
                 ",".join(sorted(unresolved_failed)),

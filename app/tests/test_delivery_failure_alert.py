@@ -1,14 +1,18 @@
 """Tests for Phase 9.2: delivery failure alert on scheduler-triggered sends."""
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.db.models import DeliveryFailureAlertState, SentMessage
+from app.db.session import get_session
 from app.main import (
     _ALERT_COOLDOWN_MINUTES,
     _ALERT_MESSAGE_TYPE,
     _delivery_alert_hash,
+    _delivery_failed_channels_hash,
+    _should_emit_delivery_failure_alert,
     _send_delivery_failure_alert,
 )
 from app.settings import Settings
@@ -232,7 +236,7 @@ class TestSendDeliveryFailureAlert:
         mock_messenger.send_messages.return_value = True
 
         kwargs = _alert_kwargs()
-        expected_hash = _delivery_alert_hash("default", "morning", date(2026, 5, 6))
+        expected_hash = "hashx"
 
         with patch("app.main._authoritative_success_channels", return_value=set()), \
              patch("app.main._should_emit_delivery_failure_alert", return_value=(True, "hashx")), \
@@ -316,3 +320,90 @@ class TestSendDeliveryFailureAlert:
              patch("app.main.TelegramMessenger") as mock_tg:
             _send_delivery_failure_alert(**kwargs)
         mock_tg.assert_not_called()
+
+
+def test_should_emit_suppresses_on_recent_failed_alert_attempt(validation_isolated_db):
+    now = datetime.now(timezone.utc)
+    local_day = date(2026, 5, 9)
+    failed_hash = _delivery_failed_channels_hash(
+        profile_name="default",
+        session_key="morning",
+        local_date=local_day,
+        failed_channels=["telegram", "email"],
+    )
+    with get_session() as s:
+        s.add(
+            SentMessage(
+                message_type=_ALERT_MESSAGE_TYPE,
+                channel="telegram",
+                event_ids=["alert:test"],
+                content_preview="delivery fail",
+                content_hash=failed_hash,
+                sent_at=now - timedelta(minutes=15),
+                success=False,
+                error_message="transport failed",
+            )
+        )
+    should, reason = _should_emit_delivery_failure_alert(
+        profile_name="default",
+        session_key="morning",
+        local_date=local_day,
+        unresolved_failed_channels=["telegram", "email"],
+        now_utc=now,
+    )
+    assert should is False
+    assert reason == "cooldown"
+
+
+def test_send_failure_alert_records_state_even_when_alert_send_fails(validation_isolated_db):
+    class _FailingTelegram:
+        def __init__(self, _settings):
+            self.last_error = "simulated alert transport fail"
+
+        def is_configured(self):
+            return True
+
+        def send_messages(self, _messages):
+            return False
+
+    kwargs = _alert_kwargs(
+        channel_status={"telegram": "failed", "email": "failed"},
+        channel_reason={"telegram": "tg fail", "email": "smtp fail"},
+    )
+    with patch("app.main.TelegramMessenger", _FailingTelegram), \
+         patch("app.main._authoritative_success_channels", return_value=set()):
+        _send_delivery_failure_alert(**kwargs)
+
+    with get_session() as s:
+        state = s.query(DeliveryFailureAlertState).filter(
+            DeliveryFailureAlertState.profile_name == "default",
+            DeliveryFailureAlertState.session_key == "morning",
+            DeliveryFailureAlertState.local_date == date(2026, 5, 6),
+        ).first()
+        assert state is not None
+        assert state.alert_count >= 1
+
+
+def test_send_failure_alert_dedupes_within_cooldown(validation_isolated_db):
+    calls: list[str] = []
+
+    class _OkTelegram:
+        def __init__(self, _settings):
+            self.last_error = ""
+
+        def is_configured(self):
+            return True
+
+        def send_messages(self, messages):
+            calls.append(messages[0])
+            return True
+
+    kwargs = _alert_kwargs(
+        channel_status={"telegram": "failed", "email": "failed"},
+        channel_reason={"telegram": "tg fail", "email": "smtp fail"},
+    )
+    with patch("app.main.TelegramMessenger", _OkTelegram), \
+         patch("app.main._authoritative_success_channels", return_value=set()):
+        _send_delivery_failure_alert(**kwargs)
+        _send_delivery_failure_alert(**kwargs)
+    assert len(calls) == 1
