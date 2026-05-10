@@ -114,18 +114,16 @@ def test_ui_settings_page_renders(client):
 def test_ui_home_renders_workspace_cards(client):
     response = client.get("/ui?profile=default_user")
     assert response.status_code == 200
+    assert "Briefly Command Centre" in response.text
     assert "Briefly Home" in response.text
-    assert "What Matters Now" in response.text
+    assert "Today’s Briefing Status" in response.text
+    assert "Alerts & Delivery" in response.text
+    assert "Macro Policy Watch" in response.text
     assert "Open Portfolio" in response.text
-    assert "Review Risk" in response.text
-    assert "Market Briefing" in response.text
-    assert "Portfolio Workbench" in response.text
-    assert "Audit & advanced controls" in response.text
     assert "/ui/briefing?profile=default_user" in response.text
     assert "/ui/portfolio?profile=default_user" in response.text
     assert "/ui/audit?profile=default_user" in response.text
-    assert "Quick portfolio setup" in response.text
-    assert "/ui/portfolio/easy-setup?profile=default_user" in response.text
+    assert "/ui/briefing/macro?profile=default_user" in response.text
 
 
 def test_ui_workspace_routes_set_initial_module_and_section(client):

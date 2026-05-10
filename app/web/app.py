@@ -333,11 +333,17 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     ):
         normalized_profile = _normalize_profile(profile)
         state = build_profile_state(_settings(request), normalized_profile)
+        command_centre = _build_command_centre_context(
+            settings=_settings(request),
+            profile_name=normalized_profile,
+            state=state,
+        )
         return templates.TemplateResponse(
             request,
-            "ui_home.html",
+            "command_centre.html",
             {
                 "state": state,
+                "cc": command_centre,
             },
         )
 
@@ -2924,6 +2930,218 @@ def _rebalancing_config_from_form(form) -> dict[str, Any]:
 
 def _normalize_profile(profile: str) -> str:
     return (profile or "default_user").strip() or "default_user"
+
+
+def _build_command_centre_context(*, settings: Settings, profile_name: str, state: dict[str, Any]) -> dict[str, Any]:
+    import fcntl as _fcntl_mod
+    from app.briefing.session_metadata import label_for
+    from app.briefing.session_routing import next_session_window, resolve_session_window
+    from app.briefing.session_snapshot_service import list_session_snapshots
+    from app.db.models import MarketSnapshot, ProviderHealthLog, RegimeSnapshot, SessionSendState
+    from app.db.session import get_session
+    from app.main import _allowed_sessions_for_profile_day
+    from app.personalization.user_profile import load_user_profile
+
+    profile = load_user_profile(settings)
+    tz = ZoneInfo(profile.timezone or settings.timezone)
+    now_utc = datetime.now(timezone.utc)
+    local_now = now_utc.astimezone(tz)
+    today = local_now.date()
+
+    scheduler_status = "unknown"
+    lock_path = Path(settings.data_dir) / "state" / "scheduler.lock"
+    try:
+        if lock_path.exists():
+            handle = lock_path.open("a+")
+            try:
+                _fcntl_mod.flock(handle.fileno(), _fcntl_mod.LOCK_EX | _fcntl_mod.LOCK_NB)
+                _fcntl_mod.flock(handle.fileno(), _fcntl_mod.LOCK_UN)
+                scheduler_status = "not running"
+            except OSError:
+                scheduler_status = "running"
+            finally:
+                handle.close()
+        else:
+            scheduler_status = "unknown"
+    except Exception:
+        scheduler_status = "unknown"
+
+    current_window = resolve_session_window(
+        now=now_utc,
+        timezone_name=profile.timezone or settings.timezone,
+        session_template=getattr(profile, "session_template", None),
+    )
+    next_window = next_session_window(
+        now=now_utc,
+        timezone_name=profile.timezone or settings.timezone,
+        session_template=getattr(profile, "session_template", None),
+    )
+    allowed_sessions = _allowed_sessions_for_profile_day(
+        mode=profile.session_mode,
+        weekend_mode=profile.weekend_mode,
+        weekday_idx=local_now.weekday(),
+    )
+    weekend_note = ""
+    if local_now.weekday() >= 5 and not allowed_sessions:
+        weekend_note = f"{local_now.strftime('%A')} mode: no automatic weekend briefing scheduled."
+
+    with get_session() as db:
+        send_rows = (
+            db.query(SessionSendState)
+            .filter(
+                SessionSendState.profile_name == profile_name,
+                SessionSendState.local_date == today,
+                SessionSendState.replay_namespace == "",
+            )
+            .all()
+        )
+        provider_rows = []
+        for provider_key in ("finnhub", "fred", "newsapi", "gdelt", "fmp_news", "mediastack"):
+            row = (
+                db.query(ProviderHealthLog)
+                .filter(ProviderHealthLog.provider == provider_key)
+                .order_by(ProviderHealthLog.timestamp.desc())
+                .first()
+            )
+            provider_rows.append((provider_key, row))
+        latest_snapshots = list_session_snapshots(profile_name=profile_name, target_date=today)
+        latest_regime = (
+            db.query(RegimeSnapshot)
+            .filter(RegimeSnapshot.profile_name == profile_name)
+            .order_by(RegimeSnapshot.timestamp.desc())
+            .first()
+        )
+        latest_market_rows = (
+            db.query(MarketSnapshot)
+            .order_by(MarketSnapshot.timestamp.desc())
+            .limit(4)
+            .all()
+        )
+
+    sent_count = sum(1 for row in send_rows if row.success)
+    failed_count = sum(1 for row in send_rows if (not row.success and not row.in_progress))
+    in_progress_count = sum(1 for row in send_rows if row.in_progress)
+    latest_sent = None
+    sent_candidates = [row for row in send_rows if row.success and row.sent_at]
+    if sent_candidates:
+        latest = max(sent_candidates, key=lambda row: row.sent_at or datetime.min)
+        latest_sent = {
+            "label": label_for(latest.session_key),
+            "session_key": latest.session_key,
+            "channel": latest.channel,
+            "sent_at": latest.sent_at.replace(tzinfo=timezone.utc).astimezone(tz).strftime("%H:%M")
+            if latest.sent_at
+            else "n/a",
+        }
+
+    market_lines: list[str] = []
+    if latest_regime is not None:
+        market_lines.append(f"Regime: {str(latest_regime.risk_regime or 'mixed').replace('_', ' ')}")
+    for row in latest_market_rows[:3]:
+        if row.price is None:
+            continue
+        name = row.display_name or row.symbol
+        if row.change_percent is not None:
+            market_lines.append(f"{name}: {row.price:.2f} ({row.change_percent:+.2f}%)")
+        else:
+            market_lines.append(f"{name}: {row.price:.2f}")
+
+    macro_summary: dict[str, Any]
+    try:
+        macro_payload = build_macro_policy_dashboard(profile=profile, settings=settings)
+        sig = macro_payload.get("policy_signals", {}) or {}
+        macro_summary = {
+            "status": sig.get("status", macro_payload.get("status", "partial")),
+            "fed": ((sig.get("fed_bias") or {}).get("label") or "uncertain").replace("_", "-"),
+            "ecb": ((sig.get("ecb_bias") or {}).get("label") or "uncertain").replace("_", "-"),
+            "inflation": ((sig.get("inflation_pressure") or {}).get("label") or "uncertain").replace("_", "-"),
+            "labour": ((sig.get("labour_pressure") or {}).get("label") or "uncertain").replace("_", "-"),
+            "rates": ((sig.get("rates_pressure") or {}).get("label") or "uncertain").replace("_", "-"),
+            "available": True,
+        }
+    except Exception:
+        macro_summary = {
+            "status": "unavailable",
+            "fed": "unavailable",
+            "ecb": "unavailable",
+            "inflation": "unavailable",
+            "labour": "unavailable",
+            "rates": "unavailable",
+            "available": False,
+        }
+
+    top_positions = (state.get("analysis", {}) or {}).get("top_positions", []) or []
+    top_holding = top_positions[0] if top_positions else None
+    policy_fit = (state.get("analysis", {}) or {}).get("policy_fit", {}) or {}
+    holdings_count = len(getattr(profile, "portfolio_holdings", []) or [])
+
+    provider_health = []
+    for key, row in provider_rows:
+        if row is None:
+            provider_health.append({"provider": key, "status": "unavailable"})
+            continue
+        if row.success:
+            status = "ok"
+        elif row.status_code == 401:
+            status = "unauthorized"
+        elif row.status_code == 429:
+            status = "rate_limited"
+        else:
+            status = "degraded"
+        provider_health.append({"provider": key, "status": status})
+
+    delivery = (state.get("effective", {}) or {}).get("delivery", {}) or {}
+    morning_channels = delivery.get("morning_channels", [])
+    breaking_channels = delivery.get("breaking_channels", [])
+    failure_alert_channels = getattr(profile, "delivery_failure_alert_channels", [])
+    failure_alerts_enabled = bool(getattr(profile, "delivery_failure_alerts_enabled", True))
+
+    return {
+        "title": "Briefly Command Centre",
+        "legacy_title": "Briefly Home",
+        "subtitle": "Market briefings, portfolio context and delivery health in one place.",
+        "local_time": local_now.strftime("%Y-%m-%d %H:%M"),
+        "timezone": profile.timezone or settings.timezone,
+        "scheduler_status": scheduler_status,
+        "current_session": {
+            "key": current_window.key,
+            "label": label_for(current_window.key),
+        },
+        "next_session": {
+            "key": next_window.key,
+            "label": label_for(next_window.key),
+        },
+        "next_eligible_send": {
+            "label": label_for(next_window.key),
+            "key": next_window.key,
+            "channels": morning_channels if next_window.key == "morning" else delivery.get("intraday_channels", []),
+        },
+        "weekend_note": weekend_note,
+        "briefing_status": {
+            "sent_count": sent_count,
+            "failed_count": failed_count,
+            "in_progress_count": in_progress_count,
+            "latest_sent": latest_sent,
+            "snapshots_count": len(latest_snapshots or []),
+        },
+        "market_snapshot_lines": market_lines,
+        "portfolio": {
+            "holdings_count": holdings_count,
+            "top_holding": top_holding,
+            "policy_status": str(policy_fit.get("status") or "unavailable").replace("_", " "),
+        },
+        "macro": macro_summary,
+        "alerts_delivery": {
+            "morning_channels": morning_channels,
+            "breaking_channels": breaking_channels,
+            "quiet_hours": getattr(profile, "quiet_hours", ("23:00", "07:00")),
+            "weekend_mode": profile.weekend_mode,
+            "breaking_alerts_enabled": profile.breaking_alerts_enabled,
+            "failure_alerts_enabled": failure_alerts_enabled,
+            "failure_alert_channels": failure_alert_channels,
+        },
+        "provider_health": provider_health,
+    }
 
 
 def _settings(request: Request) -> Settings:

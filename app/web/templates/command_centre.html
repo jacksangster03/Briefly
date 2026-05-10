@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Briefly Command Centre</title>
+  <link rel="stylesheet" href="/static/css/ui-shell.css">
+  <style>
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: "IBM Plex Sans", "Segoe UI", sans-serif; }
+    .shell { max-width: 1200px; margin: 0 auto; }
+    .hero {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+    .title { margin: 0; font-size: 1.8rem; }
+    .subtitle { margin: 6px 0 0; color: var(--text-muted); }
+    .status-strip { margin-top: 12px; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); }
+    .chip { border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; font-size: 0.78rem; color: var(--text-muted); background: var(--card); }
+    .chip strong { color: var(--text); }
+    .nav-grid { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .nav-link { text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 7px 11px; font-size: 0.78rem; color: var(--text); background: var(--card); }
+    .nav-link:hover { border-color: var(--accent); color: var(--accent); }
+    .grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 12px; }
+    .card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 14px; }
+    .card h2 { margin: 0 0 8px; font-size: 1rem; }
+    .muted { color: var(--text-muted); font-size: 0.86rem; }
+    .kv { display: grid; gap: 6px; margin-top: 8px; }
+    .row { display: flex; justify-content: space-between; gap: 10px; align-items: center; border-bottom: 1px dashed var(--border); padding-bottom: 6px; }
+    .row:last-child { border-bottom: none; }
+    .value { font-weight: 600; }
+    .actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn { text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 6px 11px; font-size: 0.78rem; color: var(--text); background: var(--card); }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .badge { border-radius: 999px; padding: 2px 8px; font-size: 0.7rem; font-weight: 700; border: 1px solid var(--border); }
+    .ok { color: #1faa6f; border-color: color-mix(in srgb, #1faa6f 60%, var(--border)); }
+    .warn { color: #d49100; border-color: color-mix(in srgb, #d49100 60%, var(--border)); }
+    .bad { color: #de5959; border-color: color-mix(in srgb, #de5959 60%, var(--border)); }
+    .off { color: #93a0b3; border-color: color-mix(in srgb, #93a0b3 60%, var(--border)); }
+    .health { margin-top: 8px; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+    .health .item { border: 1px solid var(--border); border-radius: 10px; padding: 8px; background: var(--card); font-size: 0.78rem; }
+    .quick { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
+    .quick a { text-decoration: none; border: 1px solid var(--border); border-radius: 10px; padding: 10px; color: var(--text); background: var(--card); font-size: 0.82rem; }
+    .quick a:hover { border-color: var(--accent); color: var(--accent); }
+    code { font-size: 0.77rem; color: var(--text-muted); }
+    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } .quick { grid-template-columns: 1fr 1fr; } .health { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="briefly-shell">
+  <div class="shell">
+    <section class="hero">
+      <h1 class="title">{{ cc.title }}</h1>
+      <p class="subtitle">{{ cc.subtitle }}</p>
+      <p class="muted">Legacy: {{ cc.legacy_title }}</p>
+      <div class="status-strip">
+        <div class="chip"><strong>Local Time:</strong> {{ cc.local_time }} {{ cc.timezone }}</div>
+        <div class="chip"><strong>Scheduler:</strong> {{ cc.scheduler_status }}</div>
+        <div class="chip"><strong>Current Session:</strong> {{ cc.current_session.label }}</div>
+        <div class="chip"><strong>Next Briefing:</strong> {{ cc.next_session.label }}</div>
+      </div>
+      {% if cc.weekend_note %}
+        <p class="muted" style="margin-top:10px;"><span class="badge off">weekend</span> {{ cc.weekend_note }}</p>
+      {% endif %}
+      <div class="nav-grid">
+        <a class="nav-link" href="/ui?profile={{ state.profile }}">Command Centre</a>
+        <a class="nav-link" href="/ui/briefing?profile={{ state.profile }}">Briefings</a>
+        <a class="nav-link" href="/ui/portfolio?profile={{ state.profile }}">Portfolio</a>
+        <a class="nav-link" href="/ui/briefing/macro?profile={{ state.profile }}">Macro</a>
+        <a class="nav-link" href="/ui/briefing?profile={{ state.profile }}">News</a>
+        <a class="nav-link" href="/ui/briefing/verticals?profile={{ state.profile }}">Verticals</a>
+        <a class="nav-link" href="/ui/briefing/delivery?profile={{ state.profile }}">Alerts & Delivery</a>
+        <a class="nav-link" href="/ui/audit?profile={{ state.profile }}">Diagnostics</a>
+        <a class="nav-link" href="/ui/settings?profile={{ state.profile }}">Settings</a>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Today’s Briefing Status</h2>
+        <div class="kv">
+          <div class="row"><span>Current session</span><span class="value">{{ cc.current_session.label }}</span></div>
+          <div class="row"><span>Next session</span><span class="value">{{ cc.next_session.label }}</span></div>
+          <div class="row"><span>Sent today</span><span class="value">{{ cc.briefing_status.sent_count }}</span></div>
+          <div class="row"><span>Failed today</span><span class="value">{{ cc.briefing_status.failed_count }}</span></div>
+          <div class="row"><span>In progress</span><span class="value">{{ cc.briefing_status.in_progress_count }}</span></div>
+          <div class="row"><span>Latest sent</span><span class="value">{{ cc.briefing_status.latest_sent.label ~ " " ~ cc.briefing_status.latest_sent.sent_at if cc.briefing_status.latest_sent else "None yet" }}</span></div>
+        </div>
+        <div class="actions">
+          <a class="btn" href="/ui/briefing/history?profile={{ state.profile }}">Open Delivery Log</a>
+          <a class="btn" href="/ui/briefing?profile={{ state.profile }}">Preview Next Briefing</a>
+          <a class="btn" href="/ui/audit/logs?profile={{ state.profile }}">Session Audit</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Alerts & Delivery</h2>
+        <div class="kv">
+          <div class="row"><span>Morning channels</span><span class="value">{{ cc.alerts_delivery.morning_channels|join(", ") if cc.alerts_delivery.morning_channels else "off" }}</span></div>
+          <div class="row"><span>Breaking alerts</span><span class="value">{{ "enabled" if cc.alerts_delivery.breaking_alerts_enabled else "disabled" }}</span></div>
+          <div class="row"><span>Breaking channels</span><span class="value">{{ cc.alerts_delivery.breaking_channels|join(", ") if cc.alerts_delivery.breaking_channels else "off" }}</span></div>
+          <div class="row"><span>Delivery failure alerts</span><span class="value">{{ "enabled" if cc.alerts_delivery.failure_alerts_enabled else "disabled" }}</span></div>
+          <div class="row"><span>Failure alerts to Telegram</span><span class="value">{{ "on" if "telegram" in cc.alerts_delivery.failure_alert_channels else "off" }}</span></div>
+          <div class="row"><span>Failure alert channels</span><span class="value">{{ cc.alerts_delivery.failure_alert_channels|join(", ") if cc.alerts_delivery.failure_alert_channels else "none" }}</span></div>
+          <div class="row"><span>Quiet hours</span><span class="value">{{ cc.alerts_delivery.quiet_hours[0] }}–{{ cc.alerts_delivery.quiet_hours[1] }}</span></div>
+          <div class="row"><span>Weekend mode</span><span class="value">{{ cc.alerts_delivery.weekend_mode }}</span></div>
+        </div>
+        <div class="actions">
+          <a class="btn" href="/ui/briefing/delivery?profile={{ state.profile }}">Open Alerts & Delivery</a>
+          <a class="btn" href="/ui/settings?profile={{ state.profile }}">Edit Settings</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Market Snapshot</h2>
+        {% if cc.market_snapshot_lines %}
+          <div class="kv">
+            {% for line in cc.market_snapshot_lines %}
+            <div class="row"><span class="value">{{ line }}</span></div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="muted">No latest market snapshot available yet.</p>
+        {% endif %}
+        <div class="actions">
+          <a class="btn" href="/ui/briefing/history?profile={{ state.profile }}">Open Briefing History</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Portfolio Impact</h2>
+        <div class="kv">
+          <div class="row"><span>Active holdings</span><span class="value">{{ cc.portfolio.holdings_count }}</span></div>
+          <div class="row"><span>Top holding</span><span class="value">{{ cc.portfolio.top_holding.label if cc.portfolio.top_holding else "Unavailable" }}</span></div>
+          <div class="row"><span>Policy status</span><span class="value">{{ cc.portfolio.policy_status }}</span></div>
+        </div>
+        <div class="actions">
+          <a class="btn" href="/ui/portfolio?profile={{ state.profile }}">Open Portfolio</a>
+          <a class="btn" href="/ui/portfolio/risk?profile={{ state.profile }}">Open Risk</a>
+          <a class="btn" href="/ui/portfolio/implementation?profile={{ state.profile }}">Open Rebalance</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Macro Policy Watch</h2>
+        {% if cc.macro.available %}
+          <div class="kv">
+            <div class="row"><span>Fed bias</span><span class="value">{{ cc.macro.fed }}</span></div>
+            <div class="row"><span>ECB bias</span><span class="value">{{ cc.macro.ecb }}</span></div>
+            <div class="row"><span>Inflation</span><span class="value">{{ cc.macro.inflation }}</span></div>
+            <div class="row"><span>Labour</span><span class="value">{{ cc.macro.labour }}</span></div>
+            <div class="row"><span>Rates</span><span class="value">{{ cc.macro.rates }}</span></div>
+            <div class="row"><span>Status</span><span class="value">{{ cc.macro.status }}</span></div>
+          </div>
+        {% else %}
+          <p class="muted">Macro dashboard unavailable.</p>
+        {% endif %}
+        <div class="actions">
+          <a class="btn" href="/ui/briefing/macro?profile={{ state.profile }}">Open Macro Dashboard</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>System Health</h2>
+        <div class="health">
+          {% for item in cc.provider_health %}
+            <div class="item">
+              <div class="muted">{{ item.provider }}</div>
+              {% set klass = "ok" if item.status == "ok" else ("warn" if item.status in ["degraded","rate_limited"] else ("bad" if item.status in ["error","unauthorized"] else "off")) %}
+              <span class="badge {{ klass }}">{{ item.status }}</span>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="actions">
+          <a class="btn" href="/ui/audit?profile={{ state.profile }}">Open Diagnostics</a>
+        </div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top:12px;">
+      <h2>Quick Actions</h2>
+      <div class="quick">
+        <a href="/ui/briefing?profile={{ state.profile }}">Preview Morning Briefing</a>
+        <a href="/ui/briefing?profile={{ state.profile }}">Preview US Pre-Open</a>
+        <a href="/ui/briefing/macro?profile={{ state.profile }}">Open Macro Dashboard</a>
+        <a href="/ui/portfolio?profile={{ state.profile }}">Review Portfolio</a>
+        <a href="/ui/audit/logs?profile={{ state.profile }}">Review News Intelligence</a>
+        <a href="/ui/briefing/verticals?profile={{ state.profile }}">Open Verticals</a>
+        <a href="/ui/briefing/history?profile={{ state.profile }}">View Delivery Log</a>
+        <a href="/ui/settings?profile={{ state.profile }}">Open Settings</a>
+      </div>
+      <p class="muted" style="margin-top:10px;">
+        CLI preview shortcuts:
+        <code>python -m app.cli session-preview --session morning --show-output</code> ·
+        <code>python -m app.cli session-preview --session us_pre_open --show-output</code>
+      </p>
+    </section>
+  </div>
+  </div>
+</body>
+</html>
+
