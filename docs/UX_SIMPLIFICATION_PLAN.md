@@ -158,7 +158,16 @@ No runtime scheduler/delivery/provider logic changes required for UX phases.
 - Existing advanced portfolio routes remain unchanged and linked from the advanced view.
 
 ## UX-5: News Intelligence review UI
-- Bring label/review workflows from CLI to visual queue.
+- Status: implemented.
+- `/ui/news` now provides a visual review console with tabs for:
+  - overview
+  - included stories
+  - suppressed stories
+  - breaking candidates
+  - label review queue
+  - classifier health
+  - sources/provider contribution
+- Empty-state flow includes copyable CLI commands when local review data is not yet populated.
 
 ## UX-6: Verticals polish
 - Card-based vertical lifecycle and diagnostics.

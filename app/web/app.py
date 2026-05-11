@@ -380,6 +380,32 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    @app.get("/ui/news", response_class=HTMLResponse, include_in_schema=False)
+    def ui_news_intelligence(
+        request: Request,
+        profile: str = Query(default="default_user"),
+        date: str = Query(default="today"),
+        tab: str = Query(default="overview"),
+        session: str = Query(default=""),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings(request), normalized_profile)
+        ctx = _build_news_intelligence_context(
+            settings=_settings(request),
+            profile_name=normalized_profile,
+            date_filter=date,
+            tab=tab,
+            session_filter=session,
+        )
+        return templates.TemplateResponse(
+            request,
+            "news_intelligence.html",
+            {
+                "state": state,
+                "ni": ctx,
+            },
+        )
+
     @app.get("/ui/briefing/watchlists", response_class=HTMLResponse, include_in_schema=False)
     def ui_briefing_watchlists(
         request: Request,
@@ -3558,6 +3584,180 @@ def _build_portfolio_home_context(
         "empty_holdings": holdings_count == 0,
         "has_risk": bool(risk),
         "has_policy": bool(policy_fit),
+    }
+
+
+def _build_news_intelligence_context(
+    *,
+    settings: Settings,
+    profile_name: str,
+    date_filter: str,
+    tab: str,
+    session_filter: str,
+) -> dict[str, Any]:
+    from collections import Counter
+    from datetime import date as _date
+    from app.db.models import NewsClassifierLabel, NewsClassifierShadowRun, ProviderHealthLog, SentMessage
+    from app.db.session import get_session
+    from app.personalization.user_profile import load_user_profile
+
+    profile = load_user_profile(settings)
+    tz = ZoneInfo(profile.timezone or settings.timezone or "Europe/Madrid")
+    now_local = datetime.now(timezone.utc).astimezone(tz)
+
+    requested_tab = (tab or "overview").strip().lower()
+    allowed_tabs = {"overview", "included", "suppressed", "breaking", "labels", "health", "sources"}
+    selected_tab = requested_tab if requested_tab in allowed_tabs else "overview"
+
+    raw_date = (date_filter or "today").strip().lower()
+    if raw_date == "today":
+        target_date = now_local.date()
+    elif raw_date == "yesterday":
+        target_date = (now_local - timedelta(days=1)).date()
+    else:
+        try:
+            target_date = _date.fromisoformat(raw_date)
+        except ValueError:
+            target_date = now_local.date()
+
+    normalized_session = (session_filter or "").strip().lower()
+    if not normalized_session:
+        normalized_session = ""
+
+    with get_session() as db:
+        q = db.query(NewsClassifierLabel).filter(NewsClassifierLabel.local_date == target_date)
+        if normalized_session:
+            q = q.filter(NewsClassifierLabel.session_key == normalized_session)
+        rows = list(q.order_by(NewsClassifierLabel.updated_at.desc(), NewsClassifierLabel.id.desc()).all())
+
+        shadow_q = db.query(NewsClassifierShadowRun).filter(NewsClassifierShadowRun.local_date == target_date)
+        if normalized_session:
+            shadow_q = shadow_q.filter(NewsClassifierShadowRun.session_key == normalized_session)
+        shadow_rows = list(shadow_q.order_by(NewsClassifierShadowRun.created_at.desc()).all())
+
+        sent_breaking = (
+            db.query(SentMessage)
+            .filter(
+                SentMessage.message_type == "breaking",
+                SentMessage.success.is_(True),
+                SentMessage.sent_at >= datetime.combine(target_date, datetime.min.time(), tzinfo=tz).astimezone(timezone.utc),
+                SentMessage.sent_at < datetime.combine(target_date + timedelta(days=1), datetime.min.time(), tzinfo=tz).astimezone(timezone.utc),
+            )
+            .all()
+        )
+
+        provider_names = ("finnhub", "newsapi", "gdelt", "alpha_vantage", "fmp_news", "mediastack", "marketaux", "sec")
+        provider_health: list[dict[str, str]] = []
+        for pname in provider_names:
+            row = (
+                db.query(ProviderHealthLog)
+                .filter(ProviderHealthLog.provider == pname)
+                .order_by(ProviderHealthLog.timestamp.desc())
+                .first()
+            )
+            if row is None:
+                status = "unavailable"
+            elif row.success:
+                status = "ok"
+            elif row.status_code == 429:
+                status = "rate_limited"
+            elif row.status_code == 401:
+                status = "unauthorised"
+            else:
+                status = "degraded"
+            provider_health.append({"provider": pname, "status": status})
+
+    def _manual_labelled(r: Any) -> bool:
+        return any(
+            [
+                bool(r.manual_story_type),
+                bool(r.manual_suppression_reason),
+                r.manual_breaking_eligible is not None,
+                bool(r.manual_ticker_mismatch_risk),
+                bool(r.manual_stale_reprint_risk),
+            ]
+        )
+
+    included = [r for r in rows if bool(r.included_in_briefing)]
+    suppressed = [r for r in rows if not bool(r.included_in_briefing)]
+    breaking_candidates = [r for r in rows if bool(r.deterministic_breaking_eligible)]
+    unlabelled = [r for r in rows if not _manual_labelled(r)]
+    manual_count = sum(1 for r in rows if _manual_labelled(r))
+    label_coverage = (manual_count / len(rows) * 100.0) if rows else 0.0
+    deduped_story_count = len({str(r.event_id or "") or str(r.headline or "").strip().lower() for r in rows if (r.event_id or r.headline)})
+
+    source_counts = Counter((r.source or "unknown") for r in rows)
+    suppress_reason_counts = Counter((r.deterministic_suppression_reason or "none") for r in suppressed)
+    story_type_counts = Counter((r.deterministic_story_type or "unknown") for r in rows)
+    freshness_counts = Counter((r.deterministic_freshness_state or "unknown") for r in rows)
+    disagreement_count = sum(1 for r in shadow_rows if r.agreement is False)
+
+    def _row_dict(r: Any) -> dict[str, Any]:
+        tickers = list(r.tickers_json or [])
+        return {
+            "id": r.id,
+            "headline": str(r.headline or "-"),
+            "source": str(r.source or "unknown"),
+            "tickers": tickers,
+            "story_type": str(r.deterministic_story_type or "unknown"),
+            "freshness_state": str(r.deterministic_freshness_state or "unknown"),
+            "update_status": str(r.deterministic_update_status or "unknown"),
+            "suppression_reason": str(r.deterministic_suppression_reason or ""),
+            "score": r.deterministic_score,
+            "breaking_eligible": bool(r.deterministic_breaking_eligible) if r.deterministic_breaking_eligible is not None else None,
+            "session_key": str(r.session_key or ""),
+            "labelled": _manual_labelled(r),
+            "label_source": str(r.label_source or "deterministic"),
+            "published_at": r.published_at.isoformat() if r.published_at else "",
+        }
+
+    breaking_sent_count = len(sent_breaking)
+
+    commands = [
+        "python -m app.cli news-review --date today --limit 50 --dedupe",
+        "python -m app.cli news-review --date today --limit 50 --dedupe --unlabelled-only",
+        "python -m app.cli news-label-quality --from YYYY-MM-DD --to today --dedupe",
+        "python -m app.cli session-audit --date today --classifier-details",
+    ]
+
+    return {
+        "title": "News Intelligence",
+        "subtitle": "Included stories, suppressed headlines, classifier review and breaking-candidate diagnostics.",
+        "profile": profile_name,
+        "selected_tab": selected_tab,
+        "target_date": target_date.isoformat(),
+        "session_filter": normalized_session,
+        "has_data": bool(rows),
+        "overview": {
+            "included_count": len(included),
+            "suppressed_count": len(suppressed),
+            "breaking_candidates_count": len(breaking_candidates),
+            "breaking_sent_count": breaking_sent_count,
+            "unlabelled_count": len(unlabelled),
+            "manual_label_coverage": f"{label_coverage:.1f}%",
+            "deduped_story_count": deduped_story_count,
+            "source_count": len(source_counts),
+            "disagreement_count": disagreement_count,
+        },
+        "included_rows": [_row_dict(r) for r in included[:50]],
+        "suppressed_rows": [_row_dict(r) for r in suppressed[:50]],
+        "breaking_rows": [_row_dict(r) for r in breaking_candidates[:50]],
+        "unlabelled_rows": [_row_dict(r) for r in unlabelled[:50]],
+        "story_type_counts": dict(story_type_counts),
+        "freshness_counts": dict(freshness_counts),
+        "suppress_reason_counts": dict(suppress_reason_counts),
+        "source_counts": dict(source_counts),
+        "provider_health": provider_health,
+        "shadow": {
+            "rows_total": len(shadow_rows),
+            "agreement_count": len(shadow_rows) - disagreement_count,
+            "disagreement_count": disagreement_count,
+            "enabled": bool(getattr(settings, "enable_ml_news_classifier", False)),
+            "llm_enabled": bool(getattr(settings, "enable_llm_news_classifier", False)),
+        },
+        "commands": commands,
+        "deterministic_note": "Deterministic classifier is authoritative. ML/LLM are shadow-only diagnostics.",
+        "breaking_note": "Diagnostics only. This page does not trigger alerts.",
     }
 
 

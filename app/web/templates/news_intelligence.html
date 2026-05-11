@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>News Intelligence — Briefly</title>
+  <link rel="stylesheet" href="/static/css/ui-shell.css">
+  <style>
+    :root {
+      --n-surface: rgba(17, 25, 46, 0.88);
+      --n-surface-strong: rgba(19, 28, 52, 0.94);
+      --n-border: rgba(136, 155, 195, 0.34);
+      --n-text: #ecf2ff;
+      --n-muted: #b7c4de;
+      --n-shadow: 0 16px 30px rgba(0, 0, 0, 0.22);
+      --n-accent: #6f9cff;
+      --ok: #1dc47a;
+      --warn: #f0af37;
+      --bad: #ef6a6a;
+      --off: #9ba9c2;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --n-surface: rgba(255, 255, 255, 0.95);
+        --n-surface-strong: rgba(255, 255, 255, 0.98);
+        --n-border: rgba(79, 99, 139, 0.22);
+        --n-text: #13203e;
+        --n-muted: #485a7a;
+        --n-shadow: 0 10px 24px rgba(25, 36, 62, 0.12);
+        --n-accent: #2c5fe5;
+      }
+    }
+    body { margin: 0; color: var(--n-text); font-family: "IBM Plex Sans","Segoe UI",sans-serif; }
+    .shell-wrap { padding: 24px 14px 40px; }
+    .shell { max-width: 1240px; margin: 0 auto; }
+    .hero, .card { border: 1px solid var(--n-border); border-radius: 14px; background: var(--n-surface); box-shadow: var(--n-shadow); }
+    .hero { padding: 18px; margin-bottom: 12px; background: var(--n-surface-strong); }
+    h1 { margin: 0; font-size: 1.9rem; letter-spacing: -0.02em; }
+    .sub { margin: 7px 0 0; color: var(--n-muted); font-size: 0.94rem; }
+    .filters { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .chip, .tab-link, .nav a { border: 1px solid var(--n-border); border-radius: 999px; padding: 7px 11px; font-size: 0.78rem; color: var(--n-muted); background: color-mix(in srgb, var(--n-surface) 90%, transparent); text-decoration: none; }
+    .chip strong { color: var(--n-text); }
+    .tabs, .nav { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .tab-link { color: var(--n-text); }
+    .tab-link.active { border-color: color-mix(in srgb, var(--n-accent) 58%, var(--n-border)); background: color-mix(in srgb, var(--n-accent) 18%, var(--n-surface)); font-weight: 700; }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .grid-4 { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0,1fr)); }
+    .card { padding: 14px; }
+    .card h2 { margin: 0 0 8px; font-size: 1rem; }
+    .muted { color: var(--n-muted); font-size: 0.84rem; }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dashed color-mix(in srgb, var(--n-border) 80%, transparent); }
+    .row:last-child { border-bottom: none; }
+    .value { font-weight: 650; text-align: right; }
+    .badge { border-radius: 999px; padding: 2px 8px; font-size: 0.69rem; font-weight: 700; border: 1px solid var(--n-border); text-transform: lowercase; }
+    .ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 62%, var(--n-border)); }
+    .warn, .partial, .rate_limited { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 62%, var(--n-border)); }
+    .bad, .error, .unauthorised { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 62%, var(--n-border)); }
+    .off, .suppressed, .unavailable, .disabled { color: var(--off); border-color: color-mix(in srgb, var(--off) 62%, var(--n-border)); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th, td { text-align: left; border-bottom: 1px dashed color-mix(in srgb, var(--n-border) 80%, transparent); padding: 7px 4px; vertical-align: top; }
+    th { color: var(--n-muted); font-weight: 600; }
+    .mini { font-size: 0.76rem; color: var(--n-muted); }
+    code { font-size: 0.78rem; color: var(--n-muted); }
+    .cmd { border: 1px dashed var(--n-border); border-radius: 10px; padding: 8px; margin-top: 8px; background: color-mix(in srgb, var(--n-surface) 93%, transparent); }
+    @media (max-width: 1020px) { .grid, .grid-4 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="briefly-shell">
+    <div class="shell-wrap">
+      <div class="shell">
+        <section class="hero">
+          <h1>{{ ni.title }}</h1>
+          <p class="sub">{{ ni.subtitle }}</p>
+          <div class="filters">
+            <span class="chip"><strong>Date:</strong> {{ ni.target_date }}</span>
+            <span class="chip"><strong>Session:</strong> {{ ni.session_filter or "all" }}</span>
+            <span class="chip"><strong>Deterministic:</strong> authoritative</span>
+            <span class="chip"><strong>ML shadow:</strong> {{ "enabled" if ni.shadow.enabled else "disabled" }}</span>
+            <span class="chip"><strong>LLM shadow:</strong> {{ "enabled" if ni.shadow.llm_enabled else "disabled" }}</span>
+          </div>
+          <div class="tabs">
+            {% for tab_key, tab_label in [("overview","Overview"),("included","Included"),("suppressed","Suppressed"),("breaking","Breaking Candidates"),("labels","Label Review"),("health","Classifier Health"),("sources","Sources")] %}
+              <a class="tab-link {{ 'active' if ni.selected_tab == tab_key else '' }}" href="/ui/news?profile={{ state.profile }}&date={{ ni.target_date }}&session={{ ni.session_filter }}&tab={{ tab_key }}">{{ tab_label }}</a>
+            {% endfor %}
+          </div>
+          <div class="nav">
+            <a href="/ui?profile={{ state.profile }}">Command Centre</a>
+            <a href="/ui/briefing?profile={{ state.profile }}">Briefings & Delivery</a>
+            <a href="/ui/portfolio?profile={{ state.profile }}">Portfolio</a>
+            <a href="/ui/briefing/macro?profile={{ state.profile }}">Macro</a>
+            <a href="/ui/briefing/verticals?profile={{ state.profile }}">Verticals</a>
+            <a href="/ui/settings?profile={{ state.profile }}">Settings</a>
+          </div>
+        </section>
+
+        {% if not ni.has_data %}
+          <section class="card" style="margin-bottom:12px;">
+            <h2>No local review data found for this date.</h2>
+            <p class="muted">Run one of the commands below to populate local classifier review state.</p>
+            {% for cmd in ni.commands %}
+              <div class="cmd"><code>{{ cmd }}</code></div>
+            {% endfor %}
+          </section>
+        {% endif %}
+
+        {% if ni.selected_tab == "overview" %}
+          <section class="grid-4" style="margin-bottom:12px;">
+            <article class="card"><h2>Included today</h2><div class="value">{{ ni.overview.included_count }}</div></article>
+            <article class="card"><h2>Suppressed today</h2><div class="value">{{ ni.overview.suppressed_count }}</div></article>
+            <article class="card"><h2>Breaking candidates</h2><div class="value">{{ ni.overview.breaking_candidates_count }}</div></article>
+            <article class="card"><h2>Unlabelled review items</h2><div class="value">{{ ni.overview.unlabelled_count }}</div></article>
+          </section>
+          <section class="grid" style="margin-bottom:12px;">
+            <article class="card">
+              <h2>Pipeline summary</h2>
+              <div class="row"><span>Manual label coverage</span><span class="value">{{ ni.overview.manual_label_coverage }}</span></div>
+              <div class="row"><span>Deduped stories</span><span class="value">{{ ni.overview.deduped_story_count }}</span></div>
+              <div class="row"><span>Source contributors</span><span class="value">{{ ni.overview.source_count }}</span></div>
+              <div class="row"><span>Shadow disagreements</span><span class="value">{{ ni.overview.disagreement_count }}</span></div>
+            </article>
+            <article class="card">
+              <h2>What this means</h2>
+              <p class="muted">{{ ni.deterministic_note }}</p>
+              <p class="muted">Breaking alerts require hard catalyst gates and freshness checks.</p>
+              <p class="muted">Suppressed stories are filtered out for quality and relevance, not deleted.</p>
+            </article>
+          </section>
+        {% endif %}
+
+        {% if ni.selected_tab == "included" %}
+          <section class="card">
+            <h2>Included stories</h2>
+            <table>
+              <thead><tr><th>Headline</th><th>Source</th><th>Tickers</th><th>Story type</th><th>Freshness</th><th>Score</th></tr></thead>
+              <tbody>
+              {% for r in ni.included_rows %}
+                <tr>
+                  <td>{{ r.headline }}<div class="mini">{{ r.session_key or "-" }}</div></td>
+                  <td>{{ r.source }}</td>
+                  <td>{{ r.tickers|join(", ") if r.tickers else "-" }}</td>
+                  <td>{{ r.story_type }}</td>
+                  <td>{{ r.freshness_state }} / {{ r.update_status }}</td>
+                  <td>{{ "%.2f"|format(r.score) if r.score is not none else "-" }}</td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </section>
+        {% endif %}
+
+        {% if ni.selected_tab == "suppressed" %}
+          <section class="grid" style="margin-bottom:12px;">
+            <article class="card">
+              <h2>Suppression reasons</h2>
+              {% for k, v in ni.suppress_reason_counts.items() %}
+                <div class="row"><span>{{ k }}</span><span class="value">{{ v }}</span></div>
+              {% endfor %}
+            </article>
+            <article class="card">
+              <h2>Suppressed headlines</h2>
+              <table>
+                <thead><tr><th>Headline</th><th>Reason</th><th>Type</th><th>Freshness</th></tr></thead>
+                <tbody>
+                {% for r in ni.suppressed_rows %}
+                  <tr>
+                    <td>{{ r.headline }}</td>
+                    <td>{{ r.suppression_reason or "suppressed" }}</td>
+                    <td>{{ r.story_type }}</td>
+                    <td>{{ r.freshness_state }} / {{ r.update_status }}</td>
+                  </tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            </article>
+          </section>
+        {% endif %}
+
+        {% if ni.selected_tab == "breaking" %}
+          <section class="card">
+            <h2>Breaking candidates</h2>
+            <p class="muted">{{ ni.breaking_note }}</p>
+            <div class="row"><span>Candidates</span><span class="value">{{ ni.overview.breaking_candidates_count }}</span></div>
+            <div class="row"><span>Sent breaking alerts</span><span class="value">{{ ni.overview.breaking_sent_count }}</span></div>
+            <table>
+              <thead><tr><th>Headline</th><th>Tickers</th><th>Eligibility</th><th>Rejection / suppress reason</th><th>Source</th></tr></thead>
+              <tbody>
+              {% for r in ni.breaking_rows %}
+                <tr>
+                  <td>{{ r.headline }}</td>
+                  <td>{{ r.tickers|join(", ") if r.tickers else "-" }}</td>
+                  <td><span class="badge {{ 'ok' if r.breaking_eligible else 'off' }}">{{ "eligible" if r.breaking_eligible else "not eligible" }}</span></td>
+                  <td>{{ r.suppression_reason or "-" }}</td>
+                  <td>{{ r.source }}</td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </section>
+        {% endif %}
+
+        {% if ni.selected_tab == "labels" %}
+          <section class="grid">
+            <article class="card">
+              <h2>Label review queue</h2>
+              <div class="row"><span>Unlabelled items</span><span class="value">{{ ni.overview.unlabelled_count }}</span></div>
+              <div class="row"><span>Manual coverage</span><span class="value">{{ ni.overview.manual_label_coverage }}</span></div>
+              <table>
+                <thead><tr><th>Headline</th><th>Type</th><th>Freshness</th><th>Labelled</th></tr></thead>
+                <tbody>
+                {% for r in ni.unlabelled_rows %}
+                  <tr>
+                    <td>{{ r.headline }}</td>
+                    <td>{{ r.story_type }}</td>
+                    <td>{{ r.freshness_state }}</td>
+                    <td><span class="badge off">unlabelled</span></td>
+                  </tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            </article>
+            <article class="card">
+              <h2>CLI label workflow</h2>
+              {% for cmd in ni.commands %}
+                <div class="cmd"><code>{{ cmd }}</code></div>
+              {% endfor %}
+              <div class="cmd"><code>python -m app.cli news-label-set --id 123 --story-type earnings_results</code></div>
+            </article>
+          </section>
+        {% endif %}
+
+        {% if ni.selected_tab == "health" %}
+          <section class="grid">
+            <article class="card">
+              <h2>Classifier health</h2>
+              <div class="row"><span>Deterministic classifier</span><span class="badge ok">authoritative</span></div>
+              <div class="row"><span>ML shadow classifier</span><span class="badge {{ 'warn' if ni.shadow.enabled else 'off' }}">{{ "enabled" if ni.shadow.enabled else "disabled" }}</span></div>
+              <div class="row"><span>LLM shadow classifier</span><span class="badge {{ 'warn' if ni.shadow.llm_enabled else 'off' }}">{{ "enabled" if ni.shadow.llm_enabled else "disabled" }}</span></div>
+              <div class="row"><span>Shadow disagreements</span><span class="value">{{ ni.shadow.disagreement_count }}</span></div>
+              <p class="muted">{{ ni.deterministic_note }}</p>
+            </article>
+            <article class="card">
+              <h2>Quality distributions</h2>
+              {% for k, v in ni.story_type_counts.items() %}
+                <div class="row"><span>Story type: {{ k }}</span><span class="value">{{ v }}</span></div>
+              {% endfor %}
+              {% for k, v in ni.freshness_counts.items() %}
+                <div class="row"><span>Freshness: {{ k }}</span><span class="value">{{ v }}</span></div>
+              {% endfor %}
+            </article>
+          </section>
+        {% endif %}
+
+        {% if ni.selected_tab == "sources" %}
+          <section class="grid">
+            <article class="card">
+              <h2>Source contribution</h2>
+              {% for k, v in ni.source_counts.items() %}
+                <div class="row"><span>{{ k }}</span><span class="value">{{ v }}</span></div>
+              {% endfor %}
+              {% if not ni.source_counts %}
+                <p class="muted">No source contribution data available for this date.</p>
+              {% endif %}
+            </article>
+            <article class="card">
+              <h2>Provider health</h2>
+              {% for p in ni.provider_health %}
+                <div class="row"><span>{{ p.provider }}</span><span class="badge {{ p.status }}">{{ p.status|replace("_"," ") }}</span></div>
+              {% endfor %}
+            </article>
+          </section>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</body>
+</html>

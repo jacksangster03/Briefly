@@ -236,6 +236,12 @@ python -m app.cli prefs-set --key briefing.macro_policy_watch_sessions --value '
   - `news-dataset-export`
   - `news-label-quality`
 
+News Intelligence UI:
+- Route: `/ui/news`
+- Tabs: overview, included, suppressed, breaking candidates, label review, classifier health, sources.
+- Local-state only; no live ingestion trigger from page render.
+- Deterministic classifier remains authoritative; ML/LLM remain shadow-only diagnostics.
+
 ---
 
 ## 15) Vertical intelligence and healthcare

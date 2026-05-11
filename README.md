@@ -374,6 +374,25 @@ Operational notes:
 - Closing Wrap catch-ups shortly after midnight are assigned to the prior session date to avoid blocking that day’s 22:00 Closing Wrap.
 - Provider URLs in logs are redacted for secret-like query params including `api_key`, `apikey`, `api-token`, `api_token`, `apiToken`, `access_key`, `access-token`, `access_token`, `token`, `key`, and `authorization`.
 
+News Intelligence UI:
+
+- Route: `/ui/news?profile=default_user`
+- Purpose: visual review console for included stories, suppressions, breaking candidates, label-review queue, classifier health, and source contribution.
+- Uses local persisted state (`news_classifier_labels`, `news_classifier_shadow_runs`, and provider health logs). It does not trigger live ingestion/provider fetches.
+- Deterministic classifier remains authoritative. ML/LLM are shown as shadow diagnostics only.
+- Tabs:
+  - `overview`
+  - `included`
+  - `suppressed`
+  - `breaking`
+  - `labels`
+  - `health`
+  - `sources`
+- Query examples:
+  - `/ui/news?profile=default_user&date=today&tab=overview`
+  - `/ui/news?profile=default_user&date=today&session=morning&tab=breaking`
+- If no review rows exist for a date, the page renders a safe empty state with CLI commands (`news-review`, `news-label-quality`, `session-audit --classifier-details`).
+
 ---
 
 ## Updating and running latest code
