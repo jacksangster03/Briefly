@@ -64,24 +64,27 @@ def test_macro_dashboard_ui_route_renders(validation_test_settings, monkeypatch)
     assert response.status_code == 200
     html = response.text
     assert "Macro Policy Dashboard" in html
-    assert "Central Bank Policy" in html
+    assert "Simple view" in html
+    assert "mode=simple" in html
+    assert "mode=expert" in html
+    assert "Macro Signal Summary" in html
     assert "Inflation Tracker" in html
     assert "Labour Market" in html
     assert "Rates & Yield Curve" in html
-    assert "Next Macro Catalysts" in html
-    assert "Portfolio Lens" in html
-    assert "Data Basis" in html
-    assert "Policy Signal" in html
+    assert "Macro Catalyst Calendar" in html
+    assert "Portfolio Macro Lens" in html
+    assert "Data Quality & Freshness" in html
     assert "not a forecast" in html
-    assert "Eurozone data incomplete" in html
-    assert "Regional Coverage" in html
+    assert "Regional Policy Coverage" in html
     assert "United Kingdom" in html
+    assert "Eurozone" in html
+    assert "United States" in html
     assert "Spain" in html
     assert "Japan" in html
     assert "China" in html
-    assert "US CPI YoY" in html
-    assert "fred_units_pc1" in html
-    assert "%" in html
+    assert "ECB-linked country lens" in html
+    assert "/ui?profile=default_user" in html
+    assert "/ui/briefing?profile=default_user" in html
 
 
 def test_macro_dashboard_api_route_schema(validation_test_settings, monkeypatch):
@@ -132,6 +135,43 @@ def test_macro_dashboard_ui_handles_missing_fields_without_500(validation_test_s
     response = client.get("/ui/briefing/macro?profile=default_user")
     assert response.status_code == 200
     assert "Macro Policy Dashboard" in response.text
+
+
+def test_macro_dashboard_expert_mode_renders_advanced_details(validation_test_settings, monkeypatch):
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+    monkeypatch.setattr(
+        "app.web.app.build_macro_policy_dashboard",
+        lambda **_kwargs: {
+            "status": "partial",
+            "policy_signals": {
+                "status": "partial",
+                "fed_bias": {"label": "hold", "confidence": "medium", "drivers": ["mixed inputs"], "missing": []},
+                "ecb_bias": {"label": "uncertain", "confidence": "low", "drivers": ["labour confirmation unavailable"], "missing": ["euro_area_unemployment_rate"]},
+            },
+            "central_bank_policy": {"status": "partial", "series": {}},
+            "inflation_tracker": {"status": "partial", "series": {}},
+            "labour_tracker": {"status": "partial", "series": {}},
+            "rates_yield_curve_panel": {"status": "partial", "series": {}},
+            "macro_catalyst_calendar": {"status": "partial", "events": []},
+            "portfolio_lens": {"status": "partial", "summary": "generic", "buckets": {}},
+            "data_basis": {"macro_sources": "stub", "freshness_note": "stub"},
+        },
+    )
+    response = client.get("/ui/briefing/macro?profile=default_user&mode=expert")
+    assert response.status_code == 200
+    assert "Expert view" in response.text
+    assert "Expert Details" in response.text
+    assert "Fed bias drivers" in response.text
+    assert "ECB bias drivers" in response.text
+
+
+def test_macro_dashboard_and_core_routes_still_render(validation_test_settings):
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+    assert client.get("/ui?profile=default_user").status_code == 200
+    assert client.get("/ui/briefing?profile=default_user").status_code == 200
+    assert client.get("/ui/briefing/macro?profile=default_user").status_code == 200
 
 
 def test_macro_dashboard_api_handles_service_exception(validation_test_settings, monkeypatch):

@@ -4,46 +4,75 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Macro Policy Dashboard — Briefly</title>
+  <link rel="stylesheet" href="/static/css/ui-shell.css">
   <style>
     :root {
-      --bg: #030a12;
-      --canvas: #071524;
-      --panel: #0a1d30;
-      --divider: #17364f;
-      --text: #eaf2ff;
-      --sub: #a5b5c6;
-      --muted: #7d92a9;
-      --ok: #00c2a8;
-      --partial: #ffb454;
-      --unavailable: #8f9fb2;
-      --stale: #d48fff;
+      --m-surface: rgba(17, 25, 46, 0.88);
+      --m-surface-strong: rgba(19, 28, 52, 0.94);
+      --m-border: rgba(136, 155, 195, 0.34);
+      --m-text: #ecf2ff;
+      --m-muted: #b7c4de;
+      --m-shadow: 0 16px 30px rgba(0, 0, 0, 0.22);
+      --m-accent: #6f9cff;
+      --ok: #1dc47a;
+      --warn: #f0af37;
+      --bad: #ef6a6a;
+      --off: #9ba9c2;
     }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    .head { margin-bottom: 14px; }
-    .title { margin: 0 0 8px 0; font-size: 28px; font-weight: 800; }
-    .sub { margin: 0; color: var(--sub); }
-    .chips { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
-    .chip { border: 1px solid var(--divider); background: var(--panel); border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--sub); }
-    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    .card { background: var(--canvas); border: 1px solid var(--divider); border-radius: 12px; padding: 12px; }
-    .card h2 { margin: 0 0 8px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--sub); }
-    .rows { display: grid; gap: 8px; }
-    .row { background: var(--panel); border: 1px solid var(--divider); border-radius: 10px; padding: 8px; }
-    .name { font-weight: 700; font-size: 13px; }
-    .meta { margin-top: 4px; color: var(--sub); font-size: 12px; }
-    .badge { border-radius: 999px; padding: 2px 8px; font-size: 11px; border: 1px solid var(--divider); }
-    .ok { color: var(--ok); }
-    .partial { color: var(--partial); }
-    .unavailable { color: var(--unavailable); }
-    .stale { color: var(--stale); }
-    .events { display: grid; gap: 8px; }
-    .event { border-left: 3px solid var(--divider); padding-left: 8px; }
-    .event .date { color: var(--muted); font-size: 12px; }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --m-surface: rgba(255, 255, 255, 0.95);
+        --m-surface-strong: rgba(255, 255, 255, 0.98);
+        --m-border: rgba(79, 99, 139, 0.22);
+        --m-text: #13203e;
+        --m-muted: #485a7a;
+        --m-shadow: 0 10px 24px rgba(25, 36, 62, 0.12);
+        --m-accent: #2c5fe5;
+      }
+    }
+    body { margin: 0; color: var(--m-text); font-family: "IBM Plex Sans", "Segoe UI", sans-serif; }
+    .shell-wrap { padding: 24px 14px 40px; }
+    .shell { max-width: 1240px; margin: 0 auto; }
+    .hero, .card { border: 1px solid var(--m-border); border-radius: 14px; background: var(--m-surface); box-shadow: var(--m-shadow); }
+    .hero { padding: 18px; margin-bottom: 12px; background: var(--m-surface-strong); }
+    h1 { margin: 0; font-size: 1.9rem; letter-spacing: -0.02em; }
+    .sub { margin: 7px 0 0; color: var(--m-muted); font-size: 0.94rem; }
+    .chips { margin-top: 12px; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); }
+    .chip { border: 1px solid var(--m-border); border-radius: 999px; padding: 7px 11px; font-size: 0.78rem; color: var(--m-muted); background: color-mix(in srgb, var(--m-surface) 90%, transparent); }
+    .chip strong { color: var(--m-text); }
+    .mode-toggle { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .mode-link { text-decoration: none; border: 1px solid var(--m-border); border-radius: 999px; padding: 7px 12px; font-size: 0.79rem; color: var(--m-text); background: color-mix(in srgb, var(--m-surface) 85%, transparent); }
+    .mode-link.active { border-color: color-mix(in srgb, var(--m-accent) 58%, var(--m-border)); background: color-mix(in srgb, var(--m-accent) 18%, var(--m-surface)); font-weight: 700; }
+    .mode-link:hover { border-color: color-mix(in srgb, var(--m-accent) 50%, var(--m-border)); }
+    .nav { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a { text-decoration: none; border: 1px solid var(--m-border); border-radius: 999px; padding: 7px 11px; font-size: 0.78rem; color: var(--m-text); background: color-mix(in srgb, var(--m-surface) 87%, transparent); }
+    .nav a:hover { border-color: color-mix(in srgb, var(--m-accent) 52%, var(--m-border)); }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .grid-3 { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0,1fr)); }
+    .grid-6 { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0,1fr)); }
+    .card { padding: 14px; }
+    .card h2 { margin: 0 0 8px; font-size: 1rem; }
+    .muted { color: var(--m-muted); font-size: 0.84rem; }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dashed color-mix(in srgb, var(--m-border) 80%, transparent); }
+    .row:last-child { border-bottom: none; }
+    .value { font-weight: 650; text-align: right; }
+    .badge { border-radius: 999px; padding: 2px 8px; font-size: 0.69rem; font-weight: 700; border: 1px solid var(--m-border); text-transform: lowercase; }
+    .ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 62%, var(--m-border)); }
+    .partial, .stale, .warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 62%, var(--m-border)); }
+    .error, .failed, .bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 62%, var(--m-border)); }
+    .unavailable, .disabled, .off, .not_wired { color: var(--off); border-color: color-mix(in srgb, var(--off) 62%, var(--m-border)); }
+    .signal-line { font-size: 0.9rem; font-weight: 640; margin-bottom: 5px; }
+    .region-card { border: 1px solid var(--m-border); border-radius: 11px; background: color-mix(in srgb, var(--m-surface) 92%, transparent); padding: 10px; }
+    .region-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .region-title strong { font-size: 0.9rem; }
+    .driver { font-size: 0.79rem; color: var(--m-muted); margin-top: 3px; }
+    .event { border-left: 2px solid var(--m-border); padding-left: 8px; margin-bottom: 8px; }
+    .event:last-child { margin-bottom: 0; }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: var(--m-muted); font-size: 0.82rem; }
     .links { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
-    .links a { color: var(--sub); text-decoration: none; border-bottom: 1px dotted var(--sub); }
-    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+    .links a { color: var(--m-muted); text-decoration: none; border-bottom: 1px dotted var(--m-muted); }
+    @media (max-width: 1020px) { .grid, .grid-3, .grid-6 { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -55,232 +84,187 @@
   {% set cal = p.get("macro_catalyst_calendar", {}) %}
   {% set lens = p.get("portfolio_lens", {}) %}
   {% set sig = p.get("policy_signals", {}) %}
+  {% set regions = sig.get("regions", {}) or {} %}
   {% set basis = p.get("data_basis", {}) %}
-  <div class="wrap">
-    <div class="head">
-      <h1 class="title">Macro Policy Dashboard</h1>
-      <p class="sub">Deterministic policy, inflation, labour, rates and catalyst monitoring with explicit freshness states.</p>
-      <div class="chips">
-        <span class="chip">Profile: {{ profile }}</span>
-        <span class="chip">Status: {{ p.get("status", "unavailable") }}</span>
-        <span class="chip">Generated: {{ p.get("generated_at", "n/a") }}</span>
-      </div>
-    </div>
+  {% set view_mode = mode if mode in ["simple", "expert"] else "simple" %}
 
-    <section class="card" style="margin-bottom:12px;">
-      <h2>Policy Signal <span class="badge {{ sig.get('status', 'unavailable') }}">{{ sig.get("status", "unavailable") }}</span></h2>
-      <div class="meta" style="margin-bottom:8px;">
-        Deterministic signal · policy bias only · not a market-implied probability · not a forecast.
-      </div>
-      <div class="grid" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
-        <div class="row">
-          <div class="name">Fed Bias: {{ sig.get("fed_bias", {}).get("label", "uncertain") }}</div>
-          <div class="meta">Confidence: {{ sig.get("fed_bias", {}).get("confidence", "low") }}</div>
-          {% for line in sig.get("fed_bias", {}).get("drivers", [])[:2] %}
-          <div class="meta">• {{ line }}</div>
-          {% endfor %}
-          {% if sig.get("fed_bias", {}).get("missing") %}
-          <div class="meta">Missing: {{ sig.get("fed_bias", {}).get("missing", []) | join(", ") }}</div>
-          {% endif %}
-        </div>
-        <div class="row">
-          <div class="name">ECB Bias: {{ sig.get("ecb_bias", {}).get("label", "uncertain") }}</div>
-          <div class="meta">Confidence: {{ sig.get("ecb_bias", {}).get("confidence", "low") }}</div>
-          {% for line in sig.get("ecb_bias", {}).get("drivers", [])[:2] %}
-          <div class="meta">• {{ line }}</div>
-          {% endfor %}
-          {% if sig.get("ecb_bias", {}).get("missing") %}
-          <div class="meta">Missing: {{ sig.get("ecb_bias", {}).get("missing", []) | join(", ") }}</div>
-          {% endif %}
-        </div>
-      </div>
-      <div class="rows" style="margin-top:10px;">
-        <div class="row">
-          <div class="name">Inflation Pressure: {{ sig.get("inflation_pressure", {}).get("label", "uncertain") }} ({{ sig.get("inflation_pressure", {}).get("confidence", "low") }})</div>
-          {% for line in sig.get("inflation_pressure", {}).get("drivers", [])[:2] %}
-          <div class="meta">• {{ line }}</div>
-          {% endfor %}
-        </div>
-        <div class="row">
-          <div class="name">Labour Pressure: {{ sig.get("labour_pressure", {}).get("label", "uncertain") }} ({{ sig.get("labour_pressure", {}).get("confidence", "low") }})</div>
-          {% for line in sig.get("labour_pressure", {}).get("drivers", [])[:2] %}
-          <div class="meta">• {{ line }}</div>
-          {% endfor %}
-        </div>
-        <div class="row">
-          <div class="name">Rates Pressure: {{ sig.get("rates_pressure", {}).get("label", "uncertain") }} ({{ sig.get("rates_pressure", {}).get("confidence", "low") }})</div>
-          {% for line in sig.get("rates_pressure", {}).get("drivers", [])[:2] %}
-          <div class="meta">• {{ line }}</div>
-          {% endfor %}
-        </div>
-        <div class="row">
-          <div class="name">Portfolio Implications</div>
-          {% for line in sig.get("portfolio_implications", [])[:4] %}
-          <div class="meta">• {{ line }}</div>
-          {% endfor %}
-        </div>
-      </div>
-      {% if sig.get("regions") %}
-      <div class="rows" style="margin-top:10px;">
-        <div class="row">
-          <div class="name">Regional Coverage</div>
-          <div class="meta">Fed/ECB are active deterministic signals. UK, Japan and China are Phase 1 placeholders. Spain is a Eurozone country lens.</div>
-          <div class="grid" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top:8px;">
-            {% for rkey, r in sig.get("regions", {}).items() %}
-            <div class="row">
-              <div class="name">{{ r.get("region_label", rkey|upper) }}</div>
-              <div class="meta">Scope: {{ r.get("scope", "regional") }} · Status: {{ r.get("status", "unavailable") }}</div>
-              {% if r.get("scope") == "country_lens" %}
-              <div class="meta">Lens: {{ r.get("country_lens", {}).get("label", "country_macro_lens") }} ({{ r.get("country_lens", {}).get("confidence", "low") }})</div>
-              {% if r.get("policy_anchor") %}
-              <div class="meta">Anchor: {{ r.get("policy_anchor") }}</div>
-              {% endif %}
-              {% if r.get("country_lens", {}).get("missing") %}
-              <div class="meta">Missing: {{ r.get("country_lens", {}).get("missing", []) | join(", ") }}</div>
-              {% endif %}
-              {% else %}
-              <div class="meta">Bias: {{ r.get("policy_bias", {}).get("label", "uncertain") }} ({{ r.get("policy_bias", {}).get("confidence", "low") }})</div>
-              {% if r.get("policy_bias", {}).get("missing") %}
-              <div class="meta">Missing: {{ r.get("policy_bias", {}).get("missing", []) | join(", ") }}</div>
-              {% endif %}
-              {% endif %}
-              {% if r.get("drivers") %}
-              <div class="meta">Driver: {{ r.get("drivers", [])[0] }}</div>
-              {% endif %}
-            </div>
+  <div class="briefly-shell">
+    <div class="shell-wrap">
+      <div class="shell">
+        <section class="hero">
+          <h1>Macro Policy Dashboard</h1>
+          <p class="sub">Deterministic policy signals, inflation/labour/rates context and portfolio sensitivity.</p>
+          <div class="chips">
+            <div class="chip"><strong>Profile:</strong> {{ profile }}</div>
+            <div class="chip"><strong>Status:</strong> {{ p.get("status", "unavailable") }}</div>
+            <div class="chip"><strong>Generated:</strong> {{ p.get("generated_at", "n/a") }}</div>
+          </div>
+          <div class="mode-toggle">
+            <a class="mode-link {{ 'active' if view_mode == 'simple' else '' }}" href="/ui/briefing/macro?profile={{ profile }}&mode=simple">Simple view</a>
+            <a class="mode-link {{ 'active' if view_mode == 'expert' else '' }}" href="/ui/briefing/macro?profile={{ profile }}&mode=expert">Expert view</a>
+          </div>
+          <div class="nav">
+            <a href="/ui?profile={{ profile }}">Command Centre</a>
+            <a href="/ui/briefing?profile={{ profile }}">Briefings & Delivery</a>
+            <a href="/ui/portfolio?profile={{ profile }}">Portfolio</a>
+            <a href="/ui/briefing/verticals?profile={{ profile }}">Verticals</a>
+            <a href="/ui/settings?profile={{ profile }}">Settings</a>
+          </div>
+        </section>
+
+        <section class="card" style="margin-bottom:12px;">
+          <h2>Macro Signal Summary <span class="badge {{ sig.get('status', p.get('status', 'unavailable')) }}">{{ sig.get("status", p.get("status", "unavailable")) }}</span></h2>
+          <div class="signal-line">Fed: {{ sig.get("fed_bias", {}).get("label", "uncertain")|replace("_","-") }} · {{ sig.get("fed_bias", {}).get("confidence", "low") }} confidence</div>
+          <div class="signal-line">ECB: {{ sig.get("ecb_bias", {}).get("label", "uncertain")|replace("_","-") }} · {{ sig.get("ecb_bias", {}).get("confidence", "low") }} confidence</div>
+          <div class="signal-line">Inflation: {{ sig.get("inflation_pressure", {}).get("label", "uncertain")|replace("_","-") }} · Labour: {{ sig.get("labour_pressure", {}).get("label", "uncertain")|replace("_","-") }} · Rates: {{ sig.get("rates_pressure", {}).get("label", "uncertain")|replace("_","-") }}</div>
+          <div class="signal-line">Portfolio: {{ (sig.get("portfolio_implications", []) or ["No portfolio implication available."])[0] }}</div>
+          <p class="muted" style="margin:8px 0 0;">Deterministic signal, not a forecast or market-implied probability.</p>
+        </section>
+
+        <section class="card" style="margin-bottom:12px;">
+          <h2>Regional Policy Coverage</h2>
+          <div class="grid-6">
+            {% for region_key, fallback_label, fallback_scope in [
+              ("us", "United States", "central bank"),
+              ("eurozone", "Eurozone", "central bank"),
+              ("uk", "United Kingdom", "central bank"),
+              ("spain", "Spain", "country lens"),
+              ("japan", "Japan", "central bank"),
+              ("china", "China", "central bank"),
+            ] %}
+              {% set r = regions.get(region_key, {}) %}
+              {% set r_status = r.get("status", "unavailable") %}
+              {% set r_scope = r.get("scope", fallback_scope) %}
+              {% set r_label = r.get("region_label", fallback_label) %}
+              {% set r_bias = (r.get("country_lens", {}) if r_scope == "country_lens" else r.get("policy_bias", {})) or {} %}
+              <article class="region-card">
+                <div class="region-title">
+                  <strong>{{ r_label }}</strong>
+                  <span class="badge {{ r_status }}">{{ r_status|replace("_"," ") }}</span>
+                </div>
+                <div class="driver">Scope: {{ "ECB-linked country lens" if region_key == "spain" else ("central bank" if r_scope != "country_lens" else "country lens") }}</div>
+                <div class="driver">Bias: {{ r_bias.get("label", "uncertain")|replace("_","-") }} · {{ r_bias.get("confidence", "low") }} confidence</div>
+                {% set all_drivers = (r_bias.get("drivers", []) or r.get("drivers", []) or []) %}
+                {% if all_drivers %}
+                  <div class="driver">Driver: {{ all_drivers[0] }}</div>
+                  {% if all_drivers|length > 1 %}<div class="driver">Driver: {{ all_drivers[1] }}</div>{% endif %}
+                {% endif %}
+                {% set missing_count = (r_bias.get("missing", []) or [])|length %}
+                <div class="driver">Missing fields: {{ missing_count }}</div>
+                <details>
+                  <summary>View details</summary>
+                  {% if r.get("policy_anchor") %}<div class="driver">Policy anchor: {{ r.get("policy_anchor") }}</div>{% endif %}
+                  {% if r_bias.get("missing") %}<div class="driver">Missing: {{ r_bias.get("missing", [])|join(", ") }}</div>{% endif %}
+                  {% if r_bias.get("risks") %}<div class="driver">Risks: {{ r_bias.get("risks", [])|join(" · ") }}</div>{% endif %}
+                </details>
+              </article>
             {% endfor %}
           </div>
+        </section>
+
+        <section class="grid-3" style="margin-bottom:12px;">
+          <article class="card">
+            <h2>Inflation Tracker</h2>
+            <div class="row"><span>US CPI YoY</span><span class="value">{{ inf.get("series", {}).get("us_cpi", {}).get("value", "n/a") }} {{ inf.get("series", {}).get("us_cpi", {}).get("unit", "") }}</span></div>
+            <div class="row"><span>US Core CPI / PCE</span><span class="value">{{ inf.get("series", {}).get("us_core_cpi", {}).get("value", inf.get("series", {}).get("us_core_pce", {}).get("value", "n/a")) }} {{ inf.get("series", {}).get("us_core_cpi", {}).get("unit", inf.get("series", {}).get("us_core_pce", {}).get("unit", "")) }}</span></div>
+            <div class="row"><span>Eurozone HICP</span><span class="value">{{ inf.get("series", {}).get("eurozone_hicp", {}).get("value", "n/a") }} {{ inf.get("series", {}).get("eurozone_hicp", {}).get("unit", "") }}</span></div>
+            <div class="row"><span>Freshness</span><span class="badge {{ inf.get('status', 'unavailable') }}">{{ inf.get("status", "unavailable") }}</span></div>
+          </article>
+          <article class="card">
+            <h2>Labour Market</h2>
+            <div class="row"><span>US unemployment</span><span class="value">{{ lab.get("series", {}).get("us_unemployment_rate", {}).get("value", "n/a") }} {{ lab.get("series", {}).get("us_unemployment_rate", {}).get("unit", "") }}</span></div>
+            <div class="row"><span>US payrolls / claims</span><span class="value">{{ lab.get("series", {}).get("us_payrolls", {}).get("value", "n/a") }} / {{ lab.get("series", {}).get("us_initial_claims", {}).get("value", "n/a") }}</span></div>
+            <div class="row"><span>Euro-area unemployment</span><span class="value">{{ lab.get("series", {}).get("euro_area_unemployment_rate", {}).get("value", "n/a") }} {{ lab.get("series", {}).get("euro_area_unemployment_rate", {}).get("unit", "") }}</span></div>
+            <div class="row"><span>Freshness</span><span class="badge {{ lab.get('status', 'unavailable') }}">{{ lab.get("status", "unavailable") }}</span></div>
+          </article>
+          <article class="card">
+            <h2>Rates & Yield Curve</h2>
+            <div class="row"><span>Fed / ECB policy</span><span class="value">{{ cb.get("series", {}).get("fed", {}).get("value", "n/a") }} / {{ cb.get("series", {}).get("ecb", {}).get("value", "n/a") }}</span></div>
+            <div class="row"><span>US 2Y / 10Y / 30Y</span><span class="value">{{ rates.get("series", {}).get("us_2y", {}).get("value", "n/a") }} / {{ rates.get("series", {}).get("us_10y", {}).get("value", "n/a") }} / {{ rates.get("series", {}).get("us_30y", {}).get("value", "n/a") }}</span></div>
+            <div class="row"><span>10Y-2Y</span><span class="value">{{ rates.get("series", {}).get("us_10y_2y_spread", {}).get("value", "n/a") }} {{ rates.get("series", {}).get("us_10y_2y_spread", {}).get("unit", "") }}</span></div>
+            <div class="row"><span>Rate impulse</span><span class="value">{{ rates.get("rate_impulse", "unavailable")|replace("_"," ") }}</span></div>
+          </article>
+        </section>
+
+        <section class="grid" style="margin-bottom:12px;">
+          <article class="card">
+            <h2>Macro Catalyst Calendar</h2>
+            {% if cal.get("events") %}
+              {% for ev in cal.get("events", []) %}
+                <div class="event">
+                  <div><strong>{{ ev.title }}</strong></div>
+                  <div class="muted">{{ ev.date }} · {{ ev.region|upper }} · {{ ev.importance }}</div>
+                  {% if view_mode == "expert" and ev.get("why_it_matters") %}
+                    <div class="muted">{{ ev.why_it_matters }}</div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            {% else %}
+              <div class="muted">No catalyst calendar entries available. Check configs/macro_calendar.yaml.</div>
+            {% endif %}
+          </article>
+
+          <article class="card">
+            <h2>Portfolio Macro Lens</h2>
+            <div class="muted">{{ lens.get("summary", "Portfolio lens unavailable.") }}</div>
+            {% for item in (sig.get("portfolio_implications", []) or [])[:4] %}
+              <div class="row"><span>{{ item }}</span></div>
+            {% endfor %}
+            {% if not (sig.get("portfolio_implications", []) or []) %}
+              <div class="row"><span>Duration sensitivity, growth valuation and defensive positioning are unavailable.</span></div>
+            {% endif %}
+          </article>
+        </section>
+
+        <section class="card">
+          <h2>Data Quality & Freshness</h2>
+          <details {% if view_mode == "expert" %}open{% endif %}>
+            <summary>View source and panel status</summary>
+            <div class="row"><span>FRED / ECB / Eurostat basis</span><span class="value">{{ basis.get("macro_sources", "unavailable") }}</span></div>
+            <div class="row"><span>Central bank panel</span><span class="badge {{ cb.get('status', 'unavailable') }}">{{ cb.get("status", "unavailable") }}</span></div>
+            <div class="row"><span>Inflation panel</span><span class="badge {{ inf.get('status', 'unavailable') }}">{{ inf.get("status", "unavailable") }}</span></div>
+            <div class="row"><span>Labour panel</span><span class="badge {{ lab.get('status', 'unavailable') }}">{{ lab.get("status", "unavailable") }}</span></div>
+            <div class="row"><span>Rates panel</span><span class="badge {{ rates.get('status', 'unavailable') }}">{{ rates.get("status", "unavailable") }}</span></div>
+            <div class="row"><span>Calendar panel</span><span class="badge {{ cal.get('status', 'unavailable') }}">{{ cal.get("status", "unavailable") }}</span></div>
+            <div class="row"><span>Freshness note</span><span class="value">{{ basis.get("freshness_note", "unavailable") }}</span></div>
+          </details>
+        </section>
+
+        {% if view_mode == "expert" %}
+          <section class="card" style="margin-top:12px;">
+            <h2>Expert Details</h2>
+            <p class="muted">Full deterministic drivers, missing fields, risks and methodology notes.</p>
+            <div class="grid">
+              <article>
+                <h3 style="margin:0 0 8px;">Fed bias drivers</h3>
+                {% for d in sig.get("fed_bias", {}).get("drivers", []) %}
+                  <div class="row"><span>{{ d }}</span></div>
+                {% endfor %}
+                {% if not sig.get("fed_bias", {}).get("drivers") %}<div class="muted">No drivers available.</div>{% endif %}
+                {% if sig.get("fed_bias", {}).get("missing") %}<div class="muted">Missing: {{ sig.get("fed_bias", {}).get("missing", [])|join(", ") }}</div>{% endif %}
+              </article>
+              <article>
+                <h3 style="margin:0 0 8px;">ECB bias drivers</h3>
+                {% for d in sig.get("ecb_bias", {}).get("drivers", []) %}
+                  <div class="row"><span>{{ d }}</span></div>
+                {% endfor %}
+                {% if not sig.get("ecb_bias", {}).get("drivers") %}<div class="muted">No drivers available.</div>{% endif %}
+                {% if sig.get("ecb_bias", {}).get("missing") %}<div class="muted">Missing: {{ sig.get("ecb_bias", {}).get("missing", [])|join(", ") }}</div>{% endif %}
+              </article>
+            </div>
+            {% if sig.get("methodology_note") %}
+              <p class="muted" style="margin-top:10px;">{{ sig.get("methodology_note") }}</p>
+            {% endif %}
+            <p class="muted">Signal language is deterministic and descriptive. It is not a forecast and does not imply probability weights.</p>
+          </section>
+        {% endif %}
+
+        <div class="links">
+          <a href="/ui/briefing?profile={{ profile }}">Back to Briefings & Delivery</a>
+          <a href="/ui/briefing/morning/charts?profile={{ profile }}">Morning Charts</a>
+          <a href="/api/v1/profile/{{ profile }}/briefing/macro">Raw API JSON</a>
         </div>
       </div>
-      {% endif %}
-      {% if sig.get("methodology_note") %}
-      <div class="meta" style="margin-top:8px;">{{ sig.get("methodology_note") }}</div>
-      {% endif %}
-    </section>
-
-    <div class="grid">
-      <section class="card">
-        <h2>Central Bank Policy <span class="badge {{ cb.get('status', 'unavailable') }}">{{ cb.get("status", "unavailable") }}</span></h2>
-        <div class="rows">
-          {% for key, row in cb.get("series", {}).items() %}
-          <div class="row">
-            <div class="name">{{ row.label if row.label is defined else key | upper }}</div>
-            <div class="meta">
-              {{ row.value if row.value is not none else "unavailable" }}{% if row.unit %} {{ row.unit }}{% endif %}
-              · {{ row.latest_observation_date if row.latest_observation_date else (row.date if row.date else "n/a") }}
-              · {{ row.freshness if row.freshness else "unknown" }}
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Inflation Tracker <span class="badge {{ inf.get('status', 'unavailable') }}">{{ inf.get("status", "unavailable") }}</span></h2>
-        <div class="meta" style="margin-bottom:8px;">
-          Change semantics: rate metrics use percentage-point interpretation (not compounding % change).
-        </div>
-        <div class="rows">
-          {% for key, row in inf.get("series", {}).items() %}
-          <div class="row">
-            <div class="name">{{ row.label if row.label is defined else key }}</div>
-            <div class="meta">
-              {{ row.value if row.value is not none else "unavailable" }}{% if row.unit %} {{ row.unit }}{% endif %}
-              · {{ row.latest_observation_date if row.latest_observation_date else (row.date if row.date else "n/a") }}
-              · {{ row.freshness if row.freshness else "unknown" }}
-              {% if row.transformation %} · {{ row.transformation }}{% endif %}
-              {% if row.fallback_note %} · {{ row.fallback_note }}{% endif %}
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Labour Market <span class="badge {{ lab.get('status', 'unavailable') }}">{{ lab.get("status", "unavailable") }}</span></h2>
-        <div class="meta" style="margin-bottom:8px;">
-          Units are explicit by metric (% rate, claims count, or level series).
-        </div>
-        <div class="rows">
-          {% for key, row in lab.get("series", {}).items() %}
-          <div class="row">
-            <div class="name">{{ row.label if row.label is defined else key }}</div>
-            <div class="meta">
-              {{ row.value if row.value is not none else "unavailable" }}{% if row.unit %} {{ row.unit }}{% endif %}
-              · {{ row.latest_observation_date if row.latest_observation_date else (row.date if row.date else "n/a") }}
-              · {{ row.freshness if row.freshness else "unknown" }}
-              {% if row.transformation %} · {{ row.transformation }}{% endif %}
-              {% if row.fallback_note %} · {{ row.fallback_note }}{% endif %}
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Rates & Yield Curve <span class="badge {{ rates.get('status', 'unavailable') }}">{{ rates.get("status", "unavailable") }}</span></h2>
-        <div class="meta" style="margin-bottom:8px;">
-          Shape: <strong>{{ rates.get("curve_shape", "unavailable") }}</strong> ·
-          Impulse: <strong>{{ rates.get("rate_impulse", "unavailable") }}</strong>
-        </div>
-        <div class="meta" style="margin-bottom:8px;">Yield/rate changes should be read as percentage-point moves (or basis-point equivalent), not compounding percent changes.</div>
-        <div class="meta" style="margin-bottom:8px;">{{ rates.get("portfolio_interpretation", "unavailable") }}</div>
-        <div class="rows">
-          {% for key, row in rates.get("series", {}).items() %}
-          <div class="row">
-            <div class="name">{{ row.label if row.label is defined else key }}</div>
-            <div class="meta">
-              {{ row.value if row.value is not none else "unavailable" }}{% if row.unit %} {{ row.unit }}{% endif %}
-              · {{ row.latest_observation_date if row.latest_observation_date else (row.date if row.date else "n/a") }}
-              · {{ row.freshness if row.freshness else "unknown" }}
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Next Macro Catalysts <span class="badge {{ cal.get('status', 'unavailable') }}">{{ cal.get("status", "unavailable") }}</span></h2>
-        <div class="events">
-          {% if cal.get("events") %}
-            {% for ev in cal.get("events", []) %}
-            <div class="event">
-              <div><strong>{{ ev.title }}</strong></div>
-              <div class="date">{{ ev.date }} · {{ ev.region | upper }} · {{ ev.importance }}</div>
-              <div class="meta">{{ ev.why_it_matters }}</div>
-            </div>
-            {% endfor %}
-          {% else %}
-            <div class="meta">No configured events in horizon window.</div>
-          {% endif %}
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Portfolio Lens <span class="badge {{ lens.get('status', 'unavailable') }}">{{ lens.get("status", "unavailable") }}</span></h2>
-        <div class="meta" style="margin-bottom:8px;">{{ lens.get("summary", "unavailable") }}</div>
-        <div class="rows">
-          {% for key, row in lens.get("buckets", {}).items() %}
-          <div class="row">
-            <div class="name">{{ key | replace("_", " ") | title }}</div>
-            <div class="meta">{{ row.intensity }} · weight {{ row.holding_weight_pct }}% · holdings {{ row.holdings | join(", ") if row.holdings else "none" }}</div>
-          </div>
-          {% endfor %}
-        </div>
-      </section>
-    </div>
-
-    <section class="card" style="margin-top:12px;">
-      <h2>Data Basis</h2>
-      <div class="meta">{{ basis.get("macro_sources", "unavailable") }}</div>
-      <div class="meta">Timezone: {{ basis.get("timezone", "n/a") }}</div>
-      <div class="meta">{{ basis.get("freshness_note", "Macro dashboard basis unavailable.") }}</div>
-    </section>
-
-    <div class="links">
-      <a href="/ui/briefing?profile={{ profile }}">Back to Briefing</a>
-      <a href="/ui/briefing/morning/charts?profile={{ profile }}">Morning Charts</a>
-      <a href="/api/v1/profile/{{ profile }}/briefing/macro">Raw API JSON</a>
     </div>
   </div>
 </body>

@@ -859,6 +859,9 @@ Briefly now includes a deterministic macro dashboard:
 
 - UI: `/ui/briefing/macro?profile=default_user`
 - API: `/api/v1/profile/default_user/briefing/macro`
+- View modes:
+  - `simple` (default): `/ui/briefing/macro?profile=default_user&mode=simple`
+  - `expert`: `/ui/briefing/macro?profile=default_user&mode=expert`
 
 Scope in Phase 1:
 
@@ -910,6 +913,13 @@ Design constraints:
 - Uses existing free/official provider stack first (FRED/ECB/Eurostat) and degrades gracefully
 - Every panel reports explicit status (`ok`, `partial`, `unavailable`) and freshness/basis metadata
 - Partial data is expected and intentionally rendered as partial/unavailable, not as hard failures
+- UX simplification:
+  - Simple mode prioritises a 30-second read: Fed/ECB deterministic bias, inflation/labour/rates posture, regional cards, catalyst calendar, and compact portfolio implications.
+  - Expert mode expands drivers, missing-field details, risks, and deeper data-quality context from the same payload.
+  - Status language:
+    - `ok`: enough data for confident deterministic summary
+    - `partial`: some series missing/stale; summary still available with caveats
+    - `unavailable` / `not_wired`: signal/source not currently available
 
 Optional briefing helper:
 

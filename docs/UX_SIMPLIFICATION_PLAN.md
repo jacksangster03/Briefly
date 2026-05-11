@@ -138,7 +138,15 @@ No runtime scheduler/delivery/provider logic changes required for UX phases.
   - diagnostics links
 
 ## UX-3: Macro simplification
-- Add simple/expert mode and region card harmonization.
+- Status: implemented.
+- `/ui/briefing/macro` now defaults to **Simple** mode with:
+  - macro signal hero
+  - region card grid (US, Eurozone, UK, Spain, Japan, China)
+  - inflation/labour/rates summary cards
+  - compact catalyst calendar
+  - compact portfolio lens
+  - collapsed data quality section
+- `mode=expert` expands drivers, missing-field caveats, and advanced details using the same payload.
 
 ## UX-4: Portfolio progressive disclosure
 - Beginner/intermediate/advanced tabs.

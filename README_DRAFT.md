@@ -191,6 +191,12 @@ python -m app.cli session-preview --session us_pre_open --show-output
 UI: `/ui/briefing/macro`  
 API: `/api/v1/profile/{profile}/briefing/macro`
 
+View modes:
+- `simple` (default): summary-first, region-aware cards for US/Fed, Eurozone/ECB, UK/BoE, Spain (ECB-linked country lens), Japan/BoJ, China/PBoC.
+- `expert`: full drivers, missing fields, risks, and deeper source/freshness context from the same payload.
+
+Safety wording is explicit throughout: deterministic signal, not a forecast, not market-implied probability.
+
 Includes:
 - central bank panel
 - inflation tracker

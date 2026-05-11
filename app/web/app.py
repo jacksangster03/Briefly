@@ -477,10 +477,14 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     def ui_briefing_macro_dashboard(
         request: Request,
         profile: str = Query(default="default_user"),
+        mode: str = Query(default="simple"),
     ):
         normalized_profile = _normalize_profile(profile)
         settings = _settings(request)
         user_profile = _load_profile_defaults(settings, normalized_profile)
+        normalized_mode = (mode or "simple").strip().lower()
+        if normalized_mode not in {"simple", "expert"}:
+            normalized_mode = "simple"
         try:
             payload = build_macro_policy_dashboard(
                 profile=user_profile,
@@ -525,6 +529,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 "request": request,
                 "profile": normalized_profile,
                 "payload": payload,
+                "mode": normalized_mode,
             },
         )
 
