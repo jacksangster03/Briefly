@@ -115,7 +115,7 @@ def test_ui_home_renders_workspace_cards(client):
     response = client.get("/ui?profile=default_user")
     assert response.status_code == 200
     assert "Briefly Command Centre" in response.text
-    assert "Briefly Home" in response.text
+    assert "Briefly Home" not in response.text
     assert "Today’s Briefing Status" in response.text
     assert "Alerts & Delivery" in response.text
     assert "Macro Policy Watch" in response.text

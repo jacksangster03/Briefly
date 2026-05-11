@@ -77,6 +77,7 @@ def test_command_centre_route_renders(client):
     response = client.get("/ui?profile=default_user")
     assert response.status_code == 200
     assert "Briefly Command Centre" in response.text
+    assert "Legacy: Briefly Home" not in response.text
 
 
 def test_command_centre_shows_next_or_weekend_state(client):
@@ -90,6 +91,7 @@ def test_command_centre_shows_failure_alert_status(client):
     assert response.status_code == 200
     assert "Delivery failure alerts" in response.text
     assert "Failure alerts to Telegram" in response.text
+    assert "off" in response.text
 
 
 def test_command_centre_macro_fallback_when_service_unavailable(client, monkeypatch):
@@ -116,8 +118,13 @@ def test_command_centre_has_expected_links(client):
     assert "/ui/settings?profile=default_user" in response.text
 
 
+def test_command_centre_does_not_show_raw_default_user_market_labels(client):
+    response = client.get("/ui?profile=default_user")
+    assert response.status_code == 200
+    assert "default_user:" not in response.text
+
+
 def test_ui_settings_route_still_works(client):
     response = client.get("/ui/settings?profile=default_user")
     assert response.status_code == 200
     assert "Briefly" in response.text
-

@@ -3043,13 +3043,34 @@ def _build_command_centre_context(*, settings: Settings, profile_name: str, stat
             else "n/a",
         }
 
+    def _friendly_market_label(symbol: str, display_name: str) -> str:
+        raw = (display_name or symbol or "").strip()
+        if not raw:
+            return "Market item"
+        lowered = raw.lower()
+        if lowered == profile_name.lower() or lowered.startswith("default_user"):
+            return "Portfolio move"
+        known = {
+            "CL=F": "Brent crude",
+            "BZ=F": "Brent crude",
+            "GC=F": "Gold",
+            "SI=F": "Silver",
+            "SPY": "S&P 500",
+            "QQQ": "Nasdaq 100",
+            "TLT": "20Y+ Treasury ETF",
+            "DXY": "US Dollar Index",
+        }
+        if symbol in known:
+            return known[symbol]
+        return raw
+
     market_lines: list[str] = []
     if latest_regime is not None:
         market_lines.append(f"Regime: {str(latest_regime.risk_regime or 'mixed').replace('_', ' ')}")
     for row in latest_market_rows[:3]:
         if row.price is None:
             continue
-        name = row.display_name or row.symbol
+        name = _friendly_market_label(row.symbol or "", row.display_name or "")
         if row.change_percent is not None:
             market_lines.append(f"{name}: {row.price:.2f} ({row.change_percent:+.2f}%)")
         else:

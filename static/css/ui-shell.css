@@ -1,0 +1,32 @@
+/* Shared UI shell background for /ui and /ui/portfolio pages.
+   Keeps cards unchanged; only applies to the outer page container. */
+
+.briefly-shell {
+  min-height: 100vh;
+  background-image:
+    radial-gradient(1200px 540px at 100% -5%, rgba(78, 119, 255, 0.18) 0%, rgba(78, 119, 255, 0.04) 45%, rgba(2, 6, 20, 0) 100%),
+    linear-gradient(to bottom, rgba(10, 16, 32, 0.90) 0%, rgba(10, 16, 32, 0.84) 100%),
+    url("/static/img/finance-bg.jpg");
+  background-size: auto, auto, cover;
+  background-position: top right, center, center right;
+  background-repeat: no-repeat;
+}
+
+/* Preserve existing page spacing exactly, but on the new shell wrapper. */
+.briefly-shell--home {
+  padding: 22px 14px 40px;
+}
+
+.briefly-shell--settings {
+  padding: 18px 14px 44px;
+}
+
+/* Mobile: darken/fade image more aggressively so content wins. */
+@media (max-width: 768px) {
+  .briefly-shell {
+    background-image:
+      linear-gradient(to bottom, rgba(8, 13, 27, 0.96) 0%, rgba(8, 13, 27, 0.92) 100%),
+      url("/static/img/finance-bg.jpg");
+    background-position: center center;
+  }
+}
