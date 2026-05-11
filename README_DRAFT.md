@@ -250,6 +250,19 @@ Healthcare official sources are feature-flagged and diagnostics-first.
 
 ---
 
+## 15.1) Portfolio UI progressive disclosure
+UI route: `/ui/portfolio`
+
+Portfolio home is summary-first:
+- `view=overview` (default): holdings, health, risk snapshot, next actions.
+- `view=intermediate`: risk + attribution + scenario vulnerability summary.
+- `view=scenarios`: shock-oriented entry points to scenarios/simulation.
+- `view=advanced`: CMA, simulation, benchmark, rebalancing, attribution, diagnostics.
+
+This is presentation-only. Portfolio analytics, formulas, and service logic remain unchanged.
+
+---
+
 ## 16) Testing
 Full suite:
 ```bash

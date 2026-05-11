@@ -149,7 +149,13 @@ No runtime scheduler/delivery/provider logic changes required for UX phases.
 - `mode=expert` expands drivers, missing-field caveats, and advanced details using the same payload.
 
 ## UX-4: Portfolio progressive disclosure
-- Beginner/intermediate/advanced tabs.
+- Status: implemented.
+- `/ui/portfolio` now defaults to Overview with progressive disclosure:
+  - `view=overview`
+  - `view=intermediate`
+  - `view=scenarios`
+  - `view=advanced`
+- Existing advanced portfolio routes remain unchanged and linked from the advanced view.
 
 ## UX-5: News Intelligence review UI
 - Bring label/review workflows from CLI to visual queue.

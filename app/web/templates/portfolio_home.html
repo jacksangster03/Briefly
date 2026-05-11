@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portfolio — Briefly</title>
+  <link rel="stylesheet" href="/static/css/ui-shell.css">
+  <style>
+    :root {
+      --p-surface: rgba(17, 25, 46, 0.88);
+      --p-surface-strong: rgba(19, 28, 52, 0.94);
+      --p-border: rgba(136, 155, 195, 0.34);
+      --p-text: #ecf2ff;
+      --p-muted: #b7c4de;
+      --p-shadow: 0 16px 30px rgba(0, 0, 0, 0.22);
+      --p-accent: #6f9cff;
+      --ok: #1dc47a;
+      --warn: #f0af37;
+      --bad: #ef6a6a;
+      --off: #9ba9c2;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --p-surface: rgba(255, 255, 255, 0.95);
+        --p-surface-strong: rgba(255, 255, 255, 0.98);
+        --p-border: rgba(79, 99, 139, 0.22);
+        --p-text: #13203e;
+        --p-muted: #485a7a;
+        --p-shadow: 0 10px 24px rgba(25, 36, 62, 0.12);
+        --p-accent: #2c5fe5;
+      }
+    }
+    body { margin: 0; color: var(--p-text); font-family: "IBM Plex Sans","Segoe UI",sans-serif; }
+    .shell-wrap { padding: 24px 14px 40px; }
+    .shell { max-width: 1240px; margin: 0 auto; }
+    .hero, .card { border: 1px solid var(--p-border); border-radius: 14px; background: var(--p-surface); box-shadow: var(--p-shadow); }
+    .hero { padding: 18px; margin-bottom: 12px; background: var(--p-surface-strong); }
+    h1 { margin: 0; font-size: 1.9rem; letter-spacing: -0.02em; }
+    .sub { margin: 7px 0 0; color: var(--p-muted); font-size: 0.94rem; }
+    .chips { margin-top: 12px; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); }
+    .chip { border: 1px solid var(--p-border); border-radius: 999px; padding: 7px 11px; font-size: 0.78rem; color: var(--p-muted); background: color-mix(in srgb, var(--p-surface) 90%, transparent); }
+    .chip strong { color: var(--p-text); }
+    .nav, .view-toggle { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a, .view-toggle a { text-decoration: none; border: 1px solid var(--p-border); border-radius: 999px; padding: 7px 11px; font-size: 0.78rem; color: var(--p-text); background: color-mix(in srgb, var(--p-surface) 87%, transparent); }
+    .view-toggle a.active { border-color: color-mix(in srgb, var(--p-accent) 58%, var(--p-border)); background: color-mix(in srgb, var(--p-accent) 18%, var(--p-surface)); font-weight: 700; }
+    .nav a:hover, .view-toggle a:hover { border-color: color-mix(in srgb, var(--p-accent) 52%, var(--p-border)); }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .grid-3 { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0,1fr)); }
+    .card { padding: 14px; }
+    .card h2 { margin: 0 0 8px; font-size: 1rem; }
+    .muted { color: var(--p-muted); font-size: 0.84rem; }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dashed color-mix(in srgb, var(--p-border) 80%, transparent); }
+    .row:last-child { border-bottom: none; }
+    .value { font-weight: 650; text-align: right; }
+    .badge { border-radius: 999px; padding: 2px 8px; font-size: 0.69rem; font-weight: 700; border: 1px solid var(--p-border); text-transform: lowercase; }
+    .ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 62%, var(--p-border)); }
+    .warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 62%, var(--p-border)); }
+    .bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 62%, var(--p-border)); }
+    .off, .unavailable { color: var(--off); border-color: color-mix(in srgb, var(--off) 62%, var(--p-border)); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+    th, td { text-align: left; border-bottom: 1px dashed color-mix(in srgb, var(--p-border) 80%, transparent); padding: 7px 4px; }
+    th { color: var(--p-muted); font-weight: 600; }
+    .actions-grid { display: grid; gap: 8px; grid-template-columns: repeat(3,minmax(0,1fr)); }
+    .actions-grid a { text-decoration: none; border: 1px solid var(--p-border); border-radius: 10px; padding: 10px; color: var(--p-text); background: color-mix(in srgb, var(--p-surface) 90%, transparent); font-size: 0.82rem; min-height: 54px; }
+    .actions-grid a:hover { border-color: color-mix(in srgb, var(--p-accent) 52%, var(--p-border)); }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: var(--p-muted); font-size: 0.82rem; }
+    @media (max-width: 1020px) { .grid, .grid-3, .actions-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="briefly-shell">
+    <div class="shell-wrap">
+      <div class="shell">
+        <section class="hero">
+          <h1>{{ ph.title }}</h1>
+          <p class="sub">{{ ph.subtitle }}</p>
+          <div class="chips">
+            <div class="chip"><strong>Holdings:</strong> {{ ph.holdings_count }} · {{ ph.total_weight }} allocated</div>
+            <div class="chip"><strong>Top holding:</strong> {{ ph.top_holding.label if ph.top_holding else "Unavailable" }}</div>
+            <div class="chip"><strong>Policy fit:</strong> {{ ph.policy_status|replace("_"," ") }}</div>
+            <div class="chip"><strong>Concentration:</strong> {{ ph.concentration_status|replace("_"," ") }}</div>
+            <div class="chip"><strong>Benchmark:</strong> {{ ph.benchmark_label }}</div>
+            <div class="chip"><strong>Last holdings update:</strong> {{ ph.last_holdings_update }}</div>
+          </div>
+          <div class="view-toggle">
+            <a class="{{ 'active' if ph.view == 'overview' else '' }}" href="/ui/portfolio?profile={{ state.profile }}&view=overview">Overview</a>
+            <a class="{{ 'active' if ph.view == 'intermediate' else '' }}" href="/ui/portfolio?profile={{ state.profile }}&view=intermediate">Risk & Attribution</a>
+            <a class="{{ 'active' if ph.view == 'scenarios' else '' }}" href="/ui/portfolio?profile={{ state.profile }}&view=scenarios">Scenarios</a>
+            <a class="{{ 'active' if ph.view == 'advanced' else '' }}" href="/ui/portfolio?profile={{ state.profile }}&view=advanced">Advanced</a>
+          </div>
+          <div class="nav">
+            <a href="/ui?profile={{ state.profile }}">Command Centre</a>
+            <a href="/ui/briefing?profile={{ state.profile }}">Briefings & Delivery</a>
+            <a href="/ui/briefing/macro?profile={{ state.profile }}">Macro</a>
+            <a href="/ui/briefing/verticals?profile={{ state.profile }}">Verticals</a>
+            <a href="/ui/settings?profile={{ state.profile }}">Settings</a>
+          </div>
+        </section>
+
+        {% if ph.view == "overview" %}
+          <section class="grid-3" style="margin-bottom:12px;">
+            <article class="card">
+              <h2>What you own</h2>
+              {% if ph.empty_holdings %}
+                <p class="muted">No holdings configured yet.</p>
+                <a class="muted" href="/ui/portfolio/holdings?profile={{ state.profile }}">Edit holdings</a>
+              {% else %}
+                <div class="row"><span>Active holdings</span><span class="value">{{ ph.holdings_count }}</span></div>
+                <div class="row"><span>Total allocation</span><span class="value">{{ ph.total_weight }}</span></div>
+                <div class="row"><span>Top holding</span><span class="value">{{ ph.top_holding.label if ph.top_holding else "Unavailable" }}</span></div>
+              {% endif %}
+            </article>
+            <article class="card">
+              <h2>Health check</h2>
+              <div class="row"><span>Policy fit</span><span class="badge {{ 'ok' if ph.policy_status == 'ok' else ('warn' if ph.policy_status in ['needs_attention','partial'] else ('bad' if ph.policy_status == 'breach' else 'off')) }}">{{ ph.policy_status|replace("_"," ") }}</span></div>
+              <div class="row"><span>Allocation drift</span><span class="badge {{ 'ok' if ph.allocation_status == 'ok' else ('warn' if ph.allocation_status in ['needs_attention','partial'] else ('bad' if ph.allocation_status == 'breach' else 'off')) }}">{{ ph.allocation_status|replace("_"," ") }}</span></div>
+              <div class="row"><span>Concentration</span><span class="badge {{ 'ok' if ph.concentration_status == 'ok' else ('warn' if ph.concentration_status in ['needs_attention','partial'] else ('bad' if ph.concentration_status == 'breach' else 'off')) }}">{{ ph.concentration_status|replace("_"," ") }}</span></div>
+              <p class="muted">Next action: {{ ph.next_action }}</p>
+            </article>
+            <article class="card">
+              <h2>Risk snapshot</h2>
+              {% if ph.has_risk %}
+                {% for item in ph.risk_snapshot %}
+                  <div class="row"><span>{{ item.label }}</span><span class="value">{{ item.value }}</span></div>
+                {% endfor %}
+              {% else %}
+                <p class="muted">Risk snapshot unavailable.</p>
+                <a class="muted" href="/ui/portfolio/risk?profile={{ state.profile }}">Open risk page</a>
+              {% endif %}
+            </article>
+          </section>
+
+          <section class="grid" style="margin-bottom:12px;">
+            <article class="card">
+              <h2>Latest briefing lens</h2>
+              <div class="row"><span>Top contributor</span><span class="value">{{ ph.contributor }}</span></div>
+              <div class="row"><span>Top drag</span><span class="value">{{ ph.drag }}</span></div>
+              <a class="muted" href="/ui/briefing/history?profile={{ state.profile }}">Open latest briefing</a>
+            </article>
+            <article class="card">
+              <h2>Next actions</h2>
+              <div class="actions-grid">
+                <a href="/ui/portfolio/holdings?profile={{ state.profile }}">Review holdings</a>
+                <a href="/ui/portfolio/risk?profile={{ state.profile }}">Check risk</a>
+                <a href="/ui/portfolio/rebalancing?profile={{ state.profile }}">Review rebalancing</a>
+                <a href="/ui/portfolio/attribution?profile={{ state.profile }}">Open attribution</a>
+                <a href="/ui/portfolio/scenarios?profile={{ state.profile }}">Run scenario</a>
+                <a href="/ui/portfolio/diagnostics?profile={{ state.profile }}">Advanced diagnostics</a>
+              </div>
+            </article>
+          </section>
+
+          <section class="card">
+            <h2>Holdings (compact)</h2>
+            {% if ph.compact_holdings %}
+              <table>
+                <thead>
+                  <tr><th>Ticker</th><th>Weight</th><th>Asset class</th><th>Region</th><th>Currency</th></tr>
+                </thead>
+                <tbody>
+                  {% for h in ph.compact_holdings %}
+                    <tr>
+                      <td>{{ h.symbol }}</td>
+                      <td>{{ h.weight_display }}</td>
+                      <td>{{ h.asset_class }}</td>
+                      <td>{{ h.region }}</td>
+                      <td>{{ h.currency }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              <details><summary>Show all holdings in builder</summary><a class="muted" href="/ui/portfolio/holdings?profile={{ state.profile }}">Open holdings builder</a></details>
+            {% else %}
+              <p class="muted">No holdings configured yet.</p>
+            {% endif %}
+          </section>
+        {% endif %}
+
+        {% if ph.view == "intermediate" %}
+          <section class="grid" style="margin-bottom:12px;">
+            <article class="card">
+              <h2>Risk & benchmark summary</h2>
+              {% for item in ph.risk_snapshot %}
+                <div class="row"><span>{{ item.label }}</span><span class="value">{{ item.value }}</span></div>
+              {% endfor %}
+              <div class="row"><span>Risk status</span><span class="badge {{ 'ok' if ph.risk_status == 'ok' else ('warn' if ph.risk_status in ['needs_attention','elevated'] else 'off') }}">{{ ph.risk_status|replace("_"," ") }}</span></div>
+            </article>
+            <article class="card">
+              <h2>Attribution summary</h2>
+              <div class="row"><span>Status</span><span class="badge {{ 'ok' if ph.attribution_status == 'ok' else ('warn' if ph.attribution_status in ['partial','needs_attention'] else 'off') }}">{{ ph.attribution_status|replace("_"," ") }}</span></div>
+              <div class="row"><span>Top contributor</span><span class="value">{{ ph.contributor }}</span></div>
+              <div class="row"><span>Top drag</span><span class="value">{{ ph.drag }}</span></div>
+              <a class="muted" href="/ui/portfolio/attribution?profile={{ state.profile }}">Open full attribution</a>
+            </article>
+          </section>
+          <section class="card">
+            <h2>Scenario vulnerability</h2>
+            <p class="muted">Review scenario impacts and benchmark-relative stress outcomes from the dedicated scenarios and risk routes.</p>
+            <div class="actions-grid">
+              <a href="/ui/portfolio/scenarios?profile={{ state.profile }}">Open Scenarios</a>
+              <a href="/ui/portfolio/risk?profile={{ state.profile }}">Open Risk</a>
+              <a href="/ui/portfolio/simulation?profile={{ state.profile }}">Open Simulation Lab</a>
+            </div>
+          </section>
+        {% endif %}
+
+        {% if ph.view == "scenarios" %}
+          <section class="grid-3" style="margin-bottom:12px;">
+            <article class="card"><h2>Rates up shock</h2><p class="muted">Check duration and valuation sensitivity in Scenarios.</p></article>
+            <article class="card"><h2>Equity drawdown</h2><p class="muted">Review concentration and downside behaviour.</p></article>
+            <article class="card"><h2>Oil / energy shock</h2><p class="muted">Assess cyclical and inflation-sensitive sleeves.</p></article>
+            <article class="card"><h2>USD move</h2><p class="muted">Check FX exposure and currency concentration.</p></article>
+            <article class="card"><h2>Credit spread widening</h2><p class="muted">Review fixed-income and credit beta exposure.</p></article>
+            <article class="card"><h2>Portfolio simulation</h2><p class="muted">Run deeper path analysis in Simulation Lab.</p></article>
+          </section>
+          <section class="card">
+            <h2>Scenario tools</h2>
+            <div class="actions-grid">
+              <a href="/ui/portfolio/scenarios?profile={{ state.profile }}">Open Scenarios</a>
+              <a href="/ui/portfolio/simulation?profile={{ state.profile }}">Open Simulation Lab</a>
+              <a href="/ui/portfolio/risk?profile={{ state.profile }}">Open Risk</a>
+            </div>
+          </section>
+        {% endif %}
+
+        {% if ph.view == "advanced" %}
+          <section class="card">
+            <h2>Advanced tools</h2>
+            <div class="actions-grid">
+              <a href="/ui/portfolio/cma?profile={{ state.profile }}">CMA</a>
+              <a href="/ui/portfolio/simulation?profile={{ state.profile }}">Simulation Lab</a>
+              <a href="/ui/portfolio/benchmark?profile={{ state.profile }}">Benchmark</a>
+              <a href="/ui/portfolio/rebalancing?profile={{ state.profile }}">Rebalancing implementation</a>
+              <a href="/ui/portfolio/attribution?profile={{ state.profile }}">Attribution</a>
+              <a href="/ui/portfolio/diagnostics?profile={{ state.profile }}">Diagnostics</a>
+              <a href="/ui/portfolio/history?profile={{ state.profile }}">History & advanced state</a>
+              <a href="/ui/portfolio/policy?profile={{ state.profile }}">Policy</a>
+              <a href="/ui/portfolio/allocation?profile={{ state.profile }}">Allocation</a>
+            </div>
+            <details>
+              <summary>Metric definitions</summary>
+              <p class="muted"><strong>Policy fit:</strong> how closely your current portfolio aligns with your configured guardrails.</p>
+              <p class="muted"><strong>Concentration:</strong> how much risk sits in your largest holdings.</p>
+              <p class="muted"><strong>Tracking error:</strong> how much returns deviate from your benchmark.</p>
+              <p class="muted"><strong>Sharpe:</strong> risk-adjusted return efficiency.</p>
+              <p class="muted"><strong>Attribution:</strong> which sleeves contributed or detracted most.</p>
+              <p class="muted"><strong>CMA:</strong> expected returns, volatility and correlations used for planning.</p>
+            </details>
+          </section>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</body>
+</html>

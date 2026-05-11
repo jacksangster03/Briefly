@@ -510,6 +510,33 @@ It is designed to avoid live provider calls and degrade gracefully when records 
 
 ## Portfolio Workbench
 
+### Portfolio UI (progressive disclosure)
+
+Route: `/ui/portfolio?profile=default_user`
+
+The portfolio home now defaults to an **Overview** view for basic users, with deeper views available without changing underlying analytics:
+
+- `overview` (default): what you own, health check, risk snapshot, latest briefing lens, next actions, compact holdings table.
+- `intermediate`: risk and attribution summary plus scenario vulnerability links.
+- `scenarios`: shock-oriented quick cards with links into Scenarios and Simulation Lab.
+- `advanced`: direct access to CMA, Simulation, Benchmark, Rebalancing, Attribution, Diagnostics, and history/advanced tools.
+
+Query examples:
+
+- `/ui/portfolio?profile=default_user&view=overview`
+- `/ui/portfolio?profile=default_user&view=intermediate`
+- `/ui/portfolio?profile=default_user&view=scenarios`
+- `/ui/portfolio?profile=default_user&view=advanced`
+
+Simple definitions used in the UI:
+
+- **Policy fit**: whether current holdings still align with configured policy guardrails.
+- **Concentration**: how much risk sits in a small number of holdings.
+- **Tracking error**: how much returns deviate from benchmark behaviour.
+- **Sharpe**: risk-adjusted return efficiency.
+- **Attribution**: which sleeves/positions contributed or detracted.
+- **CMA**: forward planning assumptions for returns, volatility, and correlation.
+
 ### Holdings
 
 Import holdings from YAML or CSV; edit inline with steppers and rebalance helpers. Holdings influence briefing relevance scoring and section emphasis.

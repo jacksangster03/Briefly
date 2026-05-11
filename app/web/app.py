@@ -686,12 +686,23 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     def ui_portfolio_home(
         request: Request,
         profile: str = Query(default="default_user"),
+        view: str = Query(default="overview"),
     ):
         normalized_profile = _normalize_profile(profile)
-        return _render_settings_page(
+        state = build_profile_state(_settings(request), normalized_profile)
+        context = _build_portfolio_home_context(
+            settings=_settings(request),
+            profile_name=normalized_profile,
+            state=state,
+            view=view,
+        )
+        return templates.TemplateResponse(
             request,
-            profile=normalized_profile,
-            page_key="portfolio_home",
+            "portfolio_home.html",
+            {
+                "state": state,
+                "ph": context,
+            },
         )
 
     @app.get("/ui/portfolio/easy-setup", response_class=HTMLResponse, include_in_schema=False)
@@ -3440,6 +3451,114 @@ def _build_template_aware_timeline(
             }
         )
     return timeline, suppressed
+
+
+def _build_portfolio_home_context(
+    *,
+    settings: Settings,
+    profile_name: str,
+    state: dict[str, Any],
+    view: str,
+) -> dict[str, Any]:
+    from app.personalization.user_profile import load_user_profile
+
+    profile = load_user_profile(settings)
+    normalized_view = (view or "overview").strip().lower()
+    if normalized_view not in {"overview", "intermediate", "scenarios", "advanced"}:
+        normalized_view = "overview"
+
+    analysis = (state.get("analysis") or {}) if isinstance(state, dict) else {}
+    metadata = (state.get("metadata") or {}) if isinstance(state, dict) else {}
+    holdings = list(state.get("holdings") or [])
+    top_positions = list((analysis.get("top_positions") or []))
+    risk = dict(analysis.get("risk_analytics") or {})
+    policy_fit = dict(analysis.get("policy_fit") or {})
+    allocation = dict(analysis.get("allocation_drift") or {})
+    rebalance = dict(analysis.get("rebalance_proposal") or {})
+    attribution = dict(analysis.get("attribution") or {})
+    scenarios = dict(analysis.get("scenario_analysis") or {})
+    benchmark = dict(analysis.get("benchmark") or {})
+    totals = dict(analysis.get("holdings_totals") or {})
+
+    holdings_count = len(holdings)
+    total_weight = totals.get("total_weight_display") or (
+        f"{sum(float((h.get('weight_pct') or h.get('weight') or 0.0)) for h in holdings):.2f}%"
+        if holdings
+        else "0.00%"
+    )
+    top_holding = top_positions[0] if top_positions else None
+
+    policy_status = str(policy_fit.get("status") or "unavailable")
+    risk_status = str(risk.get("risk_status") or "unavailable")
+    concentration_status = str(analysis.get("concentration", {}).get("status") or "unavailable")
+    benchmark_label = str(benchmark.get("label") or benchmark.get("name") or "Not configured")
+    last_holdings_update = str(metadata.get("last_holdings_update_local") or "Not provided")
+
+    if policy_status in {"breach", "needs_attention"}:
+        next_action = "Review concentration and policy breaches"
+    elif risk_status in {"needs_attention", "elevated"}:
+        next_action = "Review risk snapshot and benchmark-relative metrics"
+    elif rebalance.get("status") in {"rebalance_recommended", "breach", "action_needed"}:
+        next_action = "Review latest rebalancing proposal"
+    else:
+        next_action = "Portfolio looks stable. Review holdings and risk before next rebalance window."
+
+    contributor = str(attribution.get("top_contributor") or "Unavailable")
+    drag = str(attribution.get("top_drag") or "Unavailable")
+
+    compact_holdings: list[dict[str, Any]] = []
+    for row in holdings[:10]:
+        symbol = str(row.get("symbol") or row.get("ticker") or row.get("name") or "Unknown")
+        weight = row.get("weight_pct")
+        if weight is None:
+            weight = row.get("weight")
+        try:
+            weight_display = f"{float(weight):.2f}%"
+        except (TypeError, ValueError):
+            weight_display = "n/a"
+        compact_holdings.append(
+            {
+                "symbol": symbol,
+                "weight_display": weight_display,
+                "asset_class": str(row.get("asset_class") or row.get("bucket") or "n/a"),
+                "region": str(row.get("region") or "n/a"),
+                "currency": str(row.get("currency") or "n/a"),
+            }
+        )
+
+    risk_snapshot = [
+        {"label": "Volatility", "value": str(risk.get("volatility") or risk.get("annualized_volatility") or "Unavailable")},
+        {"label": "Max drawdown", "value": str(risk.get("max_drawdown") or "Unavailable")},
+        {"label": "Sharpe", "value": str(risk.get("sharpe_ratio") or "Unavailable")},
+        {"label": "Tracking error", "value": str(risk.get("tracking_error") or "Unavailable")},
+    ]
+
+    return {
+        "title": "Portfolio",
+        "subtitle": "Holdings, risk, policy fit and next actions.",
+        "view": normalized_view,
+        "holdings_count": holdings_count,
+        "total_weight": total_weight,
+        "top_holding": top_holding,
+        "policy_status": policy_status,
+        "risk_status": risk_status,
+        "concentration_status": concentration_status,
+        "next_action": next_action,
+        "last_holdings_update": last_holdings_update,
+        "benchmark_label": benchmark_label,
+        "compact_holdings": compact_holdings,
+        "risk_snapshot": risk_snapshot,
+        "contributor": contributor,
+        "drag": drag,
+        "profile_name": profile_name,
+        "allocation_status": str(allocation.get("status") or "unavailable"),
+        "attribution_status": str(attribution.get("status") or "unavailable"),
+        "scenarios_status": str(scenarios.get("status") or "unavailable"),
+        "rebalance_status": str(rebalance.get("status") or "unavailable"),
+        "empty_holdings": holdings_count == 0,
+        "has_risk": bool(risk),
+        "has_policy": bool(policy_fit),
+    }
 
 
 def _settings(request: Request) -> Settings:

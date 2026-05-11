@@ -139,8 +139,8 @@ def test_ui_workspace_routes_set_initial_module_and_section(client):
 
     portfolio = client.get("/ui/portfolio?profile=default_user")
     assert portfolio.status_code == 200
-    assert 'data-page-key="portfolio_home"' in portfolio.text
-    assert 'data-initial-section="section-overview"' in portfolio.text
+    assert "Portfolio" in portfolio.text
+    assert "Overview" in portfolio.text
 
     risk = client.get("/ui/portfolio/risk?profile=default_user")
     assert risk.status_code == 200
@@ -171,14 +171,15 @@ def test_ui_workspace_routes_set_initial_module_and_section(client):
 def test_portfolio_root_is_summary_only(client):
     response = client.get("/ui/portfolio?profile=default_user")
     assert response.status_code == 200
-    assert "<h2>Overview" in response.text
-    assert "Top Actions" in response.text
+    assert "<h1>Portfolio</h1>" in response.text
+    assert "What you own" in response.text
+    assert "Next actions" in response.text
     assert "<h2>Holdings</h2>" not in response.text
     assert "<h2>Policy</h2>" not in response.text
     assert "<h2>Allocation</h2>" not in response.text
     assert "<h2>Risk &amp; Benchmark Analytics</h2>" not in response.text
     assert "<h2>Simulation Lab</h2>" not in response.text
-    assert "History & Advanced" in response.text
+    assert "Advanced" in response.text
 
 
 def test_builder_tabs_only_show_in_builder_routes(client):
