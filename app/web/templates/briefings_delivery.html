@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Briefings & Delivery</title>
+  <link rel="stylesheet" href="/static/css/ui-shell.css">
+  <style>
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: "IBM Plex Sans", "Segoe UI", sans-serif; }
+    .shell { max-width: 1240px; margin: 0 auto; padding: 18px; }
+    .hero, .card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+    .hero { padding: 18px; margin-bottom: 12px; }
+    .title { margin: 0; font-size: 1.7rem; }
+    .subtitle { margin: 6px 0 0; color: var(--text-muted); }
+    .muted { color: var(--text-muted); font-size: 0.86rem; }
+    .status-strip { margin-top: 12px; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit,minmax(190px,1fr)); }
+    .chip { border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; font-size: 0.78rem; color: var(--text-muted); background: var(--card); }
+    .chip strong { color: var(--text); }
+    .grid { display: grid; grid-template-columns: 1.45fr 1fr; gap: 12px; }
+    .stack { display: grid; gap: 12px; }
+    .card { padding: 14px; }
+    .card h2 { margin: 0 0 8px; font-size: 1.02rem; }
+    .card h3 { margin: 0 0 8px; font-size: 0.92rem; color: var(--text-muted); }
+    .badge { border-radius: 999px; padding: 2px 8px; font-size: 0.7rem; font-weight: 700; border: 1px solid var(--border); text-transform: lowercase; }
+    .ok { color: #1faa6f; border-color: color-mix(in srgb, #1faa6f 60%, var(--border)); }
+    .warn { color: #d49100; border-color: color-mix(in srgb, #d49100 60%, var(--border)); }
+    .bad { color: #de5959; border-color: color-mix(in srgb, #de5959 60%, var(--border)); }
+    .off { color: #93a0b3; border-color: color-mix(in srgb, #93a0b3 60%, var(--border)); }
+    .timeline { display: grid; gap: 10px; margin-top: 8px; }
+    .row { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--card); }
+    .row-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+    .row-title { font-weight: 700; }
+    .row-sub { margin-top: 5px; font-size: 0.78rem; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 10px; }
+    .row-chan { margin-top: 7px; display: flex; gap: 10px; flex-wrap: wrap; font-size: 0.79rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; color: var(--text-muted); }
+    .actions { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn { text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 6px 11px; font-size: 0.78rem; color: var(--text); background: var(--card); }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .matrix { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.84rem; }
+    .matrix th, .matrix td { border-bottom: 1px dashed var(--border); padding: 8px 4px; text-align: left; vertical-align: top; }
+    .matrix th { color: var(--text-muted); font-weight: 600; }
+    .records { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.82rem; }
+    .records th, .records td { border-bottom: 1px dashed var(--border); padding: 7px 4px; text-align: left; vertical-align: top; }
+    .health-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin-top: 8px; }
+    .health-item { border: 1px solid var(--border); border-radius: 10px; padding: 8px; background: var(--card); font-size: 0.78rem; }
+    .preview-block { border: 1px dashed var(--border); border-radius: 10px; padding: 8px; margin-top: 8px; background: color-mix(in srgb, var(--card) 92%, var(--bg)); }
+    .preview-block code { display: block; white-space: pre-wrap; }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: var(--text-muted); font-size: 0.82rem; }
+    .diag-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+    .diag-grid a { text-decoration: none; border: 1px solid var(--border); border-radius: 10px; padding: 10px; color: var(--text); background: var(--card); font-size: 0.82rem; }
+    .diag-grid a:hover { border-color: var(--accent); color: var(--accent); }
+    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } .health-grid, .diag-grid { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="briefly-shell">
+    <div class="shell">
+      <section class="hero">
+        <h1 class="title">{{ bd.title }}</h1>
+        <p class="subtitle">{{ bd.subtitle }}</p>
+        <div class="status-strip">
+          <div class="chip"><strong>Scheduler:</strong> {{ bd.scheduler_status }}</div>
+          <div class="chip"><strong>Current session:</strong> {{ bd.current_session.label }}</div>
+          <div class="chip"><strong>Next session:</strong> {{ bd.next_session.label }}</div>
+          <div class="chip"><strong>Template:</strong> {{ bd.template_name }} · {{ bd.market_region }}/{{ bd.sub_region }}</div>
+          <div class="chip"><strong>Local time:</strong> {{ bd.local_time }} {{ bd.timezone }}</div>
+          <div class="chip"><strong>Failure alerts to Telegram:</strong> {{ "off" if bd.channels.failure_telegram_off else "on" }}</div>
+        </div>
+        {% if bd.weekend_note %}
+          <p class="muted" style="margin-top:10px;"><span class="badge off">weekend</span> {{ bd.weekend_note }}</p>
+        {% endif %}
+        <div class="actions">
+          <a class="btn" href="/ui?profile={{ state.profile }}">Command Centre</a>
+          <a class="btn" href="/ui/settings?profile={{ state.profile }}">Settings</a>
+          <a class="btn" href="/ui/briefing/history?profile={{ state.profile }}">Delivery Log</a>
+          <a class="btn" href="/ui/audit?profile={{ state.profile }}">Diagnostics</a>
+        </div>
+      </section>
+
+      <div class="grid">
+        <div class="stack">
+          <section class="card">
+            <h2>Today’s Session Timeline</h2>
+            <p class="muted">Template-aware timeline with per-session Telegram/email status.</p>
+            <div class="timeline">
+              {% for item in bd.timeline %}
+                <article class="row">
+                  <div class="row-top">
+                    <div>
+                      <div class="row-title">{{ item.label }}</div>
+                      <div class="mono">{{ item.key }}</div>
+                    </div>
+                    {% set s = item.status %}
+                    {% set klass = "ok" if s == "sent" else ("warn" if s in ["current","upcoming"] else ("bad" if s == "failed" else "off")) %}
+                    <span class="badge {{ klass }}">{{ s.replace("_"," ") }}</span>
+                  </div>
+                  <div class="row-sub">
+                    <span>{{ item.window }}</span>
+                    <span>{{ item.focus }}</span>
+                  </div>
+                  <div class="row-chan">
+                    <span>Telegram:
+                      {% set tklass = "ok" if item.telegram.status == "sent" else ("warn" if item.telegram.status == "current" else ("bad" if item.telegram.status == "failed" else "off")) %}
+                      <span class="badge {{ tklass }}">{{ item.telegram.status.replace("_"," ") }}</span>
+                      {% if item.telegram.sent_at %}<span class="mono">{{ item.telegram.sent_at }}</span>{% endif %}
+                    </span>
+                    <span>Email:
+                      {% set eklass = "ok" if item.email.status == "sent" else ("warn" if item.email.status == "current" else ("bad" if item.email.status == "failed" else "off")) %}
+                      <span class="badge {{ eklass }}">{{ item.email.status.replace("_"," ") }}</span>
+                      {% if item.email.sent_at %}<span class="mono">{{ item.email.sent_at }}</span>{% endif %}
+                    </span>
+                  </div>
+                  <div class="actions">
+                    <span class="mono">Preview: {{ item.preview_cmd }}</span>
+                  </div>
+                </article>
+              {% endfor %}
+            </div>
+            {% if bd.suppressed_weekday_sessions %}
+              <details>
+                <summary>Suppressed on weekends</summary>
+                <p class="muted">{{ bd.suppressed_weekday_sessions|join(", ") }}</p>
+              </details>
+            {% endif %}
+          </section>
+
+          <section class="card">
+            <h2>Latest Delivery Records</h2>
+            {% if bd.delivery_records %}
+              <table class="records">
+                <thead>
+                  <tr>
+                    <th>Session</th><th>Channel</th><th>Subject</th><th>Sent</th><th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for r in bd.delivery_records %}
+                    <tr>
+                      <td>{{ r.session_label }}<div class="mono">{{ r.session_key }}</div></td>
+                      <td>{{ r.channel }}</td>
+                      <td>{{ r.subject }}</td>
+                      <td>{{ r.sent_at }}</td>
+                      <td>
+                        <span class="badge {{ 'ok' if r.ok else 'bad' }}">{{ "sent" if r.ok else "failed" }}</span>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <p class="muted">No delivery records for this date.</p>
+            {% endif %}
+            <div class="actions">
+              <a class="btn" href="/ui/briefing/history?profile={{ state.profile }}">Open full delivery log</a>
+            </div>
+          </section>
+
+          <section class="card">
+            <h2>Safe Preview</h2>
+            <p class="muted">Session Preview is QA-only. It does not send Telegram/email and does not write live send-state.</p>
+            <div class="preview-block">
+              <code>python -m app.cli session-preview --session morning --show-output</code>
+            </div>
+            <div class="preview-block">
+              <code>python -m app.cli session-preview --session us_pre_open --show-output</code>
+            </div>
+            <div class="preview-block">
+              <code>python -m app.cli --dry-run --show-output brief</code>
+            </div>
+          </section>
+        </div>
+
+        <div class="stack">
+          <section class="card">
+            <h2>Delivery Channel Matrix</h2>
+            <table class="matrix">
+              <thead>
+                <tr><th>Message type</th><th>Telegram</th><th>Email</th><th>Status / notes</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Morning Briefing</td>
+                  <td>{{ "on" if "telegram" in bd.channels.morning else "off" }}</td>
+                  <td>{{ "on" if "email" in bd.channels.morning else "off" }}</td>
+                  <td>delivery.morning_channels</td>
+                </tr>
+                <tr>
+                  <td>Intraday Sessions</td>
+                  <td>{{ "on" if "telegram" in bd.channels.intraday else "off" }}</td>
+                  <td>{{ "on" if "email" in bd.channels.intraday else "off" }}</td>
+                  <td>delivery.intraday_channels</td>
+                </tr>
+                <tr>
+                  <td>Breaking Alerts</td>
+                  <td>{{ "on" if "telegram" in bd.channels.breaking else "off" }}</td>
+                  <td>{{ "on" if "email" in bd.channels.breaking else "off" }}</td>
+                  <td>{{ "enabled" if bd.channels.breaking_enabled else "disabled" }}</td>
+                </tr>
+                <tr>
+                  <td>Delivery Failure Alerts</td>
+                  <td>{{ "on" if "telegram" in bd.channels.failure_channels and bd.channels.failure_enabled else "off" }}</td>
+                  <td>{{ "on" if "email" in bd.channels.failure_channels and bd.channels.failure_enabled else "off" }}</td>
+                  <td>{{ "enabled" if bd.channels.failure_enabled else "disabled" }} · cooldown {{ bd.channels.failure_cooldown_minutes }}m</td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="muted" style="margin-top:8px;">Breaking alerts are market alerts. Delivery failure alerts are operational notifications.</p>
+          </section>
+
+          <section class="card">
+            <h2>Alert Controls</h2>
+            <div class="row">
+              <span>Breaking alerts</span>
+              <span class="badge {{ 'ok' if bd.channels.breaking_enabled else 'off' }}">{{ "enabled" if bd.channels.breaking_enabled else "disabled" }}</span>
+            </div>
+            <div class="row">
+              <span>Breaking channels</span>
+              <span class="muted">{{ bd.channels.breaking|join(", ") if bd.channels.breaking else "none" }}</span>
+            </div>
+            <div class="row">
+              <span>Delivery failure alerts</span>
+              <span class="badge {{ 'ok' if bd.channels.failure_enabled else 'off' }}">{{ "enabled" if bd.channels.failure_enabled else "disabled" }}</span>
+            </div>
+            <div class="row">
+              <span>Telegram error alerts</span>
+              <span class="badge {{ 'off' if bd.channels.failure_telegram_off else 'warn' }}">{{ "off" if bd.channels.failure_telegram_off else "on" }}</span>
+            </div>
+            <div class="row">
+              <span>Failure alert channels</span>
+              <span class="muted">{{ bd.channels.failure_channels|join(", ") if bd.channels.failure_channels else "none" }}</span>
+            </div>
+            <div class="row">
+              <span>Quiet hours</span>
+              <span class="muted">{{ bd.channels.quiet_hours[0] }}–{{ bd.channels.quiet_hours[1] }}</span>
+            </div>
+            <div class="row">
+              <span>Weekend mode</span>
+              <span class="muted">{{ bd.weekend_mode }}{% if bd.weekend_mode == "saturday_and_sunday_news" %} · {{ bd.sunday_news_materiality }}{% endif %}</span>
+            </div>
+            <details>
+              <summary>Quick commands</summary>
+              <div class="preview-block"><code>python -m app.cli prefs-set --key delivery.failure_alerts_enabled --value false</code></div>
+              <div class="preview-block"><code>python -m app.cli prefs-set --key delivery.failure_alerts_enabled --value true
+python -m app.cli prefs-set --key delivery.failure_alert_channels --value '["email"]'</code></div>
+            </details>
+          </section>
+
+          <section class="card">
+            <h2>System Health</h2>
+            <div class="health-grid">
+              {% for p in bd.provider_health %}
+                <div class="health-item">
+                  <div class="muted">{{ p.provider }}</div>
+                  {% set pk = "ok" if p.status == "ok" else ("warn" if p.status in ["degraded","rate_limited"] else ("bad" if p.status in ["error","unauthorised"] else "off")) %}
+                  <span class="badge {{ pk }}">{{ p.status }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          </section>
+
+          <section class="card">
+            <h2>Diagnostics</h2>
+            <div class="diag-grid">
+              <a href="/ui/audit?profile={{ state.profile }}">Schedule Status</a>
+              <a href="/ui/audit/history?profile={{ state.profile }}">Daily Summary</a>
+              <a href="/ui/briefing/history?profile={{ state.profile }}">Delivery Log</a>
+              <a href="/ui/audit/logs?profile={{ state.profile }}">Session Audit</a>
+              <a href="/ui?profile={{ state.profile }}">Command Centre</a>
+              <a href="/ui/settings?profile={{ state.profile }}">Settings</a>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

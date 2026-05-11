@@ -155,6 +155,38 @@ python -m app.cli verticals-status --verbose
 
 ---
 
+## 11.1) Briefings & Delivery control centre (`/ui/briefing`)
+Use `/ui/briefing` for a summary-first operational view of scheduled briefings and alert routing.
+
+What it shows:
+- Template-aware session timeline for the active profile (weekday or weekend-aware routing).
+- Current/next session and scheduler state.
+- Delivery channel matrix (Telegram vs email) for morning, intraday, breaking, and delivery-failure alerts.
+- Clear separation between:
+  - normal briefing delivery
+  - breaking market alerts
+  - delivery failure alerts (operational notifications)
+- Latest delivery records with compact sent/failed badges.
+- Safe QA preview commands.
+
+Failure-alert quick controls:
+```bash
+# Disable all user-facing delivery failure alerts
+python -m app.cli prefs-set --key delivery.failure_alerts_enabled --value false
+
+# Keep failure alerts, but email only
+python -m app.cli prefs-set --key delivery.failure_alerts_enabled --value true
+python -m app.cli prefs-set --key delivery.failure_alert_channels --value '["email"]'
+```
+
+Safe preview commands:
+```bash
+python -m app.cli session-preview --session morning --show-output
+python -m app.cli session-preview --session us_pre_open --show-output
+```
+
+---
+
 ## 12) Macro Policy Dashboard
 UI: `/ui/briefing/macro`  
 API: `/api/v1/profile/{profile}/briefing/macro`
@@ -257,4 +289,3 @@ For full plans, see:
 - `docs/AUDIT_CURRENT_STATE.md`
 - `docs/UX_SIMPLIFICATION_PLAN.md`
 - `docs/README_RESTRUCTURE_PLAN.md`
-

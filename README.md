@@ -475,7 +475,7 @@ Open: `http://127.0.0.1:8080/ui?profile=default_user`
 | Route | Purpose |
 |---|---|
 | `/ui` | Workspace home |
-| `/ui/briefing` | Market Briefing workspace root |
+| `/ui/briefing` | Briefings & Delivery control centre |
 | `/ui/briefing/watchlists` | Watchlist configuration |
 | `/ui/briefing/delivery` | Delivery preferences |
 | `/ui/briefing/morning` | Morning composition |
@@ -502,6 +502,9 @@ Open: `http://127.0.0.1:8080/ui?profile=default_user`
 | `/ui/audit/overrides` | Preference overrides |
 | `/ui/audit/logs` | Operational logs |
 | `/api/docs` | OpenAPI documentation |
+
+`/ui/briefing` is a summary-first operational page: template-aware session timeline, current/next session state, Telegram/email channel matrix, breaking vs delivery-failure alert separation, latest delivery records, and safe QA preview commands.  
+It is designed to avoid live provider calls and degrade gracefully when records are missing.
 
 ---
 

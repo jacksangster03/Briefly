@@ -129,8 +129,8 @@ def test_ui_home_renders_workspace_cards(client):
 def test_ui_workspace_routes_set_initial_module_and_section(client):
     briefing = client.get("/ui/briefing?profile=default_user")
     assert briefing.status_code == 200
-    assert 'data-page-key="briefing_home"' in briefing.text
-    assert 'data-initial-section="section-briefing-home"' in briefing.text
+    assert "Briefings &amp; Delivery" in briefing.text
+    assert "Today’s Session Timeline" in briefing.text
 
     briefing_watch = client.get("/ui/briefing/watchlists?profile=default_user")
     assert briefing_watch.status_code == 200
@@ -212,10 +212,9 @@ def test_subpage_navigation_is_limited_to_workspace_and_home(client):
 def test_briefing_and_audit_workspace_roots_and_subpages_are_split(client):
     briefing_root = client.get("/ui/briefing?profile=default_user")
     assert briefing_root.status_code == 200
-    assert "<h2>Briefing</h2>" in briefing_root.text
-    assert "Regional Intelligence Board" in briefing_root.text
-    assert "Cross-Asset Spillovers" in briefing_root.text
-    assert "<h2>Market Briefing · Watchlists &amp; Coverage Priorities</h2>" not in briefing_root.text
+    assert "Briefings &amp; Delivery" in briefing_root.text
+    assert "Delivery Channel Matrix" in briefing_root.text
+    assert "Safe Preview" in briefing_root.text
 
     briefing_watch = client.get("/ui/briefing/watchlists?profile=default_user")
     assert briefing_watch.status_code == 200

@@ -128,7 +128,14 @@ No runtime scheduler/delivery/provider logic changes required for UX phases.
 - Keep existing links reachable.
 
 ## UX-2: Briefings + Alerts & Delivery control centre
-- Consolidate session timeline + delivery controls + failure-alert settings.
+- Status: implemented.
+- `/ui/briefing` is now a dedicated control centre with:
+  - template-aware timeline
+  - channel matrix
+  - alert controls summary
+  - latest records
+  - safe session-preview command panel
+  - diagnostics links
 
 ## UX-3: Macro simplification
 - Add simple/expert mode and region card harmonization.
@@ -147,4 +154,3 @@ No runtime scheduler/delivery/provider logic changes required for UX phases.
 
 ## UX-8: Docs finalization
 - Align README + docs with final UX flows.
-

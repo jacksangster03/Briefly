@@ -365,10 +365,19 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
         profile: str = Query(default="default_user"),
     ):
         normalized_profile = _normalize_profile(profile)
-        return _render_settings_page(
+        state = build_profile_state(_settings(request), normalized_profile)
+        ctx = _build_briefings_delivery_context(
+            settings=_settings(request),
+            profile_name=normalized_profile,
+            state=state,
+        )
+        return templates.TemplateResponse(
             request,
-            profile=normalized_profile,
-            page_key="briefing_home",
+            "briefings_delivery.html",
+            {
+                "state": state,
+                "bd": ctx,
+            },
         )
 
     @app.get("/ui/briefing/watchlists", response_class=HTMLResponse, include_in_schema=False)
@@ -3142,6 +3151,269 @@ def _build_command_centre_context(*, settings: Settings, profile_name: str, stat
         },
         "provider_health": provider_health,
     }
+
+
+def _build_briefings_delivery_context(*, settings: Settings, profile_name: str, state: dict[str, Any]) -> dict[str, Any]:
+    import fcntl as _fcntl_mod
+    import re
+    from app.briefing.session_metadata import SessionMeta, label_for, sessions_for_profile
+    from app.briefing.session_routing import next_session_window, resolve_session_window
+    from app.briefing.session_templates import get_session_template_for_profile
+    from app.db.models import ProviderHealthLog, SentMessage, SessionSendState
+    from app.db.session import get_session
+    from app.main import _allowed_sessions_for_mode, _allowed_sessions_for_profile_day
+    from app.personalization.user_profile import load_user_profile
+
+    profile = load_user_profile(settings)
+    tz = ZoneInfo(profile.timezone or settings.timezone)
+    now_utc = datetime.now(timezone.utc)
+    local_now = now_utc.astimezone(tz)
+    today = local_now.date()
+    weekday_idx = local_now.weekday()
+
+    scheduler_status = "unknown"
+    lock_path = Path(settings.data_dir) / "state" / "scheduler.lock"
+    try:
+        if lock_path.exists():
+            handle = lock_path.open("a+")
+            try:
+                _fcntl_mod.flock(handle.fileno(), _fcntl_mod.LOCK_EX | _fcntl_mod.LOCK_NB)
+                _fcntl_mod.flock(handle.fileno(), _fcntl_mod.LOCK_UN)
+                scheduler_status = "not running"
+            except OSError:
+                scheduler_status = "running"
+            finally:
+                handle.close()
+    except Exception:
+        scheduler_status = "unknown"
+
+    template_name, _template_items = get_session_template_for_profile(profile)
+    current_window = resolve_session_window(
+        now=now_utc,
+        timezone_name=profile.timezone or settings.timezone,
+        session_template=getattr(profile, "session_template", None),
+    )
+    next_window = next_session_window(
+        now=now_utc,
+        timezone_name=profile.timezone or settings.timezone,
+        session_template=getattr(profile, "session_template", None),
+    )
+    allowed_sessions = _allowed_sessions_for_profile_day(
+        mode=profile.session_mode,
+        weekend_mode=profile.weekend_mode,
+        weekday_idx=weekday_idx,
+    )
+
+    with get_session() as db:
+        rows = (
+            db.query(SessionSendState)
+            .filter(
+                SessionSendState.profile_name == profile_name,
+                SessionSendState.local_date == today,
+                SessionSendState.replay_namespace == "",
+            )
+            .all()
+        )
+        sent_rows = (
+            db.query(SentMessage)
+            .filter(
+                SentMessage.message_type.like("session_brief:%"),
+                SentMessage.sent_at.isnot(None),
+            )
+            .order_by(SentMessage.sent_at.desc())
+            .limit(24)
+            .all()
+        )
+        provider_rows = []
+        for provider_key in ("finnhub", "fred", "newsapi", "gdelt", "fmp_news", "mediastack"):
+            row = (
+                db.query(ProviderHealthLog)
+                .filter(ProviderHealthLog.provider == provider_key)
+                .order_by(ProviderHealthLog.timestamp.desc())
+                .first()
+            )
+            provider_rows.append((provider_key, row))
+
+    state_map: dict[tuple[str, str], SessionSendState] = {(r.session_key, r.channel): r for r in rows}
+    timeline, suppressed_weekday = _build_template_aware_timeline(
+        profile=profile,
+        weekday_idx=weekday_idx,
+        allowed_sessions=allowed_sessions,
+        current_session_key=current_window.key,
+        state_map=state_map,
+        local_now=local_now,
+        tz=tz,
+    )
+
+    delivery = (state.get("effective", {}) or {}).get("delivery", {}) or {}
+    failure_alerts_enabled = bool(getattr(profile, "delivery_failure_alerts_enabled", True))
+    failure_alert_channels = getattr(profile, "delivery_failure_alert_channels", [])
+
+    provider_health = []
+    for key, row in provider_rows:
+        if row is None:
+            status = "unavailable"
+        elif row.success:
+            status = "ok"
+        elif row.status_code == 401:
+            status = "unauthorised"
+        elif row.status_code == 429:
+            status = "rate_limited"
+        else:
+            status = "degraded"
+        provider_health.append({"provider": key, "status": status})
+
+    html_re = re.compile(r"<[^>]+>")
+    delivery_records: list[dict[str, Any]] = []
+    for row in sent_rows[:8]:
+        txt = html_re.sub("", row.content_preview or "")
+        first_line = next((line.strip() for line in txt.splitlines() if line.strip()), "") or "-"
+        sent_local = (
+            row.sent_at.replace(tzinfo=timezone.utc).astimezone(tz).strftime("%H:%M")
+            if row.sent_at
+            else "-"
+        )
+        delivery_records.append(
+            {
+                "session_label": label_for(row.message_type.replace("session_brief:", "")),
+                "session_key": row.message_type.replace("session_brief:", ""),
+                "channel": row.channel,
+                "subject": first_line[:80],
+                "sent_at": sent_local,
+                "ok": bool(row.success),
+            }
+        )
+
+    weekend_note = ""
+    if weekday_idx == 5:
+        weekend_note = f"Saturday mode: {profile.weekend_mode}"
+    elif weekday_idx == 6:
+        weekend_note = f"Sunday mode: {profile.weekend_mode} ({profile.sunday_news_materiality})"
+
+    return {
+        "title": "Briefings & Delivery",
+        "subtitle": "Scheduled market briefings, alert channels, previews and delivery health.",
+        "scheduler_status": scheduler_status,
+        "local_time": local_now.strftime("%Y-%m-%d %H:%M"),
+        "timezone": profile.timezone or settings.timezone,
+        "template_name": template_name,
+        "market_region": getattr(profile, "market_region", "") or "EMEA",
+        "sub_region": getattr(profile, "sub_region", "") or "Eurozone",
+        "current_session": {"key": current_window.key, "label": label_for(current_window.key)},
+        "next_session": {"key": next_window.key, "label": label_for(next_window.key)},
+        "session_mode": profile.session_mode,
+        "weekend_mode": profile.weekend_mode,
+        "sunday_news_materiality": profile.sunday_news_materiality,
+        "weekend_note": weekend_note,
+        "timeline": timeline,
+        "suppressed_weekday_sessions": suppressed_weekday,
+        "channels": {
+            "morning": delivery.get("morning_channels", []),
+            "intraday": delivery.get("intraday_channels", []),
+            "breaking": delivery.get("breaking_channels", []),
+            "breaking_enabled": bool(delivery.get("breaking_alerts", True)),
+            "failure_enabled": failure_alerts_enabled,
+            "failure_channels": failure_alert_channels,
+            "failure_telegram_off": (not failure_alerts_enabled) or ("telegram" not in failure_alert_channels),
+            "failure_cooldown_minutes": int(getattr(profile, "delivery_failure_alert_cooldown_minutes", 360)),
+            "quiet_hours": getattr(profile, "quiet_hours", ("23:00", "07:00")),
+        },
+        "delivery_records": delivery_records,
+        "provider_health": provider_health,
+    }
+
+
+def _build_template_aware_timeline(
+    *,
+    profile,
+    weekday_idx: int,
+    allowed_sessions: set[str],
+    current_session_key: str,
+    state_map: dict[tuple[str, str], Any],
+    local_now: datetime,
+    tz: ZoneInfo,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    from app.briefing.session_metadata import SessionMeta, sessions_for_profile
+    from datetime import time as _time
+
+    # Primary source: active profile template session definitions.
+    if weekday_idx >= 5:
+        weekend_rows: list[SessionMeta] = []
+        if "saturday_weekend_briefing" in allowed_sessions:
+            weekend_rows.append(
+                SessionMeta(
+                    key="saturday_weekend_briefing",
+                    label="Weekend Briefing",
+                    focus="Friday close recap + weekend developments + next-week setup",
+                    window_start=_time(6, 0),
+                    window_end=_time(23, 59),
+                )
+            )
+        if "sunday_weekend_watch" in allowed_sessions:
+            weekend_rows.append(
+                SessionMeta(
+                    key="sunday_weekend_watch",
+                    label="Sunday Weekend Watch",
+                    focus="Material weekend developments for Monday setup",
+                    window_start=_time(9, 0),
+                    window_end=_time(23, 59),
+                )
+            )
+        active_sessions = tuple(weekend_rows)
+        base_weekday = [meta.key for meta in sessions_for_profile(profile)]
+        suppressed = sorted(set(base_weekday))
+    else:
+        active_sessions = sessions_for_profile(profile)
+        suppressed = []
+
+    timeline: list[dict[str, Any]] = []
+    now_tod = local_now.time()
+    for meta in active_sessions:
+        tg = state_map.get((meta.key, "telegram"))
+        em = state_map.get((meta.key, "email"))
+        channel_rows = [row for row in (tg, em) if row is not None]
+        if any(row.success for row in channel_rows):
+            status = "sent"
+        elif any(row.in_progress for row in channel_rows):
+            status = "current"
+        elif meta.key == current_session_key:
+            status = "current"
+        elif now_tod < meta.window_start:
+            status = "upcoming"
+        elif now_tod > meta.window_end:
+            status = "not_attempted"
+        else:
+            status = "not_attempted"
+        if meta.key not in allowed_sessions:
+            status = "suppressed"
+
+        def _ch(row):
+            if row is None:
+                return {"status": "not_attempted", "sent_at": ""}
+            if row.success:
+                sent_at = (
+                    row.sent_at.replace(tzinfo=timezone.utc).astimezone(tz).strftime("%H:%M")
+                    if row.sent_at
+                    else ""
+                )
+                return {"status": "sent", "sent_at": sent_at}
+            if row.in_progress:
+                return {"status": "current", "sent_at": ""}
+            return {"status": "failed", "sent_at": ""}
+
+        timeline.append(
+            {
+                "key": meta.key,
+                "label": meta.label,
+                "focus": meta.focus,
+                "window": meta.window_str,
+                "status": status,
+                "telegram": _ch(tg),
+                "email": _ch(em),
+                "preview_cmd": f"python -m app.cli session-preview --session {meta.key} --show-output",
+            }
+        )
+    return timeline, suppressed
 
 
 def _settings(request: Request) -> Settings:
