@@ -271,5 +271,7 @@ def test_session_audit_vertical_diagnostics_unavailable_is_safe(monkeypatch):
 
     monkeypatch.setattr("app.main.get_session", _fake_db)
     monkeypatch.setattr("app.main.get_session_snapshot", lambda *_a, **_k: None)
+    # Patch the engine reference used by app.main directly to prevent DB state leakage.
+    monkeypatch.setattr("app.main.persisted_vertical_diagnostics_for_date", lambda **_k: {})
     out = run_session_audit(Settings(), target_date_str="today", profile_name="default_user", live_check=False, vertical_details=True)
     assert "diagnostics unavailable for this session" in out
