@@ -1365,6 +1365,71 @@ See `docs/BRIEFING_OUTPUT_QUALITY.md` for a detailed rule reference.
 
 ---
 
+## FX & Dollar Pulse
+
+**Purpose**: Briefly includes a profile-aware FX and Dollar Pulse module that surfaces currency momentum and USD pressure signals in the session briefing. All signals are deterministic: no LLM calls, no probability claims.
+
+### Profile-aware basket logic
+
+The FX basket is selected based on the user's `home_region`:
+
+| Region | Core pairs |
+|---|---|
+| Spain / Eurozone / EMEA | EUR/USD, Trade-weighted USD (FRED), EUR/GBP, USD/JPY, USD/CNH |
+| US / Americas | Trade-weighted USD (FRED), EUR/USD, USD/JPY, GBP/USD, USD/CNH |
+| UK / United Kingdom | GBP/USD, EUR/GBP, Trade-weighted USD (FRED), USD/JPY |
+| APAC / Asia / Japan / Australia | USD/JPY, USD/CNH, AUD/USD, Trade-weighted USD (FRED) |
+
+Optional pairs are added when context conditions are met (e.g. USD/NOK appears when `oil_shock=True`).
+
+### Session-specific inclusion rules
+
+FX content only appears when it is material. The block is suppressed when moves are negligible.
+
+| Session | Inclusion rule | Format |
+|---|---|---|
+| Morning | fx_materiality in ("medium", "high") | Full block with portfolio lens |
+| Europe Midday | materiality_score >= 2 | Short block: USD pressure + EUR/USD |
+| US Pre-Open | materiality_score >= 2 | Short block: USD/JPY, USD/CNH focus |
+| US Intraday | fx_materiality == "high" | One-liner |
+| Into Close | fx_materiality == "high" | One-liner |
+| Closing Wrap | fx_materiality in ("medium", "high") | Full block |
+
+### Data sources
+
+- **FRED**: Trade-weighted USD index (DTWEXBGS). Requires `fred_api_key` setting.
+- **yfinance**: All currency pairs (EURUSD=X, USDJPY=X, etc.). No API key required.
+- **ECB**: EUR-base pairs (reference rates). Falls back to yfinance on failure.
+
+### Deterministic caveat
+
+Every FX section ends with: "Deterministic signal, not a forecast." No probability estimates or price targets are ever included.
+
+### Example output (Spain/Eurozone profile, morning session)
+
+```
+FX & DOLLAR PULSE
+USD weaker; EUR/USD 1.1050 (+0.60%), EUR/GBP 0.8450 (+0.20%), USD/JPY 156.50 (+0.70%).
+Portfolio lens: Weaker USD supports EM, gold and commodity-linked assets. Yen strengthening may signal risk-off positioning.
+Deterministic signal, not a forecast.
+```
+
+### FX Pulse chart
+
+An FX Pulse chart showing normalised 5-day percentage moves for the basket is included when:
+- `fx_materiality_score >= 5` (driven by large concurrent moves across multiple pairs)
+- The session is "morning" (full mode)
+
+Each pair has a stable colour assignment from the `WATCHLIST_COLOUR_PALETTE`. The chart does not replace other charts; it is added to the stack if capacity allows.
+
+### Dashboard API
+
+A `/api/fx-pulse` endpoint returns the signal bundle in JSON. Supports `?mode=expert` for full FXQuote data including source, freshness, and status per instrument.
+
+See `docs/FX_DOLLAR_PULSE.md` for full architecture reference.
+
+---
+
 ## License
 
 MIT

@@ -614,6 +614,130 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    # ── FX & Dollar Pulse API ───────────────────────────────────────────────
+
+    @app.get("/api/fx-pulse", include_in_schema=True)
+    def api_fx_pulse(
+        request: Request,
+        profile: str = Query(default="default_user"),
+        mode: str = Query(default="simple"),
+    ):
+        """Return FX & Dollar Pulse signals for the given profile.
+
+        Simple mode returns a compact summary. Expert mode returns all
+        FXQuote objects with source, freshness, and status fields.
+
+        Data is fetched live from FRED and yfinance; no LLM calls.
+        Degrades gracefully if providers are unavailable.
+        """
+        from app.fx.basket import build_fx_basket
+        from app.fx.panel import fetch_fx_panel, FXQuote
+        from app.fx.signals import build_fx_signals
+        from dataclasses import asdict
+
+        normalized_profile = _normalize_profile(profile)
+        app_settings = _settings(request)
+        user_profile = _load_profile_defaults(app_settings, normalized_profile)
+        normalized_mode = (mode or "simple").strip().lower()
+        if normalized_mode not in {"simple", "expert"}:
+            normalized_mode = "simple"
+
+        profile_dict = {
+            "home_region": getattr(user_profile, "home_region", "spain"),
+            "base_currency": getattr(user_profile, "base_currency", "EUR"),
+            "market_focus": getattr(user_profile, "market_focus_region", ""),
+            "market_region": getattr(user_profile, "market_region", ""),
+        }
+        settings_dict = {
+            "fred_api_key": getattr(app_settings, "fred_api_key", ""),
+        }
+
+        home_region = profile_dict["home_region"]
+        region_labels = {
+            "spain": "Spain/Eurozone",
+            "eurozone": "Spain/Eurozone",
+            "emea": "EMEA",
+            "europe": "Europe",
+            "euro area": "Spain/Eurozone",
+            "us": "United States",
+            "united states": "United States",
+            "americas": "Americas",
+            "uk": "United Kingdom",
+            "united kingdom": "United Kingdom",
+            "apac": "APAC",
+            "asia": "Asia",
+            "japan": "Japan",
+            "australia": "Australia",
+        }
+        basket_label = region_labels.get(home_region.lower(), home_region.title())
+
+        try:
+            basket = build_fx_basket(profile_dict, settings_dict)
+            panel = fetch_fx_panel(basket, settings_dict)
+            signals = build_fx_signals(panel)
+
+            def _quote_value(label_fragment: str):
+                for q in panel:
+                    if label_fragment.lower() in q.instrument.label.lower():
+                        if q.status == "ok" and q.value is not None:
+                            return {
+                                "value": q.value,
+                                "change_pct": q.daily_change_pct,
+                                "freshness": q.freshness,
+                                "source": q.source,
+                            }
+                        return {"value": None, "change_pct": None}
+                return {"value": None, "change_pct": None}
+
+            result: dict = {
+                "usd_pressure": signals.usd_pressure,
+                "eur_usd": _quote_value("EUR/USD"),
+                "usd_jpy": _quote_value("USD/JPY"),
+                "fx_materiality": signals.fx_materiality,
+                "materiality_score": signals.materiality_score,
+                "profile_basket_label": basket_label,
+                "drivers": signals.drivers,
+                "missing": signals.missing,
+                "eur_pressure": signals.eur_pressure,
+                "sterling_pressure": signals.sterling_pressure,
+                "yen_risk_signal": signals.yen_risk_signal,
+                "china_fx_stress": signals.china_fx_stress,
+                "note": "Deterministic signal, not a forecast.",
+            }
+
+            if normalized_mode == "expert":
+                result["quotes"] = [
+                    {
+                        "label": q.instrument.label,
+                        "symbol": q.instrument.symbol,
+                        "source": q.source,
+                        "freshness": q.freshness,
+                        "status": q.status,
+                        "value": q.value,
+                        "daily_change_pct": q.daily_change_pct,
+                        "change_5d_pct": q.change_5d_pct,
+                        "fetched_at": q.fetched_at.isoformat() if q.fetched_at else None,
+                    }
+                    for q in panel
+                ]
+
+        except Exception as exc:
+            logger.warning("FX Pulse API error: %s", exc)
+            result = {
+                "usd_pressure": "unavailable",
+                "eur_usd": {"value": None, "change_pct": None},
+                "usd_jpy": {"value": None, "change_pct": None},
+                "fx_materiality": "low",
+                "materiality_score": 0,
+                "profile_basket_label": basket_label,
+                "drivers": [],
+                "missing": ["all"],
+                "note": "FX Pulse unavailable; provider or network error.",
+            }
+
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content=result)
+
     # ── Phase 9.4: Briefing history UI ──────────────────────────────────────
 
     _HISTORY_SESSION_SLOTS: list[tuple[str, str, str]] = [

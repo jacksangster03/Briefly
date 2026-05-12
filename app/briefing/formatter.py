@@ -188,6 +188,11 @@ class TelegramFormatter:
             if commodities:
                 sections.append(commodities)
 
+        # FX & Dollar Pulse section (deterministic, session-aware)
+        fx_section = getattr(briefing, "fx_pulse_section", "") or ""
+        if fx_section:
+            sections.append(self._format_fx_section(fx_section, session_key))
+
         show_regional = is_morning or is_midday or is_preopen or is_closing
         if not show_regional and briefing.regional_skew_summary:
             skew_lower = briefing.regional_skew_summary.lower()
@@ -305,6 +310,33 @@ class TelegramFormatter:
         sections = self._apply_quality_guards(sections, briefing=briefing)
         full_text = "\n\n".join(sections)
         return self._split_message(full_text)
+
+    @staticmethod
+    def _format_fx_section(fx_text: str, session: str) -> str:
+        """Wrap the FX pulse text in an appropriate section header.
+
+        Only inserts a full header block for morning and closing sessions;
+        intraday sessions receive a compact inline line.
+        """
+        if not fx_text or not fx_text.strip():
+            return ""
+        session = (session or "morning").lower().strip()
+        _intraday_like = session in {"us_intraday_risk", "into_close"}
+        if _intraday_like:
+            # One-liner: no bold header, just italic inline
+            return f"<i>{fx_text.strip()}</i>"
+        # Short block (midday, pre-open) and full block (morning, closing):
+        # use a bold header only for the full block sessions
+        _full_sessions = {"morning", "closing_wrap", "saturday_weekend_briefing", "sunday_weekend_watch"}
+        if session in _full_sessions:
+            lines = [line.strip() for line in fx_text.strip().splitlines() if line.strip()]
+            if lines:
+                header = f"<b>{lines[0]}</b>"
+                rest = "\n".join(lines[1:])
+                return f"{header}\n{rest}" if rest else header
+            return ""
+        # Short block: no header, just the text
+        return fx_text.strip()
 
     def _format_market_clock(self, ctx: dict) -> str:
         if not ctx:

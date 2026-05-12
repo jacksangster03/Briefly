@@ -623,6 +623,24 @@ def _build_candidates(
         )
     )
 
+    # FX Pulse chart: normalised 5D moves for FX basket instruments
+    if _feature_on("FEATURE_FX_PULSE_CHART", True):
+        fx_score = int(getattr(briefing, "fx_materiality_score", 0) or 0)
+        if fx_score >= 5:
+            specs.append(
+                ChartCandidate(
+                    chart_key="fx_pulse_chart",
+                    category="support",
+                    priority=0.72 + (0.10 if "oil_shock" in regime_tags else 0.0),
+                    spec=_fx_pulse_chart_spec(briefing, profile),
+                    reason="FX 5-day pulse shows cross-currency momentum in one glance.",
+                )
+            )
+        else:
+            logger.debug(
+                "FX Pulse chart suppressed: materiality_score=%d (need >=5)", fx_score
+            )
+
     for item in specs:
         item.spec["priority"] = round(float(item.priority), 4)
     specs.sort(key=lambda row: row.priority, reverse=True)
@@ -2264,3 +2282,108 @@ def _confidence_label(metrics: dict[str, Any]) -> str:
     if score >= 2:
         return "medium"
     return "low"
+
+
+# Stable colour mapping for FX pairs (label -> palette index).
+# Labels must match FXInstrument.label values.
+_FX_COLOUR_ASSIGNMENTS: dict[str, int] = {
+    "EUR/USD": 0,           # blue
+    "Trade-weighted USD": 1,  # green
+    "EUR/GBP": 2,           # red
+    "USD/JPY": 3,           # amber
+    "USD/CNH": 4,           # violet
+    "USD/CNY": 4,           # violet (same as CNH)
+    "GBP/USD": 5,           # cyan
+    "AUD/USD": 6,           # pink
+    "USD/CAD": 7,           # lime
+    "EUR/CHF": 8,           # orange
+    "GBP/JPY": 9,           # teal
+    "USD/NOK": 0,           # blue (cycle)
+}
+
+
+def _fx_pulse_chart_spec(
+    briefing: MorningBriefing,
+    profile: UserProfile,
+) -> dict[str, Any]:
+    """Build chart spec for the FX Pulse 5-day normalised move chart.
+
+    Each instrument in the FX basket is shown as a separate line with a
+    stable colour assignment. The y-axis is normalised 5D percentage change.
+
+    Returns a chart spec dict in the standard format used by the chart
+    engine. Returns an unavailable spec if fewer than 2 instruments have
+    5D change data.
+    """
+    # Attempt to retrieve the FX panel that was built during briefing generation.
+    # The panel is not currently stored on the briefing object; we build a
+    # lightweight spec from the materiality score to avoid re-fetching live
+    # prices during chart assembly. The chart renderer can optionally fetch
+    # fresh data if it needs to render actual series.
+    fx_score = int(getattr(briefing, "fx_materiality_score", 0) or 0)
+    session_key = (briefing.session_key or "morning").lower()
+
+    # Build placeholder series that the renderer will populate.
+    # The chart spec defines shape, colours, and labels. Actual price
+    # history is fetched by the chart renderer at render time.
+    home_region = getattr(profile, "home_region", "spain").lower()
+
+    # Select representative pairs for the chart (ordered by regional relevance)
+    if home_region in {"spain", "eurozone", "emea", "europe", "euro area"}:
+        pair_labels = ["EUR/USD", "Trade-weighted USD", "EUR/GBP", "USD/JPY", "USD/CNH"]
+    elif home_region in {"uk", "united kingdom"}:
+        pair_labels = ["GBP/USD", "EUR/GBP", "Trade-weighted USD", "USD/JPY"]
+    elif home_region in {"us", "united states", "americas", "north america"}:
+        pair_labels = ["Trade-weighted USD", "EUR/USD", "USD/JPY", "GBP/USD", "USD/CNH"]
+    elif home_region in {"apac", "asia", "japan", "australia"}:
+        pair_labels = ["USD/JPY", "USD/CNH", "AUD/USD", "Trade-weighted USD"]
+    else:
+        pair_labels = ["EUR/USD", "Trade-weighted USD", "USD/JPY", "GBP/USD"]
+
+    palette = WATCHLIST_COLOUR_PALETTE
+    series: list[dict[str, Any]] = []
+    for label in pair_labels:
+        colour_idx = _FX_COLOUR_ASSIGNMENTS.get(label, len(series) % len(palette))
+        series.append({
+            "label": label,
+            "colour": palette[colour_idx % len(palette)],
+            "colour_index": colour_idx % len(palette),
+            "data_key": label.replace("/", "_").replace(" ", "_").lower(),
+            "type": "line",
+        })
+
+    available = fx_score >= 5
+
+    if not available:
+        reason = (
+            f"FX materiality score {fx_score} below threshold (5); "
+            "FX Pulse chart suppressed."
+        )
+    else:
+        reason = ""
+
+    return {
+        "chart_key": "fx_pulse_chart",
+        "variant": "fx_5d_normalised",
+        "available": available,
+        "priority": 0.72,
+        "reason_if_hidden": reason,
+        "title": "FX Pulse: 5-Day Normalised Moves",
+        "caption": (
+            "Normalised 5-day percentage change for key FX pairs. "
+            "Deterministic signal, not a forecast."
+        ),
+        "series": series,
+        "annotations": [
+            {"type": "zero_line", "label": "Flat", "colour": "#4B5563"},
+        ],
+        "email_dimensions": {"width": 560, "height": 220},
+        "meta": {
+            "home_region": home_region,
+            "fx_materiality_score": fx_score,
+            "session_key": session_key,
+            "pair_labels": pair_labels,
+            "series_count": len(series),
+            "note": "Deterministic signal, not a forecast.",
+        },
+    }

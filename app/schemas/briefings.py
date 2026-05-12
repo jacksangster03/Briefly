@@ -105,6 +105,8 @@ class MorningBriefing(BaseModel):
     events_fetched: int = 0
     events_after_dedup: int = 0
     events_sent: int = 0
+    fx_pulse_section: str = ""
+    fx_materiality_score: int = 0
 
 
 class IntradayUpdate(BaseModel):

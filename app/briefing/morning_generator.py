@@ -471,6 +471,59 @@ class MorningBriefingGenerator:
         briefing.market_setup_analysis_confidence = setup_interpretation.confidence
         briefing.market_setup_signal_tags = setup_interpretation.tags
 
+        # 2b. FX & Dollar Pulse (profile-aware, deterministic, gracefully degrades)
+        try:
+            from app.fx.basket import build_fx_basket
+            from app.fx.panel import fetch_fx_panel
+            from app.fx.signals import build_fx_signals
+            from app.briefing.fx_section import should_include_fx, build_fx_section_text
+
+            _profile_dict = {
+                "home_region": getattr(self.profile, "home_region", "spain"),
+                "base_currency": getattr(self.profile, "base_currency", "EUR"),
+                "market_focus": getattr(self.profile, "market_focus_region", ""),
+                "market_region": getattr(self.profile, "market_region", ""),
+            }
+            _settings_dict = {
+                "fred_api_key": getattr(self.settings, "fred_api_key", ""),
+            }
+            # Build context for optional pairs (oil shock, commodity shock)
+            _fx_context: dict = {}
+            for q in briefing.market_setup.macro_quotes:
+                label = (q.display_name or q.symbol or "").upper()
+                if ("WTI" in label or "CRUDE" in label) and q.change_percent is not None:
+                    if abs(float(q.change_percent)) >= 3.5:
+                        _fx_context["commodity_shock"] = "oil"
+                        _fx_context["oil_shock"] = True
+            _fx_basket = build_fx_basket(_profile_dict, _settings_dict, _fx_context)
+            _fx_panel = fetch_fx_panel(_fx_basket, _settings_dict)
+            # Cross-asset context for materiality scoring
+            _xasset_ctx: dict = {}
+            for q in briefing.market_setup.macro_quotes:
+                label = (q.display_name or q.symbol or "").upper()
+                if "GOLD" in label and q.change_percent is not None:
+                    _xasset_ctx["gold_change_pct"] = float(q.change_percent)
+                if ("WTI" in label or "CRUDE" in label) and q.change_percent is not None:
+                    _xasset_ctx["oil_change_pct"] = float(q.change_percent)
+            if briefing.market_setup.treasury_10y and briefing.market_setup.treasury_10y.change is not None:
+                _xasset_ctx["us_10y_change_bps"] = float(briefing.market_setup.treasury_10y.change) * 100.0
+            _fx_signals = build_fx_signals(_fx_panel, _xasset_ctx)
+            briefing.fx_materiality_score = _fx_signals.materiality_score
+            _session_key = (session_key or "morning").lower()
+            if should_include_fx(_fx_signals, _session_key, _profile_dict):
+                briefing.fx_pulse_section = build_fx_section_text(
+                    _fx_panel, _fx_signals, _profile_dict, _session_key
+                )
+            else:
+                logger.debug(
+                    "FX Pulse suppressed for session=%s materiality=%s score=%d",
+                    _session_key,
+                    _fx_signals.fx_materiality,
+                    _fx_signals.materiality_score,
+                )
+        except Exception:
+            logger.debug("FX Pulse build failed; skipping FX section", exc_info=True)
+
         # 3. Fetch all news/events
         all_events = self.news_svc.fetch_all(
             watchlist=self.profile.all_watchlist_tickers[:20]  # limit API calls
