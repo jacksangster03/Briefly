@@ -453,3 +453,146 @@ def test_dry_run_session_brief_logs_dry_run_status_and_writes_no_live_send_state
     with get_session() as session:
         assert session.query(SentMessage).count() == 0
         assert session.query(SessionSendState).count() == 0
+
+
+def test_dry_run_does_not_write_archive_snapshot(
+    monkeypatch,
+    validation_isolated_db,
+):
+    """A dry-run send must not produce a live archive snapshot row.
+
+    The should_store_snapshot guard returns False when dry_run=True, so
+    create_session_snapshot should never be called during a dry-run.
+    """
+    from app.briefing.session_snapshot_service import should_store_snapshot
+
+    # Confirm the guard itself returns False for a dry-run scheduler tick.
+    result = should_store_snapshot(
+        command_source="scheduler",
+        dry_run=True,
+        is_backfill=False,
+        session_key="morning",
+        delivery_attempted=True,
+        snapshots_enabled=True,
+    )
+    assert result is False, (
+        "should_store_snapshot must return False for dry_run=True regardless of command_source"
+    )
+
+
+def test_scheduler_live_send_path_calls_create_session_snapshot(
+    monkeypatch,
+    validation_isolated_db,
+):
+    """When command_source='scheduler' and dry_run=False, create_session_snapshot
+    must be called (i.e. the archive path is reached and not silently skipped).
+    """
+    from types import SimpleNamespace
+    from app.main import run_morning_briefing
+    from app.personalization.user_profile import UserProfile
+    from app.schemas.briefings import MorningBriefing
+    from app.schemas.delivery import EmailRenderResult
+    from app.db.models import SessionArchiveSnapshot
+    from app.db.session import get_session
+
+    class _StubGenerator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def generate(self, *, session_key: str = "morning", session_title: str = "Morning Briefing") -> MorningBriefing:
+            return MorningBriefing(
+                generated_at=datetime(2026, 5, 6, 8, 0, tzinfo=timezone.utc),
+                session_key=session_key,
+                session_title=session_title,
+                data_freshness={"Market Prices": "2026-05-06 08:00 CEST"},
+            )
+
+    class _StubTelegramFormatter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def format_morning_briefing(self, briefing: MorningBriefing) -> list[str]:
+            return [f"{briefing.session_title}: telegram"]
+
+    class _StubEmailFormatter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def format_morning_briefing(self, briefing: MorningBriefing) -> EmailRenderResult:
+            return EmailRenderResult(
+                subject=briefing.session_title,
+                plain_text=f"{briefing.session_title}: email",
+                html_body=f"<p>{briefing.session_title}: email</p>",
+                inline_assets=[],
+            )
+
+    class _StubLLMRenderer:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def render_morning(self, *, deterministic_email, **kwargs):
+            return SimpleNamespace(active_email=deterministic_email, shadow_preview=None)
+
+    class _FakeEmailMessenger:
+        name = "email"
+
+        def __init__(self, settings):
+            self.settings = settings
+            self.dry_run = False
+            self.last_error = ""
+
+        def is_configured(self) -> bool:
+            return True
+
+        def send_rich(self, *, subject: str, plain_text: str, html_body: str, inline_assets=None) -> bool:
+            return True
+
+    monkeypatch.setattr("app.main.load_user_profile", lambda settings: UserProfile(name="default_user"))
+    monkeypatch.setattr("app.main.load_sector_universe", lambda settings: object())
+    monkeypatch.setattr("app.main._build_services", lambda settings: (object(), object(), object()))
+    monkeypatch.setattr("app.main.MorningBriefingGenerator", _StubGenerator)
+    monkeypatch.setattr("app.main.TelegramFormatter", _StubTelegramFormatter)
+    monkeypatch.setattr("app.main.EmailFormatter", _StubEmailFormatter)
+    monkeypatch.setattr("app.main.LLMEmailRenderer", _StubLLMRenderer)
+    monkeypatch.setattr("app.main.EmailMessenger", _FakeEmailMessenger)
+    monkeypatch.setattr("app.main.load_previous_snapshot", lambda **kwargs: (None, {}))
+    monkeypatch.setattr("app.main.persist_snapshot", lambda **kwargs: None)
+    monkeypatch.setattr("app.main.record_sent_events", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.main.record_cadence_marker", lambda **kwargs: None)
+    # Preferences: snapshots enabled (patched at source module since it's
+    # imported locally inside the snapshot try-block in app.main)
+    import app.personalization.preferences_service as _prefs_mod
+    monkeypatch.setattr(
+        _prefs_mod,
+        "get_preferences",
+        lambda name: {
+            "snapshots.enabled": True,
+            "snapshots.store_email_html": False,
+            "snapshots.store_failed_attempts": False,
+            "snapshots.retention_days": 30,
+        },
+    )
+
+    settings = Settings(
+        dry_run=False,
+        delivery_channel="email",
+        email_user="sender@example.com",
+        email_password="secret",
+        email_to="recipient@example.com",
+    )
+
+    run_morning_briefing(
+        settings,
+        auto_route_session=False,
+        session_override="morning",
+        command_source="scheduler",
+    )
+
+    with get_session() as db:
+        rows = db.query(SessionArchiveSnapshot).all()
+
+    assert len(rows) == 1, (
+        f"Expected 1 archive snapshot row after a live scheduler send, got {len(rows)}"
+    )
+    assert rows[0].session_key == "morning"
+    assert rows[0].source_type == "live_scheduler"

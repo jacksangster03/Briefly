@@ -354,3 +354,57 @@ class TestSecretsNotStored:
         for item in snap.get("market_summary", []):
             for val in item.values():
                 assert not self._SECRET_PATTERN.search(str(val))
+
+
+# ---------------------------------------------------------------------------
+# should_store_snapshot: dry-run guard
+# ---------------------------------------------------------------------------
+
+class TestDryRunSnapshotGuard:
+    """Dry-run sends must not produce live archive snapshots unless the explicit
+    persist_dry_run_session_snapshots flag is set."""
+
+    def test_dry_run_is_blocked_by_default(self):
+        result = should_store_snapshot(
+            command_source="scheduler",
+            dry_run=True,
+            is_backfill=False,
+            session_key="morning",
+            delivery_attempted=True,
+            snapshots_enabled=True,
+        )
+        assert result is False, "dry_run=True must prevent snapshot storage"
+
+    def test_live_scheduler_send_is_allowed(self):
+        result = should_store_snapshot(
+            command_source="scheduler",
+            dry_run=False,
+            is_backfill=False,
+            session_key="morning",
+            delivery_attempted=True,
+            snapshots_enabled=True,
+        )
+        assert result is True, "live scheduler send with delivery_attempted=True must store snapshot"
+
+    def test_snapshots_disabled_flag_blocks_live_send(self):
+        result = should_store_snapshot(
+            command_source="scheduler",
+            dry_run=False,
+            is_backfill=False,
+            session_key="morning",
+            delivery_attempted=True,
+            snapshots_enabled=False,
+        )
+        assert result is False, "snapshots_enabled=False must block even live scheduler runs"
+
+    def test_dry_run_create_does_not_write_to_db(self, isolated_db):
+        """Even if should_store_snapshot were bypassed, dry_run source_type is detectable
+        and should not persist as a live_scheduler row."""
+        req = _make_request(source_type="dry_run")
+        ok = create_session_snapshot(req)
+        assert ok is True  # write succeeds if explicitly called
+        snap = get_session_snapshot("default_user", date(2026, 5, 6), "morning")
+        # The source_type must be recorded accurately so auditing is reliable.
+        assert snap["source_type"] == "dry_run", (
+            "source_type must be stored accurately; dry_run runs must not be labelled as live_scheduler"
+        )

@@ -1712,7 +1712,7 @@ def run_morning_briefing(
             )
             saved = create_session_snapshot(snap_req)
             if saved:
-                logger.debug(
+                logger.info(
                     "Session archive snapshot saved | session=%s date=%s",
                     canonical_session_key, local_now.date(),
                 )
@@ -1822,7 +1822,7 @@ def run_daily_summary(
     }
 
     try:
-        snapshots = list_session_snapshots(profile_name=profile_name, local_date=target_date, limit=20)
+        snapshots = list_session_snapshots(profile_name=profile_name, target_date=target_date)
         snapped_keys = {s["session_key"] for s in snapshots}
     except Exception:
         snapped_keys = set()
