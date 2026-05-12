@@ -1343,6 +1343,28 @@ These are expected and tracked; the system is designed to degrade gracefully.
 
 ---
 
+## Briefing output quality
+
+The pipeline includes a deterministic post-processing layer that runs before dispatch. Key improvements:
+
+**Quality guard** (`app/briefing/quality_guard.py`): `BriefingQualityGuard` applies five rewrite rules after sections are assembled: duplicate heading removal, VIX unavailability substitution, stale Brent caveat, "review diagnostics" wording replacement, and contradictory directional claim suppression. It never blocks sending.
+
+**VIX reliability**: the `market_data.py` provider layer logs a clear warning when VIX is requested but unavailable across all providers. The quality guard substitutes "VIX unavailable" wherever live confirmation language would otherwise appear.
+
+**Brent freshness**: stale Brent is tracked via `quote_freshness` on the briefing object. When `freshness_state` is `stale`, `prior_close`, or `carried_forward`, the quality guard replaces live confirmation language with a stale caveat.
+
+**Macro Policy Watch heading**: the heading "MACRO POLICY WATCH" appears exactly once per briefing in both Telegram and email output.
+
+**Chart output**: full density mode (`email_density_mode: full`) has no arbitrary chart cap; all rendered charts are returned. Desk mode caps at 5, medium at 6. Set `delivery.max_email_charts` to impose a user-level cap in any mode.
+
+**Watchlist performance chart**: each ticker is assigned a stable categorical colour using `assign_watchlist_colours()` (alphabetical sort index into a 10-colour palette). The same ticker always gets the same colour within a fixed watchlist.
+
+**Valuation lens** (`app/briefing/valuation_lens.py`): disabled by default. Enabled via `delivery.include_valuation_lens: true`. Triggers deterministically when 10Y yield >= 4.5% or rates change >= 0.03, or a tracked name moves >2%, or cross-section dispersion >= 3%. Outputs up to 3 bullet lines with a "Valuation context only, not investment advice." disclaimer.
+
+See `docs/BRIEFING_OUTPUT_QUALITY.md` for a detailed rule reference.
+
+---
+
 ## License
 
 MIT

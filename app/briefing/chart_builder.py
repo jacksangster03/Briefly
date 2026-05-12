@@ -103,12 +103,37 @@ class MorningChartBuilder:
         density = str(self.profile.delivery.get("email_density_mode", "auto")).strip().lower()
         if density in {"", "auto"}:
             density = default_mode
-        if density == "medium":
-            cap = 6
-        elif density == "desk":
-            cap = 5
+
+        # User-configurable max chart cap (briefing.max_email_charts).
+        # Default is None (no cap beyond density-mode defaults).
+        user_max = self.profile.delivery.get("max_email_charts", None)
+        if user_max is None:
+            if density == "medium":
+                cap = 6
+            elif density == "desk":
+                cap = 5
+            else:
+                # Full mode: no arbitrary cap; keep all selected charts.
+                cap = None
         else:
-            cap = 9
-        if (briefing.session_key or "morning").lower() == "morning" and self.profile.morning_section_enabled("watchlist_snapshot"):
-            cap += 1
-        return rendered[:cap]
+            try:
+                cap = int(user_max)
+            except (TypeError, ValueError):
+                cap = None
+
+        if cap is not None:
+            if (briefing.session_key or "morning").lower() == "morning" and self.profile.morning_section_enabled("watchlist_snapshot"):
+                cap += 1
+            from app.logger import get_logger as _get_logger
+            _chart_logger = _get_logger("chart_builder")
+            if len(rendered) > cap:
+                suppressed = rendered[cap:]
+                for asset in suppressed:
+                    _chart_logger.warning(
+                        "chart_builder: suppressing chart due to density cap | key=%s reason=density_cap(%s)",
+                        getattr(asset, "chart_key", "unknown"),
+                        density,
+                    )
+            return rendered[:cap]
+
+        return rendered

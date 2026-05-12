@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Any
 
+from app.briefing.morning_charts import assign_watchlist_colours
 from app.data_sources.market_data import MarketDataService
 from app.logger import get_logger
 from app.personalization.user_profile import UserProfile
@@ -119,6 +120,8 @@ def build_watchlist_chart_spec(
                 "latest close used where intraday history unavailable."
             ),
         }
+        # Assign stable categorical colours to each ticker.
+        colour_map = assign_watchlist_colours(resolved)
         payload = {
             "profile": profile.name,
             "controls": {
@@ -143,6 +146,9 @@ def build_watchlist_chart_spec(
                     "available": item.available,
                     "points": item.points,
                     "warning": item.warning,
+                    "colour": colour_map.get(item.symbol.upper(), {}).get("colour", "#2563EB"),
+                    "colour_index": colour_map.get(item.symbol.upper(), {}).get("colour_index", 0),
+                    "marker_style": colour_map.get(item.symbol.upper(), {}).get("marker_style", 0),
                 }
                 for item in series_payloads
             ],

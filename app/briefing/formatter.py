@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.processing.cleaners import truncate
 from app.briefing.global_news_selector import build_market_relevance_note
+from app.briefing.quality_guard import BriefingQualityGuard, flags_from_briefing
 from app.processing.article_quality import classify_article_type, event_company_confidence
 from app.briefing.templates import (
     MAX_EARNINGS_DISPLAY,
@@ -154,11 +155,18 @@ class TelegramFormatter:
             basis_lines = [f"- {line}" for line in briefing.data_basis_lines[:5]]
             sections.append("\n".join(["<b>DATA BASIS</b>"] + basis_lines))
         if briefing.macro_policy_watch:
+            watch_lines = [
+                str(line).strip()
+                for line in str(briefing.macro_policy_watch).splitlines()
+                if str(line).strip()
+            ]
+            if watch_lines and watch_lines[0].upper() == "MACRO POLICY WATCH":
+                watch_lines = watch_lines[1:]
             sections.append(
                 "\n".join(
                     [
                         "<b>MACRO POLICY WATCH</b>",
-                        truncate(str(briefing.macro_policy_watch), 320),
+                        truncate("\n".join(watch_lines) if watch_lines else str(briefing.macro_policy_watch), 320),
                     ]
                 )
             )
@@ -294,6 +302,7 @@ class TelegramFormatter:
             if note:
                 sections.append(f"<i>{note}</i>")
 
+        sections = self._apply_quality_guards(sections, briefing=briefing)
         full_text = "\n\n".join(sections)
         return self._split_message(full_text)
 
@@ -723,7 +732,11 @@ class TelegramFormatter:
             return ""
         lines = [f"<b>{heading or SECTION_HEADERS['portfolio_impact']}</b>"]
         if posture:
-            lines.append(f"Action posture: {posture.replace('_', ' ')}")
+            posture_display = {
+                "review_diagnostics": "review risk",
+                "review_risk": "review risk",
+            }.get(posture, posture.replace("_", " "))
+            lines.append(f"Action posture: {posture_display}")
         for bullet in bullets[:3]:
             lines.append(f"- {bullet}")
         if geo_risk_level:
@@ -741,6 +754,33 @@ class TelegramFormatter:
             shift_text = ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in sorted(shift.items()))
             lines.append(f"Regime shift: {shift_text}")
         return "\n".join(lines)
+
+    def _apply_quality_guards(self, sections: list[str], *, briefing: MorningBriefing) -> list[str]:
+        """Deterministic non-blocking cleanup for user-facing output quality.
+
+        Delegates to BriefingQualityGuard for all rules. Legacy inline checks
+        are preserved as a belt-and-braces fallback before the guard runs.
+        """
+        # Resolve flags
+        try:
+            flags = flags_from_briefing(briefing)
+        except Exception:
+            flags = {}
+        vix_available = bool(flags.get("vix_available", True))
+        brent_stale = bool(flags.get("brent_stale", False))
+
+        # Belt-and-braces: also check data_basis_lines for legacy stale markers
+        basis_lines = [str(line or "") for line in (briefing.data_basis_lines or [])]
+        if any("vix:" in line.lower() and "unavailable" in line.lower() for line in basis_lines):
+            vix_available = False
+        if any("brent" in line.lower() and "stale" in line.lower() for line in basis_lines):
+            brent_stale = True
+
+        guard = BriefingQualityGuard(
+            vix_available=vix_available,
+            brent_stale=brent_stale,
+        )
+        return guard.apply(sections)
 
     def _format_themes_for_mode(
         self,

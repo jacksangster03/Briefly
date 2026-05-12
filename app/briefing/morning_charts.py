@@ -45,6 +45,46 @@ CHART_SPEC_REQUIRED_KEYS = (
 
 logger = get_logger("morning_charts")
 
+# ---------------------------------------------------------------------------
+# Watchlist categorical colour palette
+# Stable 10-colour set. Tickers are assigned colours by their sorted index
+# so the same ticker always gets the same colour across 1D/1M/1Y/5Y charts.
+# If more than 10 tickers are present, cycle through with an incremented
+# marker style index (the renderer decides the visual marker shape).
+# ---------------------------------------------------------------------------
+WATCHLIST_COLOUR_PALETTE: list[str] = [
+    "#2563EB",  # blue
+    "#16A34A",  # green
+    "#DC2626",  # red
+    "#D97706",  # amber
+    "#7C3AED",  # violet
+    "#0891B2",  # cyan
+    "#DB2777",  # pink
+    "#65A30D",  # lime
+    "#EA580C",  # orange
+    "#0D9488",  # teal
+]
+
+
+def assign_watchlist_colours(symbols: list[str]) -> dict[str, dict[str, Any]]:
+    """Return a stable ticker -> colour assignment dict.
+
+    Keys are uppercase ticker symbols. Values are dicts with:
+      - colour: hex colour string
+      - colour_index: index into palette (0-based)
+      - marker_style: 0 for first cycle, 1 for second, etc.
+    """
+    sorted_symbols = sorted(set(s.upper() for s in symbols if s))
+    palette_len = len(WATCHLIST_COLOUR_PALETTE)
+    assignments: dict[str, dict[str, Any]] = {}
+    for idx, sym in enumerate(sorted_symbols):
+        assignments[sym] = {
+            "colour": WATCHLIST_COLOUR_PALETTE[idx % palette_len],
+            "colour_index": idx % palette_len,
+            "marker_style": idx // palette_len,
+        }
+    return assignments
+
 
 def _feature_on(name: str, default: bool = True) -> bool:
     raw = os.getenv(name, "true" if default else "false").strip().lower()
@@ -1297,13 +1337,20 @@ def _watchlist_movers_spec(briefing: MorningBriefing) -> dict[str, Any]:
     )
     leaders = ranked[:3]
     laggards = list(reversed(ranked[-3:])) if len(ranked) > 3 else []
+    all_symbols = [q.symbol for q in quotes if q.symbol]
+    colour_map = assign_watchlist_colours(all_symbols)
     rows = []
     for row in leaders + laggards:
+        sym = row.symbol or ""
+        colour_info = colour_map.get(sym.upper(), {})
         rows.append(
             {
-                "name": (row.display_name or row.symbol or "").strip()[:28],
-                "symbol": row.symbol,
+                "name": (row.display_name or sym or "").strip()[:28],
+                "symbol": sym,
                 "value": round(float(row.change_percent or 0.0), 3),
+                "colour": colour_info.get("colour", WATCHLIST_COLOUR_PALETTE[0]),
+                "colour_index": colour_info.get("colour_index", 0),
+                "marker_style": colour_info.get("marker_style", 0),
             }
         )
     available = len(rows) >= 2
@@ -1323,7 +1370,11 @@ def _watchlist_movers_spec(briefing: MorningBriefing) -> dict[str, Any]:
         "caption": caption,
         "series": rows,
         "annotations": [],
-        "meta": {"leader_count": len(leaders), "laggard_count": len(laggards)},
+        "meta": {
+            "leader_count": len(leaders),
+            "laggard_count": len(laggards),
+            "colour_palette": WATCHLIST_COLOUR_PALETTE,
+        },
         "email_dimensions": {"width": 900, "height": 460},
     }
 
@@ -1391,20 +1442,22 @@ def _what_changed_spec(briefing: MorningBriefing) -> dict[str, Any]:
 
 def _geo_confirmation_ladder_spec(briefing: MorningBriefing, metrics: dict[str, Any]) -> dict[str, Any]:
     oil = float(metrics.get("oil_delta_pct") or 0.0)
-    vix_delta = float(metrics.get("vix_delta_pct") or 0.0)
+    vix_raw = metrics.get("vix_delta_pct")
+    vix_delta = float(vix_raw or 0.0)
     gold = float(metrics.get("gold_delta_pct") or 0.0)
     us = float(metrics.get("us_avg") or 0.0)
     eu = float(metrics.get("eu_avg") or 0.0)
     asia = float(metrics.get("asia_avg") or 0.0)
     equity_confirm = (us + eu + asia) / 3.0 <= -0.4
     oil_confirm = oil >= 1.0
-    vix_confirm = vix_delta >= 1.5
+    vix_available = vix_raw is not None
+    vix_confirm = vix_available and vix_delta >= 1.5
     haven_confirm = gold >= 0.3
     geo_level = str(briefing.geo_risk_level or "n/a")
 
     rows = [
         {"name": "Oil", "state": "YES" if oil_confirm else "MILD" if oil > 0 else "NO", "value": oil},
-        {"name": "VIX", "state": "YES" if vix_confirm else "NO", "value": vix_delta},
+        {"name": "VIX", "state": "YES" if vix_confirm else ("N/A" if not vix_available else "NO"), "value": vix_delta if vix_available else 0.0},
         {"name": "Gold/Haven", "state": "YES" if haven_confirm else "NO", "value": gold},
         {"name": "Equities", "state": "YES" if equity_confirm else "PARTIAL", "value": (us + eu + asia) / 3.0},
     ]
@@ -1421,7 +1474,8 @@ def _geo_confirmation_ladder_spec(briefing: MorningBriefing, metrics: dict[str, 
         "reason_if_hidden": None,
         "title": "Geo Confirmation Ladder",
         "caption": (
-            f"Oil {'confirms' if oil_confirm else 'is mild'}, VIX {'confirms' if vix_confirm else 'does not confirm'}, "
+            f"Oil {'confirms' if oil_confirm else 'is mild'}, "
+            f"{'VIX unavailable' if not vix_available else ('VIX confirms' if vix_confirm else 'VIX does not confirm')}, "
             f"gold {'confirms' if haven_confirm else 'does not confirm'} haven demand; final geo label {geo_level} ({conclusion})."
         ),
         "series": rows,
@@ -1458,11 +1512,17 @@ def _oil_transmission_card_spec(briefing: MorningBriefing, metrics: dict[str, An
     gold_v = float(gold or 0.0)
     xle_v = float(xle or 0.0)
 
-    if max(oil_v, brent_v) > 1.0 and vix_v > 1.0 and gold_v <= 0.2:
+    quote_freshness = dict(briefing.quote_freshness or {})
+    brent_meta = quote_freshness.get("BRENT") or quote_freshness.get("BZ=F") or {}
+    brent_stale = str(brent_meta.get("freshness_state") or "").lower() in {"stale", "prior_close", "carried_forward"}
+    brent_live = (brent is not None) and not brent_stale
+    lead_oil = max(oil_v, brent_v if brent_live else oil_v)
+
+    if lead_oil > 1.0 and vix_v > 1.0 and gold_v <= 0.2:
         verdict = "inflation stress > haven panic"
-    elif max(oil_v, brent_v) > 1.0 and xle_v > 0:
+    elif lead_oil > 1.0 and xle_v > 0:
         verdict = "energy leadership confirms supply stress"
-    elif max(oil_v, brent_v) <= 0 and vix_v <= 0:
+    elif lead_oil <= 0 and vix_v <= 0:
         verdict = "energy pressure easing"
     else:
         verdict = "mixed transmission"
@@ -1474,7 +1534,12 @@ def _oil_transmission_card_spec(briefing: MorningBriefing, metrics: dict[str, An
         {"name": "VIX", "value": None if vix is None else round(vix_v, 3), "available": vix is not None},
         {"name": "Gold", "value": None if gold is None else round(gold_v, 3), "available": gold is not None},
     ]
-    brent_caption = f"Brent {brent_v:+.2f}%" if brent is not None else "Brent unavailable"
+    brent_caption = (
+        "Brent stale/provider-held"
+        if brent_stale and brent is not None
+        else (f"Brent {brent_v:+.2f}%" if brent is not None else "Brent unavailable")
+    )
+    vix_caption = f"VIX {vix_v:+.2f}%" if metrics.get("vix_delta_pct") is not None else "VIX unavailable"
     return {
         "chart_key": "oil_transmission_card",
         "variant": "macro_transmission",
@@ -1483,7 +1548,7 @@ def _oil_transmission_card_spec(briefing: MorningBriefing, metrics: dict[str, An
         "title": "Oil Transmission",
         "caption": (
             f"WTI {oil_v:+.2f}% / {brent_caption} with XLE {xle_v:+.2f}%, "
-            f"VIX {vix_v:+.2f}% and gold {gold_v:+.2f}%: {verdict}."
+            f"{vix_caption} and gold {gold_v:+.2f}%: {verdict}."
         ),
         "series": rows,
         "annotations": [{"label": "verdict", "value": verdict}],
@@ -1701,15 +1766,18 @@ def _yield_curve_spec(
     thirty = row_map.get(30, {}).get("today")
     spread_10_2 = ((ten - two) * 100.0) if (ten is not None and two is not None) else None
     shape = _classify_curve_shape(today_rows)
+    week_ago_available = any(row.get("week_ago") is not None for row in today_rows)
     if available and two is not None and ten is not None:
         tenor_bits = [f"{int(row['tenor'])}Y {float(row['today']):.2f}%" for row in today_rows]
         read = f"{shape.replace('_', ' ').title()} curve: " + ", ".join(tenor_bits)
         if spread_10_2 is not None:
             read += f"; 10Y-2Y spread {spread_10_2:+.0f} bp."
         ten_change_bps = row_map.get(10, {}).get("change_bps")
-        if ten_change_bps is not None:
+        if ten_change_bps is not None and week_ago_available:
             direction = "higher" if float(ten_change_bps) > 0 else ("lower" if float(ten_change_bps) < 0 else "unchanged")
-            read += f" 10Y move {direction} ({float(ten_change_bps):+.0f} bp)."
+            read += f" 10Y vs prior week: {direction} ({float(ten_change_bps):+.0f} bp)."
+        if not week_ago_available:
+            read += " Prior-week comparison unavailable; showing current curve only."
         if generated_at and generated_at.weekday() >= 5:
             read += " Data basis: latest available official rates."
     else:
@@ -1731,6 +1799,7 @@ def _yield_curve_spec(
             "thirty": thirty,
             "tenors": [int(row["tenor"]) for row in today_rows],
             "weekend_basis": bool(generated_at and generated_at.weekday() >= 5),
+            "prior_week_available": week_ago_available,
         },
         "email_dimensions": {"width": 1000, "height": 520},
     }

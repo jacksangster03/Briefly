@@ -160,3 +160,28 @@ def test_region_selection_avoids_noisy_unavailable_placeholders():
     )
     assert "Japan unavailable" not in summary
     assert "China unavailable" not in summary
+
+
+def test_macro_policy_watch_heading_exactly_once_telegram():
+    """Heading 'MACRO POLICY WATCH' must appear exactly once in Telegram output."""
+    import re
+    briefing = MorningBriefing(
+        generated_at=datetime.now(timezone.utc),
+        macro_policy_watch="MACRO POLICY WATCH\nFed: hold · ECB: cut-leaning (low confidence)\nDeterministic signal, not a forecast.",
+    )
+    formatter = TelegramFormatter("Europe/Madrid")
+    output = "\n".join(formatter.format_morning_briefing(briefing))
+    count = len(re.findall(r"MACRO POLICY WATCH", output, re.IGNORECASE))
+    assert count == 1, f"Expected exactly 1 heading occurrence, got {count}\n\nOutput:\n{output}"
+
+
+def test_macro_policy_watch_heading_exactly_once_email():
+    """Heading 'MACRO POLICY WATCH' must appear exactly once in email HTML output."""
+    import re
+    briefing = MorningBriefing(
+        generated_at=datetime.now(timezone.utc),
+        macro_policy_watch="MACRO POLICY WATCH\nFed: hold · ECB: cut-leaning (low confidence)\nDeterministic signal, not a forecast.",
+    )
+    html = EmailFormatter("Europe/Madrid").format_morning_briefing(briefing).html_body
+    count = len(re.findall(r"MACRO POLICY WATCH", html, re.IGNORECASE))
+    assert count == 1, f"Expected exactly 1 heading in email HTML, got {count}"

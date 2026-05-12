@@ -37,6 +37,7 @@ from app.briefing.regional_lens import build_regional_lens
 from app.briefing.theme_builder import build_top_themes
 from app.briefing.news_classifier import annotate_news_events, should_suppress_low_signal
 from app.briefing.llm_news_classifier import run_llm_news_classifier_shadow
+from app.briefing.valuation_lens import ValuationLens
 from app.verticals.engine import build_vertical_section
 from app.logger import get_logger
 from app.db.session import get_session
@@ -553,6 +554,7 @@ class MorningBriefingGenerator:
                 )
             except Exception:
                 logger.debug("macro policy watch helper unavailable", exc_info=True)
+        briefing.valuation_lens_lines = self._build_valuation_lens(briefing)[:3]
         self._apply_session_profile(briefing)
         # Incremental non-morning content: prioritize new developments since prior session.
         try:
@@ -807,6 +809,13 @@ class MorningBriefingGenerator:
             len(briefing.watchlist_events),
         )
         return briefing
+
+    def _build_valuation_lens(self, briefing: MorningBriefing) -> list[str]:
+        """Delegate to ValuationLens module. Disabled by default."""
+        enabled = bool(self.profile.delivery.get("include_valuation_lens", False))
+        max_items = int(self.profile.delivery.get("valuation_lens_max_items", 3) or 3)
+        lens = ValuationLens(enabled=enabled, max_items=max_items)
+        return lens.build_lines(briefing)
 
     def _apply_session_profile(self, briefing: MorningBriefing) -> None:
         """Scale content density by session type so non-morning briefs stay concise."""

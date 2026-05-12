@@ -62,4 +62,4 @@ def _action_posture(*, setup_tags: list[str], has_linked: bool) -> str:
         return "monitor_and_simulate"
     if has_linked:
         return "monitor"
-    return "review_diagnostics"
+    return "monitor_confirmation"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.data_sources.providers.ecb import ECBProvider
 from app.data_sources.providers.eurostat import EurostatProvider
 from app.data_sources.providers.fred import FREDProvider
@@ -79,7 +81,34 @@ class MacroDataService:
         """Fetch 2Y/5Y/10Y/30Y Treasury yields for curve shape chart."""
         if not self.fred or not self.fred.is_configured():
             return []
-        return self.fred.get_macro_snapshot(YIELD_CURVE_SERIES)
+        points = self.fred.get_macro_snapshot(YIELD_CURVE_SERIES)
+        # Prefer prior-week comparison value for charting when available.
+        for point in points:
+            try:
+                rows = self.fred._fetch_recent_valid_observations(point.series_id, limit=20)  # type: ignore[attr-defined]
+            except Exception:
+                rows = []
+            if not rows:
+                continue
+            latest_date = _parse_fred_date(rows[0].get("date", ""))
+            if latest_date is None:
+                continue
+            week_ago_value: float | None = None
+            for row in rows[1:]:
+                d = _parse_fred_date(row.get("date", ""))
+                if d is None:
+                    continue
+                if (latest_date - d).days >= 6:
+                    try:
+                        week_ago_value = float(row.get("value"))
+                    except Exception:
+                        week_ago_value = None
+                    break
+            if week_ago_value is not None:
+                point.previous_value = week_ago_value
+                point.change = float(point.value) - week_ago_value
+                point.change_percent = ((point.change / abs(week_ago_value)) * 100.0) if week_ago_value else None
+        return points
 
     def get_extended_macro(self) -> list[MacroDataPoint]:
         """Fetch broader macro context (unemployment, CPI, fed funds)."""
@@ -120,3 +149,10 @@ class MacroDataService:
         points = [point] if point is not None else []
         logger.info("Eurostat snapshot: %d items", len(points))
         return points
+
+
+def _parse_fred_date(value: str) -> datetime | None:
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d")
+    except Exception:
+        return None

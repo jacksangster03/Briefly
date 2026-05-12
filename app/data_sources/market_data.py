@@ -14,6 +14,9 @@ logger = get_logger("market_data")
 # Skip Yahoo-specific and macro-style symbols there to avoid false
 # "endpoint unhealthy" signals and rely on fallbacks for those.
 _FINNHUB_QUOTE_BLACKLIST_PREFIXES = ("DGS", "T10Y", "DTWEX", "ECB_", "EUROSTAT_")
+_YAHOO_SYMBOL_ALIASES = {
+    "VIX": "^VIX",
+}
 
 
 class MarketDataService:
@@ -76,7 +79,34 @@ class MarketDataService:
             for quote in self.yfinance.get_quotes(still_missing):
                 results[quote.symbol] = quote
 
+            # Alias retry path for known Yahoo-symbol mismatches (e.g., VIX -> ^VIX).
+            alias_targets = {
+                original: _YAHOO_SYMBOL_ALIASES.get(original.upper(), "")
+                for original in still_missing
+                if original not in results
+            }
+            alias_targets = {k: v for k, v in alias_targets.items() if v}
+            if alias_targets:
+                alias_quotes = self.yfinance.get_quotes(list(alias_targets.values()))
+                by_symbol = {q.symbol.upper(): q for q in alias_quotes}
+                for original, alias in alias_targets.items():
+                    q = by_symbol.get(alias.upper())
+                    if q is None:
+                        continue
+                    results[original] = q.model_copy(update={"symbol": original})
+
         logger.info("Market data: %d/%d symbols fetched", len(results), len(symbols))
+
+        # VIX availability: log a clear warning if VIX was requested but not fetched.
+        # Internal alias "VIX" maps to yfinance "^VIX". Both are tracked.
+        vix_requested = any(s.upper() in {"VIX", "^VIX"} for s in symbols)
+        vix_fetched = any(s.upper() in {"VIX", "^VIX"} for s in results)
+        if vix_requested and not vix_fetched:
+            logger.warning(
+                "VIX quote unavailable: all providers failed for VIX/^VIX. "
+                "Sections that would confirm via VIX will show 'VIX unavailable'."
+            )
+
         return list(results.values())
 
     def get_quote(self, symbol: str) -> QuoteData | None:

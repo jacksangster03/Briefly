@@ -122,6 +122,25 @@ class ChartRenderer:
         return REGION_COLORS.get(family, REGION_COLORS["other"])
 
     @staticmethod
+    def _stable_symbol_color(symbol: str, idx: int = 0) -> str:
+        palette = [
+            "#4F8CFF",
+            "#2ED1B2",
+            "#FF9F43",
+            "#A78BFA",
+            "#F472B6",
+            "#34D399",
+            "#FBBF24",
+            "#60A5FA",
+            "#F87171",
+            "#22D3EE",
+        ]
+        key = (symbol or "").strip().upper()
+        if key:
+            return palette[sum(ord(ch) for ch in key) % len(palette)]
+        return palette[idx % len(palette)]
+
+    @staticmethod
     def _line_series_for_email(series: list[dict], limit: int = 7) -> list[dict]:
         if len(series) <= limit:
             return series
@@ -277,7 +296,7 @@ class ChartRenderer:
             ys = [float(p.get("rebased_100") or 0.0) for p in points if p.get("date")]
             if not xs or not ys:
                 continue
-            color = self._series_color({"family": "other", "change_pct": ys[-1] - ys[0]}, idx)
+            color = self._stable_symbol_color(symbol, idx)
             ax.plot(xs, ys, color=color, linewidth=2.0 if idx < 4 else 1.5, alpha=0.9, label=symbol)
             latest_rows.append((symbol, float(ys[-1])))
 
