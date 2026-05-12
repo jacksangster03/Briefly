@@ -87,6 +87,7 @@
   {% set regions = sig.get("regions", {}) or {} %}
   {% set basis = p.get("data_basis", {}) %}
   {% set view_mode = mode if mode in ["simple", "expert"] else "simple" %}
+  {% set fx = fx_pulse or {} %}
 
   <div class="briefly-shell">
     <div class="shell-wrap">
@@ -184,6 +185,41 @@
             <div class="row"><span>10Y-2Y</span><span class="value">{{ rates.get("series", {}).get("us_10y_2y_spread", {}).get("value", "n/a") }} {{ rates.get("series", {}).get("us_10y_2y_spread", {}).get("unit", "") }}</span></div>
             <div class="row"><span>Rate impulse</span><span class="value">{{ rates.get("rate_impulse", "unavailable")|replace("_"," ") }}</span></div>
           </article>
+        </section>
+
+        <section class="card" style="margin-bottom:12px;">
+          <h2>FX &amp; Dollar Pulse <span class="badge {{ fx.get('status', 'unavailable') }}">{{ fx.get('status', 'unavailable') }}</span></h2>
+          <div class="row"><span>USD pressure</span><span class="value">{{ fx.get("usd_pressure", "unavailable")|replace("_"," ") }}</span></div>
+          <div class="row"><span>EUR/USD</span><span class="value">{{ fx.get("eur_usd", {}).get("value", "n/a") }}{% if fx.get("eur_usd", {}).get("change_pct") is not none %} ({{ "%.2f"|format(fx.get("eur_usd", {}).get("change_pct", 0)) }}%){% endif %}</span></div>
+          <div class="row"><span>USD/JPY</span><span class="value">{{ fx.get("usd_jpy", {}).get("value", "n/a") }}{% if fx.get("usd_jpy", {}).get("change_pct") is not none %} ({{ "%.2f"|format(fx.get("usd_jpy", {}).get("change_pct", 0)) }}%){% endif %}</span></div>
+          <div class="row"><span>Materiality</span><span class="value">{{ fx.get("fx_materiality", "low") }} (score: {{ fx.get("materiality_score", 0) }})</span></div>
+          {% if fx.get("drivers") %}
+            <div class="row"><span>Key drivers</span><span class="value">{{ fx.get("drivers", [])|join(" · ") }}</span></div>
+          {% endif %}
+          {% if fx.get("missing") and fx.get("status") != "unavailable" %}
+            <div class="row muted"><span>Missing feeds</span><span>{{ fx.get("missing", [])|join(", ") }}</span></div>
+          {% endif %}
+          {% if view_mode == "expert" and fx.get("quotes") %}
+            <details open style="margin-top:10px;">
+              <summary>Full instrument quotes</summary>
+              <table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:0.82rem;">
+                <thead><tr style="text-align:left;"><th>Instrument</th><th>Value</th><th>1D chg</th><th>Source</th><th>Freshness</th><th>Status</th></tr></thead>
+                <tbody>
+                  {% for q in fx.get("quotes", []) %}
+                    <tr>
+                      <td>{{ q.get("label", "") }}</td>
+                      <td>{{ q.get("value", "n/a") }}</td>
+                      <td>{% if q.get("daily_change_pct") is not none %}{{ "%.2f"|format(q.get("daily_change_pct", 0)) }}%{% else %}n/a{% endif %}</td>
+                      <td>{{ q.get("source", "") }}</td>
+                      <td>{{ q.get("freshness", "") }}</td>
+                      <td><span class="badge {{ q.get('status', 'unavailable') }}">{{ q.get("status", "unavailable") }}</span></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </details>
+          {% endif %}
+          <p class="muted" style="margin:8px 0 0;">Deterministic signal. Not a forecast or market-implied probability.</p>
         </section>
 
         <section class="grid" style="margin-bottom:12px;">

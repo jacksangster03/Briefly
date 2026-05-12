@@ -256,6 +256,9 @@ def test_session_audit_prints_vertical_diagnostics_when_available(validation_iso
     assert "sources: fda=stub_inactive" in out
 
 
+# Pre-existing failure: test only patches app.main.get_session but persisted_vertical_diagnostics_for_date
+# uses app.verticals.engine.get_session directly, so it reads real DB rows populated by other tests in the
+# suite, meaning the "diagnostics unavailable" path is never reached. Unrelated to FX module.
 def test_session_audit_vertical_diagnostics_unavailable_is_safe(monkeypatch):
     monkeypatch.setattr("app.main.init_db", lambda: None)
     monkeypatch.setattr("app.main.load_user_profile", lambda *_args, **_kwargs: _profile())

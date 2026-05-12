@@ -604,6 +604,65 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                     "freshness_note": "Macro dashboard degraded safely due to provider or render failure.",
                 },
             }
+        # Build FX Pulse data for the dashboard card (cached-safe: degrades gracefully on failure)
+        try:
+            from app.fx.basket import build_fx_basket
+            from app.fx.panel import fetch_fx_panel
+            from app.fx.signals import build_fx_signals
+
+            _profile_dict = {
+                "home_region": getattr(user_profile, "home_region", "spain"),
+                "base_currency": getattr(user_profile, "base_currency", "EUR"),
+                "market_focus": getattr(user_profile, "market_focus_region", ""),
+                "market_region": getattr(user_profile, "market_region", ""),
+            }
+            _settings_dict = {"fred_api_key": getattr(settings, "fred_api_key", "")}
+            _basket = build_fx_basket(_profile_dict, _settings_dict)
+            _panel = fetch_fx_panel(_basket, _settings_dict)
+            _signals = build_fx_signals(_panel)
+
+            def _qv(label_fragment: str):
+                for q in _panel:
+                    if label_fragment.lower() in q.instrument.label.lower():
+                        if q.status == "ok" and q.value is not None:
+                            return {"value": q.value, "change_pct": q.daily_change_pct, "freshness": q.freshness, "source": q.source, "status": q.status}
+                        return {"value": None, "change_pct": None, "freshness": q.freshness, "source": q.source, "status": q.status}
+                return {"value": None, "change_pct": None, "freshness": "unavailable", "source": "unavailable", "status": "unavailable"}
+
+            fx_pulse = {
+                "status": "ok",
+                "usd_pressure": _signals.usd_pressure,
+                "eur_usd": _qv("EUR/USD"),
+                "usd_jpy": _qv("USD/JPY"),
+                "fx_materiality": _signals.fx_materiality,
+                "materiality_score": _signals.materiality_score,
+                "drivers": _signals.drivers,
+                "missing": _signals.missing,
+                "quotes": [
+                    {
+                        "label": q.instrument.label,
+                        "source": q.source,
+                        "freshness": q.freshness,
+                        "status": q.status,
+                        "value": q.value,
+                        "daily_change_pct": q.daily_change_pct,
+                    }
+                    for q in _panel
+                ],
+            }
+        except Exception:
+            fx_pulse = {
+                "status": "unavailable",
+                "usd_pressure": "unavailable",
+                "eur_usd": {"value": None, "change_pct": None},
+                "usd_jpy": {"value": None, "change_pct": None},
+                "fx_materiality": "low",
+                "materiality_score": 0,
+                "drivers": [],
+                "missing": ["all"],
+                "quotes": [],
+            }
+
         return templates.TemplateResponse(
             "macro_dashboard.html",
             {
@@ -611,6 +670,7 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
                 "profile": normalized_profile,
                 "payload": payload,
                 "mode": normalized_mode,
+                "fx_pulse": fx_pulse,
             },
         )
 

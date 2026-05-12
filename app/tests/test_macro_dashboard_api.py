@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
 from app.web.app import create_web_app
@@ -225,3 +227,115 @@ def test_api_payload_raw_index_fallback_not_labelled_yoy(validation_test_setting
     assert uk["label"] == "UK CPI index level"
     assert uk["value_kind"] == "index_level"
     assert uk["transformation"] == "raw_index_fallback"
+
+
+# ---------------------------------------------------------------------------
+# FX Pulse API: simple mode returns expected keys
+# ---------------------------------------------------------------------------
+
+def _make_mock_panel():
+    """Build a minimal FX panel stub for testing without live provider calls."""
+    from datetime import datetime, timezone
+    from app.fx.basket import FXInstrument
+    from app.fx.panel import FXQuote
+
+    def _q(label, symbol, base, quote, value, change):
+        instr = FXInstrument(
+            label=label, symbol=symbol, source="yfinance",
+            base=base, quote=quote, is_dxy_proxy=False, optional=False, condition=None,
+        )
+        return FXQuote(
+            instrument=instr, value=value, daily_change_pct=change,
+            change_5d_pct=change * 2, source="yfinance",
+            freshness="prior_close", status="ok",
+            fetched_at=datetime.now(timezone.utc),
+        )
+
+    return [
+        _q("EUR/USD", "EURUSD=X", "EUR", "USD", 1.105, 0.6),
+        _q("Trade-weighted USD", "DTWEXBGS", "USD", "BASKET", 115.2, -0.3),
+        _q("EUR/GBP", "EURGBP=X", "EUR", "GBP", 0.845, 0.2),
+        _q("USD/JPY", "USDJPY=X", "USD", "JPY", 156.5, 0.7),
+        _q("USD/CNH", "USDCNH=X", "USD", "CNH", 7.32, 0.6),
+    ]
+
+
+def test_fx_pulse_api_simple_mode_returns_required_keys(validation_test_settings):
+    """Simple mode must return all documented keys without live provider calls."""
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+    mock_panel = _make_mock_panel()
+
+    with patch("app.fx.panel.fetch_fx_panel", return_value=mock_panel):
+        response = client.get("/api/fx-pulse?profile=default_user&mode=simple")
+
+    assert response.status_code == 200
+    data = response.json()
+    for key in ("usd_pressure", "eur_usd", "usd_jpy", "fx_materiality", "materiality_score", "profile_basket_label", "drivers", "missing"):
+        assert key in data, f"Missing key in simple mode response: {key}"
+    assert "quotes" not in data, "Simple mode must not include quotes array"
+
+
+def test_fx_pulse_api_expert_mode_returns_quotes_array(validation_test_settings):
+    """Expert mode must return a quotes array with source, freshness, status fields."""
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+    mock_panel = _make_mock_panel()
+
+    with patch("app.fx.panel.fetch_fx_panel", return_value=mock_panel):
+        response = client.get("/api/fx-pulse?profile=default_user&mode=expert")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "quotes" in data, "Expert mode must include quotes array"
+    assert len(data["quotes"]) > 0
+    first = data["quotes"][0]
+    for field in ("label", "source", "freshness", "status"):
+        assert field in first, f"Quote missing field: {field}"
+
+
+def test_fx_pulse_api_degrades_gracefully_on_provider_failure(validation_test_settings):
+    """The endpoint must return a valid JSON response even when the provider fails."""
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+
+    def _fail(basket, settings_dict):
+        raise RuntimeError("Provider unavailable")
+
+    with patch("app.fx.panel.fetch_fx_panel", side_effect=_fail):
+        response = client.get("/api/fx-pulse?profile=default_user")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data.get("usd_pressure") == "unavailable"
+    assert data.get("fx_materiality") == "low"
+
+
+def test_macro_ui_includes_fx_pulse_card(validation_test_settings, monkeypatch):
+    """The /ui/briefing/macro route must render the FX & Dollar Pulse card."""
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+    monkeypatch.setattr("app.web.app.build_macro_policy_dashboard", lambda **_kw: {"status": "partial"})
+    mock_panel = _make_mock_panel()
+
+    with patch("app.fx.panel.fetch_fx_panel", return_value=mock_panel):
+        response = client.get("/ui/briefing/macro?profile=default_user")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "FX" in html and "Dollar Pulse" in html or "FX &amp; Dollar Pulse" in html or "FX & Dollar Pulse" in html
+
+
+def test_macro_ui_expert_mode_includes_fx_quotes_table(validation_test_settings, monkeypatch):
+    """Expert mode of /ui/briefing/macro must render the FX instrument quotes table."""
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+    monkeypatch.setattr("app.web.app.build_macro_policy_dashboard", lambda **_kw: {"status": "partial"})
+    mock_panel = _make_mock_panel()
+
+    with patch("app.fx.panel.fetch_fx_panel", return_value=mock_panel):
+        response = client.get("/ui/briefing/macro?profile=default_user&mode=expert")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "Full instrument quotes" in html
