@@ -374,6 +374,28 @@ Operational notes:
 - Closing Wrap catch-ups shortly after midnight are assigned to the prior session date to avoid blocking that day’s 22:00 Closing Wrap.
 - Provider URLs in logs are redacted for secret-like query params including `api_key`, `apikey`, `api-token`, `api_token`, `apiToken`, `access_key`, `access-token`, `access_token`, `token`, `key`, and `authorization`.
 
+Diagnostics Hub UI:
+
+- Route: `/ui/diagnostics?profile=default_user`
+- Purpose: consolidate scheduler, delivery, provider, snapshot, classifier, vertical, and macro-source diagnostics into one operator page.
+- Tabs:
+  - Overview
+  - Scheduler & Sessions
+  - Delivery & Alerts
+  - Providers
+  - Snapshots & Audits
+  - News / Classifier
+  - Verticals
+  - Macro Sources
+  - CLI Toolkit
+- Data model: local DB/state only in this phase. The hub does not run live provider fetches and does not mutate runtime state.
+- Relationship to CLI tools:
+  - `schedule-status`, `daily-summary`, `delivery-log`, and `session-audit` remain authoritative operational commands.
+  - Diagnostics hub surfaces those states and includes copyable command snippets for deeper CLI checks.
+- Delivery-failure diagnostics:
+  - Delivery failure alerts are operational notifications, separate from market breaking alerts.
+  - Hub shows whether failure alerts are enabled, channel routing, and latest alert-state records where available.
+
 News Intelligence UI:
 
 - Route: `/ui/news?profile=default_user`

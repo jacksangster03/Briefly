@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diagnostics — Briefly</title>
+  <link rel="stylesheet" href="/static/css/ui-shell.css">
+  <style>
+    :root {
+      --dx-surface: rgba(16, 24, 46, 0.9);
+      --dx-border: rgba(126, 146, 188, 0.34);
+      --dx-text: #ebf2ff;
+      --dx-muted: #b8c6df;
+      --dx-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
+      --ok: #22c278;
+      --warn: #efb347;
+      --bad: #eb6b6b;
+      --off: #9aa8c1;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --dx-surface: rgba(255, 255, 255, 0.96);
+        --dx-border: rgba(88, 108, 148, 0.24);
+        --dx-text: #14203f;
+        --dx-muted: #4f6282;
+        --dx-shadow: 0 10px 24px rgba(26, 38, 68, 0.12);
+      }
+    }
+    body { margin: 0; color: var(--dx-text); font-family: "IBM Plex Sans","Segoe UI",sans-serif; }
+    .wrap { padding: 22px 14px 36px; }
+    .shell { max-width: 1240px; margin: 0 auto; }
+    .hero, .card { border: 1px solid var(--dx-border); border-radius: 14px; background: var(--dx-surface); box-shadow: var(--dx-shadow); }
+    .hero { padding: 18px; margin-bottom: 12px; }
+    h1 { margin: 0; font-size: 1.9rem; letter-spacing: -0.02em; }
+    .sub { margin: 6px 0 0; color: var(--dx-muted); font-size: 0.94rem; }
+    .meta { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .meta span { border: 1px solid var(--dx-border); border-radius: 999px; padding: 6px 10px; color: var(--dx-muted); font-size: 0.78rem; }
+    .nav { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a, .tabs a { text-decoration: none; border: 1px solid var(--dx-border); border-radius: 999px; padding: 7px 11px; font-size: 0.78rem; color: var(--dx-text); }
+    .tabs { margin: 12px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+    .tabs a.active { border-color: color-mix(in srgb, #78a2ff 65%, var(--dx-border)); background: color-mix(in srgb, #78a2ff 12%, var(--dx-surface)); }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .card { padding: 14px; margin-bottom: 12px; }
+    .card h2, .card h3 { margin: 0 0 8px; }
+    .muted { color: var(--dx-muted); font-size: 0.84rem; }
+    .row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px dashed color-mix(in srgb, var(--dx-border) 80%, transparent); }
+    .row:last-child { border-bottom: none; }
+    .val { text-align: right; font-weight: 650; }
+    .badge { border-radius: 999px; padding: 2px 8px; font-size: 0.7rem; font-weight: 700; border: 1px solid var(--dx-border); text-transform: lowercase; }
+    .ok, .running, .enabled, .sent { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 62%, var(--dx-border)); }
+    .partial, .degraded, .rate_limited, .current, .warning { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 62%, var(--dx-border)); }
+    .failed, .error, .unauthorised, .unauthorized { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 62%, var(--dx-border)); }
+    .disabled, .off, .unavailable, .unknown { color: var(--off); border-color: color-mix(in srgb, var(--off) 62%, var(--dx-border)); }
+    .cmd { border: 1px dashed var(--dx-border); border-radius: 10px; padding: 8px; margin-top: 8px; background: color-mix(in srgb, var(--dx-surface) 94%, transparent); }
+    code { color: var(--dx-muted); font-size: 0.78rem; white-space: pre-wrap; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th, td { padding: 7px; border-bottom: 1px solid color-mix(in srgb, var(--dx-border) 85%, transparent); text-align: left; }
+    .empty { padding: 10px; border: 1px dashed var(--dx-border); border-radius: 10px; color: var(--dx-muted); }
+    @media (max-width: 1000px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="briefly-shell">
+    <div class="wrap">
+      <div class="shell">
+        <section class="hero">
+          <h1>{{ dx.title }}</h1>
+          <p class="sub">{{ dx.subtitle }}</p>
+          <div class="meta">
+            <span>Scope: local DB only</span>
+            <span>Profile: {{ dx.profile }}</span>
+            <span>Date: {{ dx.target_date }}</span>
+          </div>
+          <div class="nav">
+            <a href="/ui?profile={{ state.profile }}">Command Centre</a>
+            <a href="/ui/briefing?profile={{ state.profile }}">Briefings & Delivery</a>
+            <a href="/ui/news?profile={{ state.profile }}">News Intelligence</a>
+            <a href="/ui/portfolio?profile={{ state.profile }}">Portfolio</a>
+            <a href="/ui/briefing/macro?profile={{ state.profile }}">Macro</a>
+            <a href="/ui/briefing/verticals?profile={{ state.profile }}">Verticals</a>
+            <a href="/ui/settings?profile={{ state.profile }}">Settings</a>
+          </div>
+        </section>
+
+        <section class="tabs">
+          {% for key, label in dx.tabs %}
+            <a href="/ui/diagnostics?profile={{ state.profile }}&date={{ dx.target_date }}&tab={{ key }}" class="{% if dx.selected_tab == key %}active{% endif %}">{{ label }}</a>
+          {% endfor %}
+        </section>
+
+        {% if dx.selected_tab == "overview" %}
+          <section class="grid-3">
+            <article class="card">
+              <h3>System</h3>
+              <div class="row"><span>Scheduler status</span><span class="badge {{ dx.overview.scheduler_status|replace(' ', '_') }}">{{ dx.overview.scheduler_status }}</span></div>
+              <div class="row"><span>Current session</span><span class="val">{{ dx.overview.current_session_label }}</span></div>
+              <div class="row"><span>Next session</span><span class="val">{{ dx.overview.next_session_label }}</span></div>
+            </article>
+            <article class="card">
+              <h3>Delivery today</h3>
+              <div class="row"><span>Sent count</span><span class="val">{{ dx.overview.sent_count }}</span></div>
+              <div class="row"><span>Failed count</span><span class="val">{{ dx.overview.failed_count }}</span></div>
+              <div class="row"><span>Breaking alerts</span><span class="val">{{ dx.overview.breaking_count }}</span></div>
+            </article>
+            <article class="card">
+              <h3>Alert posture</h3>
+              <div class="row"><span>Delivery failure alerts</span><span class="badge {{ 'enabled' if dx.overview.failure_alerts_enabled else 'disabled' }}">{{ "enabled" if dx.overview.failure_alerts_enabled else "disabled" }}</span></div>
+              <div class="row"><span>Telegram failure alerts</span><span class="val">{{ "on" if dx.overview.failure_telegram_on else "off" }}</span></div>
+              <div class="row"><span>Provider health</span><span class="val">{{ dx.overview.provider_ok }} ok · {{ dx.overview.provider_warn }} warning · {{ dx.overview.provider_fail }} failed</span></div>
+            </article>
+          </section>
+          <section class="card">
+            <h3>Recommended next check</h3>
+            <p>{{ dx.overview.recommended_next }}</p>
+            <p class="muted">Use tab: {{ dx.overview.recommended_target }}</p>
+          </section>
+        {% endif %}
+
+        {% if dx.selected_tab == "scheduler" %}
+          <section class="grid-2">
+            <article class="card">
+              <h3>Scheduler & Sessions</h3>
+              <div class="row"><span>Local time/timezone</span><span class="val">{{ dx.scheduler.local_time }} {{ dx.scheduler.timezone }}</span></div>
+              <div class="row"><span>Market region/sub-region</span><span class="val">{{ dx.scheduler.market_region }} / {{ dx.scheduler.sub_region }}</span></div>
+              <div class="row"><span>Session mode</span><span class="val">{{ dx.scheduler.session_mode }}</span></div>
+              <div class="row"><span>Weekend mode</span><span class="val">{{ dx.scheduler.weekend_mode }}</span></div>
+              <div class="row"><span>Sunday news materiality</span><span class="val">{{ dx.scheduler.sunday_news_materiality }}</span></div>
+              <div class="row"><span>Allowed sessions</span><span class="val">{{ dx.scheduler.allowed_sessions|join(", ") if dx.scheduler.allowed_sessions else "none" }}</span></div>
+            </article>
+            <article class="card">
+              <h3>CLI</h3>
+              {% for cmd in dx.scheduler.commands %}
+                <div class="cmd"><code>{{ cmd }}</code></div>
+              {% endfor %}
+            </article>
+          </section>
+        {% endif %}
+
+        {% if dx.selected_tab == "delivery" %}
+          <section class="grid-2">
+            <article class="card">
+              <h3>Delivery & Alerts</h3>
+              <div class="row"><span>Success/failure count</span><span class="val">{{ dx.delivery.success_count }} / {{ dx.delivery.failure_count }}</span></div>
+              <div class="row"><span>Morning channels</span><span class="val">{{ dx.delivery.morning_channels|join(", ") if dx.delivery.morning_channels else "none" }}</span></div>
+              <div class="row"><span>Intraday channels</span><span class="val">{{ dx.delivery.intraday_channels|join(", ") if dx.delivery.intraday_channels else "none" }}</span></div>
+              <div class="row"><span>Breaking alerts</span><span class="val">{{ "enabled" if dx.delivery.breaking_alerts_enabled else "disabled" }} ({{ dx.delivery.breaking_channels|join(", ") if dx.delivery.breaking_channels else "none" }})</span></div>
+              <div class="row"><span>Delivery failure alerts</span><span class="val">{{ "enabled" if dx.delivery.failure_alerts_enabled else "disabled" }}</span></div>
+              <div class="row"><span>Failure alert channels</span><span class="val">{{ dx.delivery.failure_alert_channels|join(", ") if dx.delivery.failure_alert_channels else "none" }}</span></div>
+              <p class="muted">Delivery failure alerts are operational error messages. They are separate from market breaking alerts.</p>
+            </article>
+            <article class="card">
+              <h3>Latest delivery records</h3>
+              {% if dx.delivery.records %}
+                <table>
+                  <thead><tr><th>Type</th><th>Channel</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {% for row in dx.delivery.records %}
+                      <tr>
+                        <td>{{ row.message_type }}</td>
+                        <td>{{ row.channel }}</td>
+                        <td><span class="badge {{ 'sent' if row.success else 'failed' }}">{{ "sent" if row.success else "failed" }}</span></td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              {% else %}
+                <div class="empty">No delivery records for this date.</div>
+              {% endif %}
+            </article>
+          </section>
+          <section class="card">
+            <h3>Commands</h3>
+            {% for cmd in dx.delivery.commands %}
+              <div class="cmd"><code>{{ cmd }}</code></div>
+            {% endfor %}
+          </section>
+        {% endif %}
+
+        {% if dx.selected_tab == "providers" %}
+          <section class="card">
+            <h3>Provider Health</h3>
+            {% if dx.providers.empty %}
+              <div class="empty">No provider health recorded yet.</div>
+            {% else %}
+              <table>
+                <thead><tr><th>Provider</th><th>Status</th><th>Latest</th><th>Message</th></tr></thead>
+                <tbody>
+                  {% for row in dx.providers.rows %}
+                    <tr>
+                      <td>{{ row.provider }}</td>
+                      <td><span class="badge {{ row.status }}">{{ row.status|replace("_"," ") }}</span></td>
+                      <td>{{ row.last_checked or "unavailable" }}</td>
+                      <td>{{ row.message or "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% endif %}
+          </section>
+        {% endif %}
+
+        {% if dx.selected_tab == "snapshots" %}
+          <section class="grid-2">
+            <article class="card">
+              <h3>Snapshots & Audits</h3>
+              <div class="row"><span>Archived snapshots (today)</span><span class="val">{{ dx.snapshots.snapshot_count }}</span></div>
+              {% if dx.snapshots.rows %}
+                <table>
+                  <thead><tr><th>Session</th><th>Generated</th><th>Delivery</th></tr></thead>
+                  <tbody>
+                    {% for row in dx.snapshots.rows %}
+                      <tr><td>{{ row.session_key }}</td><td>{{ row.generated_at or "-" }}</td><td>{{ "ok" if row.delivery_success else "partial" }}</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              {% else %}
+                <div class="empty">No snapshots archived for this date.</div>
+              {% endif %}
+            </article>
+            <article class="card">
+              <h3>Commands</h3>
+              {% for cmd in dx.snapshots.commands %}
+                <div class="cmd"><code>{{ cmd }}</code></div>
+              {% endfor %}
+            </article>
+          </section>
+        {% endif %}
+
+        {% if dx.selected_tab == "news" %}
+          <section class="grid-2">
+            <article class="card">
+              <h3>News / Classifier</h3>
+              <p class="muted">{{ dx.news.deterministic_note }}</p>
+              <div class="row"><span>Total rows</span><span class="val">{{ dx.news.rows_count }}</span></div>
+              <div class="row"><span>Labelled / unlabelled</span><span class="val">{{ dx.news.labelled_count }} / {{ dx.news.unlabelled_count }}</span></div>
+              <div class="row"><span>Shadow disagreements</span><span class="val">{{ dx.news.disagreement_count }}</span></div>
+              <div class="row"><span>ML/LLM shadow</span><span class="val">{{ "enabled" if dx.news.ml_shadow_enabled else "disabled" }} / {{ "enabled" if dx.news.llm_shadow_enabled else "disabled" }}</span></div>
+              <div class="cmd"><code>/ui/news?profile={{ state.profile }}</code></div>
+            </article>
+            <article class="card">
+              <h3>Commands</h3>
+              {% for cmd in dx.news.commands %}
+                <div class="cmd"><code>{{ cmd }}</code></div>
+              {% endfor %}
+            </article>
+          </section>
+        {% endif %}
+
+        {% if dx.selected_tab == "verticals" %}
+          <section class="grid-2">
+            <article class="card">
+              <h3>Verticals</h3>
+              <div class="row"><span>Registered verticals</span><span class="val">{{ dx.verticals.registered_count }}</span></div>
+              <div class="row"><span>Healthcare mode/status</span><span class="val">{{ dx.verticals.healthcare_mode }} / {{ dx.verticals.healthcare_status }}</span></div>
+              <div class="row"><span>Activation reason</span><span class="val">{{ dx.verticals.healthcare_reason }}</span></div>
+              <div class="row"><span>Latest stored diagnostics</span><span class="val">{{ dx.verticals.latest.session_key or "No vertical diagnostics yet." }}</span></div>
+              <div class="cmd"><code>/ui/briefing/verticals?profile={{ state.profile }}</code></div>
+            </article>
+            <article class="card">
+              <h3>Commands</h3>
+              {% for cmd in dx.verticals.commands %}
+                <div class="cmd"><code>{{ cmd }}</code></div>
+              {% endfor %}
+            </article>
+          </section>
+        {% endif %}
+
+        {% if dx.selected_tab == "macro" %}
+          <section class="grid-2">
+            <article class="card">
+              <h3>Macro Sources</h3>
+              <p class="muted">{{ dx.macro.note }}</p>
+              {% if dx.macro.provider_subset %}
+                <table>
+                  <thead><tr><th>Provider</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {% for row in dx.macro.provider_subset %}
+                      <tr><td>{{ row.provider }}</td><td><span class="badge {{ row.status }}">{{ row.status|replace("_"," ") }}</span></td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              {% else %}
+                <div class="empty">No macro provider health recorded yet.</div>
+              {% endif %}
+              <div class="cmd"><code>/ui/briefing/macro?profile={{ state.profile }}</code></div>
+            </article>
+            <article class="card">
+              <h3>Command/API</h3>
+              {% for cmd in dx.macro.commands %}
+                <div class="cmd"><code>{{ cmd }}</code></div>
+              {% endfor %}
+            </article>
+          </section>
+        {% endif %}
+
+        {% if dx.selected_tab == "cli" %}
+          <section class="card">
+            <h3>CLI Toolkit</h3>
+            {% for group, commands in dx.cli_groups.items() %}
+              <h4 style="margin:10px 0 6px;">{{ group }}</h4>
+              {% for cmd in commands %}
+                <div class="cmd"><code>{{ cmd }}</code></div>
+              {% endfor %}
+            {% endfor %}
+          </section>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</body>
+</html>

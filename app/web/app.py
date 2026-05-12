@@ -406,6 +406,31 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    @app.get("/ui/diagnostics", response_class=HTMLResponse, include_in_schema=False)
+    def ui_diagnostics_hub(
+        request: Request,
+        profile: str = Query(default="default_user"),
+        date: str = Query(default="today"),
+        tab: str = Query(default="overview"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        state = build_profile_state(_settings(request), normalized_profile)
+        ctx = _build_diagnostics_context(
+            settings=_settings(request),
+            profile_name=normalized_profile,
+            state=state,
+            date_filter=date,
+            tab=tab,
+        )
+        return templates.TemplateResponse(
+            request,
+            "diagnostics.html",
+            {
+                "state": state,
+                "dx": ctx,
+            },
+        )
+
     @app.get("/ui/briefing/watchlists", response_class=HTMLResponse, include_in_schema=False)
     def ui_briefing_watchlists(
         request: Request,
@@ -3788,6 +3813,429 @@ def _build_news_intelligence_context(
         "commands": commands,
         "deterministic_note": "Deterministic classifier is authoritative. ML/LLM are shadow-only diagnostics.",
         "breaking_note": "Diagnostics only. This page does not trigger alerts.",
+    }
+
+
+def _build_diagnostics_context(
+    *,
+    settings: Settings,
+    profile_name: str,
+    state: dict[str, Any],
+    date_filter: str,
+    tab: str,
+) -> dict[str, Any]:
+    import fcntl as _fcntl_mod
+    from app.briefing.session_metadata import label_for
+    from app.briefing.session_routing import next_session_window, resolve_session_window
+    from app.db.models import (
+        DeliveryFailureAlertState,
+        NewsClassifierLabel,
+        NewsClassifierShadowRun,
+        ProviderHealthLog,
+        SentMessage,
+        SessionArchiveSnapshot,
+        SessionSendState,
+        VerticalRunDiagnostics,
+    )
+    from app.db.session import get_session
+    from app.main import _allowed_sessions_for_profile_day
+    from app.personalization.user_profile import load_user_profile
+    from app.verticals.engine import verticals_status_for_profile
+
+    profile = load_user_profile(settings)
+    tz = ZoneInfo(profile.timezone or settings.timezone or "Europe/Madrid")
+    now_utc = datetime.now(timezone.utc)
+    now_local = now_utc.astimezone(tz)
+
+    requested_tab = (tab or "overview").strip().lower()
+    allowed_tabs = {
+        "overview",
+        "scheduler",
+        "delivery",
+        "providers",
+        "snapshots",
+        "news",
+        "verticals",
+        "macro",
+        "cli",
+    }
+    selected_tab = requested_tab if requested_tab in allowed_tabs else "overview"
+
+    raw_date = (date_filter or "today").strip().lower()
+    if raw_date == "today":
+        target_date = now_local.date()
+    elif raw_date == "yesterday":
+        target_date = (now_local - timedelta(days=1)).date()
+    else:
+        try:
+            target_date = _date_cls.fromisoformat(raw_date)
+        except ValueError:
+            target_date = now_local.date()
+
+    scheduler_status = "unknown"
+    lock_path = Path(settings.data_dir) / "state" / "scheduler.lock"
+    try:
+        if lock_path.exists():
+            handle = lock_path.open("a+")
+            try:
+                _fcntl_mod.flock(handle.fileno(), _fcntl_mod.LOCK_EX | _fcntl_mod.LOCK_NB)
+                _fcntl_mod.flock(handle.fileno(), _fcntl_mod.LOCK_UN)
+                scheduler_status = "not running"
+            except OSError:
+                scheduler_status = "running"
+            finally:
+                handle.close()
+    except Exception:
+        scheduler_status = "unknown"
+
+    current_window = resolve_session_window(
+        now=now_utc,
+        timezone_name=profile.timezone or settings.timezone,
+        session_template=getattr(profile, "session_template", None),
+    )
+    next_window = next_session_window(
+        now=now_utc,
+        timezone_name=profile.timezone or settings.timezone,
+        session_template=getattr(profile, "session_template", None),
+    )
+    allowed_sessions = sorted(
+        _allowed_sessions_for_profile_day(
+            mode=profile.session_mode,
+            weekend_mode=profile.weekend_mode,
+            weekday_idx=now_local.weekday(),
+        )
+    )
+
+    day_start_utc = datetime.combine(target_date, datetime.min.time(), tzinfo=tz).astimezone(timezone.utc)
+    day_end_utc = datetime.combine(target_date + timedelta(days=1), datetime.min.time(), tzinfo=tz).astimezone(timezone.utc)
+
+    with get_session() as db:
+        send_rows = (
+            db.query(SessionSendState)
+            .filter(
+                SessionSendState.profile_name == profile_name,
+                SessionSendState.local_date == target_date,
+                SessionSendState.replay_namespace == "",
+            )
+            .all()
+        )
+        sent_rows = (
+            db.query(SentMessage)
+            .filter(SentMessage.sent_at >= day_start_utc, SentMessage.sent_at < day_end_utc)
+            .order_by(SentMessage.sent_at.desc())
+            .all()
+        )
+        provider_recent_rows = (
+            db.query(ProviderHealthLog)
+            .order_by(ProviderHealthLog.timestamp.desc())
+            .limit(400)
+            .all()
+        )
+        failure_alert_rows = (
+            db.query(DeliveryFailureAlertState)
+            .filter(
+                DeliveryFailureAlertState.profile_name == profile_name,
+                DeliveryFailureAlertState.local_date == target_date,
+            )
+            .order_by(DeliveryFailureAlertState.last_alerted_at.desc())
+            .all()
+        )
+        snapshot_rows = (
+            db.query(SessionArchiveSnapshot)
+            .filter(
+                SessionArchiveSnapshot.profile_name == profile_name,
+                SessionArchiveSnapshot.local_date == target_date,
+            )
+            .order_by(SessionArchiveSnapshot.created_at.desc())
+            .all()
+        )
+        latest_vertical_diag = (
+            db.query(VerticalRunDiagnostics)
+            .filter(VerticalRunDiagnostics.profile_name == profile_name)
+            .order_by(VerticalRunDiagnostics.updated_at.desc())
+            .first()
+        )
+        news_rows = (
+            db.query(NewsClassifierLabel)
+            .filter(NewsClassifierLabel.local_date == target_date)
+            .all()
+        )
+        shadow_rows = (
+            db.query(NewsClassifierShadowRun)
+            .filter(NewsClassifierShadowRun.local_date == target_date)
+            .all()
+        )
+
+    sent_count = sum(1 for r in send_rows if bool(r.success))
+    failed_count = sum(1 for r in send_rows if (not bool(r.success) and not bool(r.in_progress)))
+    breaking_count = sum(1 for r in sent_rows if str(r.message_type or "").startswith("breaking") and bool(r.success))
+
+    latest_success = next((r for r in sent_rows if bool(r.success)), None)
+    latest_failure = next((r for r in sent_rows if not bool(r.success)), None)
+
+    provider_summary: dict[str, dict[str, Any]] = {}
+    for row in provider_recent_rows:
+        key = str(row.provider or "unknown")
+        if key not in provider_summary:
+            if row.success:
+                status = "ok"
+            elif row.status_code == 429:
+                status = "rate_limited"
+            elif row.status_code == 401:
+                status = "unauthorised"
+            else:
+                status = "degraded"
+            provider_summary[key] = {
+                "provider": key,
+                "status": status,
+                "last_checked": row.timestamp.isoformat() if row.timestamp else "",
+                "message": str(row.error_message or ""),
+                "status_code": row.status_code,
+            }
+    provider_rows = list(provider_summary.values())
+    provider_ok = sum(1 for row in provider_rows if row["status"] == "ok")
+    provider_warn = sum(1 for row in provider_rows if row["status"] in {"rate_limited", "degraded"})
+    provider_fail = sum(1 for row in provider_rows if row["status"] in {"unauthorised"})
+
+    deterministic_authoritative_note = "Deterministic classifier remains authoritative. ML/LLM shadow outputs are diagnostics-only."
+    labelled_count = sum(
+        1
+        for r in news_rows
+        if (
+            bool(r.manual_story_type)
+            or bool(r.manual_suppression_reason)
+            or r.manual_breaking_eligible is not None
+            or bool(r.manual_ticker_mismatch_risk)
+            or bool(r.manual_stale_reprint_risk)
+        )
+    )
+    unlabelled_count = max(0, len(news_rows) - labelled_count)
+    disagreement_count = sum(1 for r in shadow_rows if r.agreement is False)
+
+    vertical_rows = verticals_status_for_profile(profile=profile)
+    healthcare = next((r for r in vertical_rows if r.get("vertical_key") == "healthcare"), {}) or {}
+    latest_vertical_summary = {
+        "session_key": str(getattr(latest_vertical_diag, "session_key", "") or ""),
+        "mode": str(getattr(latest_vertical_diag, "mode", "") or ""),
+        "status": str(getattr(latest_vertical_diag, "status", "") or ""),
+        "candidate_count": getattr(latest_vertical_diag, "candidate_count", None),
+        "included_count": getattr(latest_vertical_diag, "included_count", None),
+        "suppressed_count": getattr(latest_vertical_diag, "suppressed_count", None),
+        "updated_at": getattr(latest_vertical_diag, "updated_at", None).isoformat() if getattr(latest_vertical_diag, "updated_at", None) else "",
+    }
+
+    delivery_effective = ((state.get("effective") or {}).get("delivery") or {})
+    failure_alert_channels = list(getattr(profile, "delivery_failure_alert_channels", []) or [])
+    failure_alerts_enabled = bool(getattr(profile, "delivery_failure_alerts_enabled", True))
+    breaking_enabled = bool(getattr(profile, "breaking_alerts_enabled", delivery_effective.get("breaking_alerts", True)))
+    breaking_channels = list(delivery_effective.get("breaking_channels", []) or [])
+
+    recommended_next = "No immediate action."
+    recommended_target = "overview"
+    if scheduler_status != "running":
+        recommended_next = "Scheduler does not appear to be running. Restart the service."
+        recommended_target = "scheduler"
+    elif failed_count > 0:
+        recommended_next = "Delivery failures detected today. Review Delivery & Alerts."
+        recommended_target = "delivery"
+    elif provider_warn > 0 or provider_fail > 0:
+        recommended_next = "Provider degradation detected. Review provider health."
+        recommended_target = "providers"
+
+    return {
+        "title": "Diagnostics",
+        "subtitle": "Scheduler, delivery, provider health and audit tools.",
+        "profile": profile_name,
+        "target_date": target_date.isoformat(),
+        "selected_tab": selected_tab,
+        "tabs": [
+            ("overview", "Overview"),
+            ("scheduler", "Scheduler & Sessions"),
+            ("delivery", "Delivery & Alerts"),
+            ("providers", "Providers"),
+            ("snapshots", "Snapshots & Audits"),
+            ("news", "News / Classifier"),
+            ("verticals", "Verticals"),
+            ("macro", "Macro Sources"),
+            ("cli", "CLI Toolkit"),
+        ],
+        "overview": {
+            "scheduler_status": scheduler_status,
+            "current_session_key": current_window.key,
+            "current_session_label": label_for(current_window.key),
+            "next_session_key": next_window.key,
+            "next_session_label": label_for(next_window.key),
+            "sent_count": sent_count,
+            "failed_count": failed_count,
+            "breaking_count": breaking_count,
+            "failure_alerts_enabled": failure_alerts_enabled,
+            "failure_telegram_on": failure_alerts_enabled and ("telegram" in failure_alert_channels),
+            "provider_ok": provider_ok,
+            "provider_warn": provider_warn,
+            "provider_fail": provider_fail,
+            "latest_success": {
+                "type": str(getattr(latest_success, "message_type", "") or ""),
+                "channel": str(getattr(latest_success, "channel", "") or ""),
+                "sent_at": getattr(latest_success, "sent_at", None).isoformat() if latest_success and getattr(latest_success, "sent_at", None) else "",
+            },
+            "latest_failure": {
+                "type": str(getattr(latest_failure, "message_type", "") or ""),
+                "channel": str(getattr(latest_failure, "channel", "") or ""),
+                "sent_at": getattr(latest_failure, "sent_at", None).isoformat() if latest_failure and getattr(latest_failure, "sent_at", None) else "",
+            },
+            "snapshot_count": len(snapshot_rows),
+            "recommended_next": recommended_next,
+            "recommended_target": recommended_target,
+        },
+        "scheduler": {
+            "timezone": profile.timezone or settings.timezone,
+            "local_time": now_local.strftime("%Y-%m-%d %H:%M"),
+            "market_region": str(getattr(profile, "market_region", "") or "EMEA"),
+            "sub_region": str(getattr(profile, "sub_region", "") or "Global"),
+            "session_mode": str(getattr(profile, "session_mode", "default") or "default"),
+            "weekend_mode": str(getattr(profile, "weekend_mode", "saturday_only") or "saturday_only"),
+            "sunday_news_materiality": str(getattr(profile, "sunday_news_materiality", "material_only") or "material_only"),
+            "allowed_sessions": allowed_sessions,
+            "session_rows": [
+                {
+                    "session_key": r.session_key,
+                    "channel": r.channel,
+                    "success": bool(r.success),
+                    "in_progress": bool(r.in_progress),
+                    "error_message": str(r.error_message or ""),
+                }
+                for r in sorted(send_rows, key=lambda x: (x.session_key, x.channel))
+            ],
+            "commands": [
+                "python -m app.cli schedule-status",
+                "python -m app.cli daily-summary --date today",
+                "python -m app.cli session-audit --date today",
+                "python -m app.cli session-audit --date today --classifier-details --vertical-details",
+            ],
+        },
+        "delivery": {
+            "records": [
+                {
+                    "message_type": str(r.message_type or ""),
+                    "channel": str(r.channel or ""),
+                    "success": bool(r.success),
+                    "sent_at": r.sent_at.isoformat() if r.sent_at else "",
+                    "error_message": str(r.error_message or ""),
+                }
+                for r in sent_rows[:16]
+            ],
+            "success_count": sum(1 for r in sent_rows if bool(r.success)),
+            "failure_count": sum(1 for r in sent_rows if not bool(r.success)),
+            "morning_channels": list(delivery_effective.get("morning_channels", []) or []),
+            "intraday_channels": list(delivery_effective.get("intraday_channels", []) or []),
+            "breaking_alerts_enabled": breaking_enabled,
+            "breaking_channels": breaking_channels,
+            "failure_alerts_enabled": failure_alerts_enabled,
+            "failure_alert_channels": failure_alert_channels,
+            "failure_alert_cooldown_minutes": int(getattr(profile, "delivery_failure_alert_cooldown_minutes", 360)),
+            "quiet_hours": list(getattr(profile, "quiet_hours", ("23:00", "07:00")) or ("23:00", "07:00")),
+            "weekend_mode": str(getattr(profile, "weekend_mode", "saturday_only") or "saturday_only"),
+            "failure_alert_rows": [
+                {
+                    "session_key": r.session_key,
+                    "failed_channels": list(r.failed_channels_json or []),
+                    "alert_count": int(r.alert_count or 0),
+                    "last_alerted_at": r.last_alerted_at.isoformat() if r.last_alerted_at else "",
+                }
+                for r in failure_alert_rows[:12]
+            ],
+            "commands": [
+                "python -m app.cli delivery-log --date today",
+                "python -m app.cli daily-summary --date today",
+                "python -m app.cli prefs-show | grep -E \"failure_alert|breaking|morning_channels|intraday_channels\"",
+            ],
+        },
+        "providers": {
+            "rows": provider_rows,
+            "empty": len(provider_rows) == 0,
+        },
+        "snapshots": {
+            "snapshot_count": len(snapshot_rows),
+            "rows": [
+                {
+                    "session_key": r.session_key,
+                    "session_title": str(r.session_title or ""),
+                    "generated_at": r.generated_at_utc.isoformat() if r.generated_at_utc else "",
+                    "delivery_success": bool(r.delivery_success),
+                }
+                for r in snapshot_rows[:12]
+            ],
+            "commands": [
+                "python -m app.cli snapshots list --date today",
+                "python -m app.cli snapshots replay --date today --session morning",
+                "python -m app.cli session-audit --date today",
+            ],
+        },
+        "news": {
+            "deterministic_note": deterministic_authoritative_note,
+            "rows_count": len(news_rows),
+            "labelled_count": labelled_count,
+            "unlabelled_count": unlabelled_count,
+            "shadow_count": len(shadow_rows),
+            "disagreement_count": disagreement_count,
+            "ml_shadow_enabled": bool(getattr(settings, "enable_ml_news_classifier", False)),
+            "llm_shadow_enabled": bool(getattr(settings, "enable_llm_news_classifier", False)),
+            "commands": [
+                "python -m app.cli news-review --date today --limit 50 --dedupe",
+                "python -m app.cli news-label-quality --from YYYY-MM-DD --to today --dedupe",
+                "python -m app.cli session-audit --date today --classifier-details",
+            ],
+        },
+        "verticals": {
+            "registered_count": len(vertical_rows),
+            "healthcare_mode": str(healthcare.get("mode") or "off"),
+            "healthcare_status": str(healthcare.get("activation_status") or "inactive"),
+            "healthcare_reason": str(healthcare.get("activation_reason") or "mode_off"),
+            "latest": latest_vertical_summary,
+            "commands": [
+                "python -m app.cli verticals-status --verbose",
+                "python -m app.cli verticals-history --from YYYY-MM-DD --to today",
+                "python -m app.cli session-audit --date today --vertical-details",
+            ],
+        },
+        "macro": {
+            "note": "Macro source diagnostics are local-state only in this view. Use Macro Dashboard for full panel detail.",
+            "provider_subset": [row for row in provider_rows if row["provider"] in {"fred", "ecb", "eurostat"}],
+            "commands": [
+                "curl -s \"http://127.0.0.1:8080/api/v1/profile/default_user/briefing/macro\" | python -m json.tool | head -120",
+            ],
+        },
+        "cli_groups": {
+            "System": [
+                "python -m app.cli version",
+                "python -m app.cli preflight",
+                "python -m app.cli status",
+                "python -m app.cli schedule-status",
+            ],
+            "Delivery": [
+                "python -m app.cli daily-summary --date today",
+                "python -m app.cli delivery-log --date today",
+            ],
+            "Preview": [
+                "python -m app.cli session-preview --session morning --show-output",
+                "python -m app.cli session-preview --session us_pre_open --show-output",
+            ],
+            "Audit": [
+                "python -m app.cli session-audit --date today",
+                "python -m app.cli session-audit --date today --classifier-details --vertical-details",
+            ],
+            "Preferences": [
+                "python -m app.cli prefs-show",
+                "python -m app.cli prefs-set --key delivery.failure_alerts_enabled --value false",
+                "python -m app.cli prefs-set --key delivery.failure_alert_channels --value '[\"email\"]'",
+            ],
+            "Service": [
+                "./scripts/service.sh restart",
+                "./scripts/service.sh stop",
+                "./scripts/service.sh start",
+                "ps aux | grep \"app.cli scheduler\" | grep -v grep",
+            ],
+        },
     }
 
 

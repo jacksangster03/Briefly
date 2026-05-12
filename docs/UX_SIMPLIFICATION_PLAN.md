@@ -181,7 +181,18 @@ No runtime scheduler/delivery/provider logic changes required for UX phases.
   - advanced diagnostics collapsed by default
 
 ## UX-7: Diagnostics consolidation
-- Move noisy internals to one bounded area.
+- Status: implemented.
+- Added `/ui/diagnostics` as a central diagnostics hub with tabs for:
+  - overview
+  - scheduler & sessions
+  - delivery & alerts
+  - providers
+  - snapshots & audits
+  - news/classifier
+  - verticals
+  - macro sources
+  - CLI toolkit
+- Hub is local-state-first and read-only in this phase (no live provider calls, no state mutation actions).
 
 ## UX-8: Docs finalization
 - Align README + docs with final UX flows.

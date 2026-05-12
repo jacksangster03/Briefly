@@ -74,7 +74,7 @@
           <a class="btn" href="/ui?profile={{ state.profile }}">Command Centre</a>
           <a class="btn" href="/ui/settings?profile={{ state.profile }}">Settings</a>
           <a class="btn" href="/ui/briefing/history?profile={{ state.profile }}">Delivery Log</a>
-          <a class="btn" href="/ui/audit?profile={{ state.profile }}">Diagnostics</a>
+          <a class="btn" href="/ui/diagnostics?profile={{ state.profile }}">Diagnostics</a>
         </div>
       </section>
 
@@ -262,10 +262,10 @@ python -m app.cli prefs-set --key delivery.failure_alert_channels --value '["ema
           <section class="card">
             <h2>Diagnostics</h2>
             <div class="diag-grid">
-              <a href="/ui/audit?profile={{ state.profile }}">Schedule Status</a>
-              <a href="/ui/audit/history?profile={{ state.profile }}">Daily Summary</a>
+              <a href="/ui/diagnostics?profile={{ state.profile }}&tab=scheduler">Schedule Status</a>
+              <a href="/ui/diagnostics?profile={{ state.profile }}&tab=overview">Daily Summary</a>
               <a href="/ui/briefing/history?profile={{ state.profile }}">Delivery Log</a>
-              <a href="/ui/audit/logs?profile={{ state.profile }}">Session Audit</a>
+              <a href="/ui/diagnostics?profile={{ state.profile }}&tab=snapshots">Session Audit</a>
               <a href="/ui/news?profile={{ state.profile }}">News Intelligence</a>
               <a href="/ui?profile={{ state.profile }}">Command Centre</a>
               <a href="/ui/settings?profile={{ state.profile }}">Settings</a>

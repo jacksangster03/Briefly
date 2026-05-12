@@ -225,7 +225,8 @@
             <a class="nav-link" href="/ui/news?profile={{ state.profile }}">News</a>
             <a class="nav-link" href="/ui/briefing/verticals?profile={{ state.profile }}">Verticals</a>
             <a class="nav-link" href="/ui/briefing/delivery?profile={{ state.profile }}">Alerts & Delivery</a>
-            <a class="nav-link" href="/ui/audit?profile={{ state.profile }}">Diagnostics</a>
+            <a class="nav-link" href="/ui/diagnostics?profile={{ state.profile }}">Diagnostics</a>
+            <a class="nav-link" href="/ui/audit?profile={{ state.profile }}">Legacy Audit</a>
             <a class="nav-link" href="/ui/settings?profile={{ state.profile }}">Settings</a>
           </div>
         </section>
@@ -245,7 +246,7 @@
               <div class="actions">
                 <a class="btn" href="/ui/briefing/history?profile={{ state.profile }}">Open Delivery Log</a>
                 <a class="btn" href="/ui/briefing?profile={{ state.profile }}">Preview Next Briefing</a>
-                <a class="btn" href="/ui/audit/logs?profile={{ state.profile }}">Session Audit</a>
+                <a class="btn" href="/ui/diagnostics?profile={{ state.profile }}&tab=snapshots">Session Audit</a>
               </div>
             </section>
 
@@ -332,7 +333,7 @@
                 {% endfor %}
               </div>
               <div class="actions">
-                <a class="btn" href="/ui/audit?profile={{ state.profile }}">Open Diagnostics</a>
+                <a class="btn" href="/ui/diagnostics?profile={{ state.profile }}">Open Diagnostics</a>
               </div>
             </section>
           </div>
