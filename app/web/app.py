@@ -446,13 +446,43 @@ def create_web_app(settings: Settings | None = None) -> FastAPI:
     def ui_briefing_verticals(
         request: Request,
         profile: str = Query(default="default_user"),
+        message: str = Query(default=""),
+        message_kind: str = Query(default="success"),
     ):
         normalized_profile = _normalize_profile(profile)
-        return _render_settings_page(
-            request,
-            profile=normalized_profile,
-            page_key="briefing_verticals",
+        state = build_profile_state(_settings(request), normalized_profile)
+        ctx = _build_verticals_ui_context(
+            settings=_settings(request),
+            profile_name=normalized_profile,
+            state=state,
+            message=message,
+            message_kind=message_kind,
         )
+        return templates.TemplateResponse(
+            request,
+            "verticals_dashboard.html",
+            {"state": state, "vx": ctx},
+        )
+
+    @app.post("/ui/briefing/verticals/save", response_class=HTMLResponse, include_in_schema=False)
+    async def ui_briefing_verticals_save(
+        request: Request,
+        profile: str = Query(default="default_user"),
+    ):
+        normalized_profile = _normalize_profile(profile)
+        try:
+            form = await request.form()
+            updates = _vertical_updates_from_form(form)
+            apply_preference_updates(normalized_profile, updates)
+            return RedirectResponse(
+                url=f"/ui/briefing/verticals?profile={normalized_profile}&message=Vertical+intelligence+preferences+saved.&message_kind=success",
+                status_code=303,
+            )
+        except Exception as exc:
+            return RedirectResponse(
+                url=f"/ui/briefing/verticals?profile={normalized_profile}&message=Vertical+save+failed%3A+{str(exc)}&message_kind=error",
+                status_code=303,
+            )
 
     @app.get("/ui/briefing/morning/charts", response_class=HTMLResponse, include_in_schema=False)
     def ui_briefing_morning_charts(
@@ -3758,6 +3788,131 @@ def _build_news_intelligence_context(
         "commands": commands,
         "deterministic_note": "Deterministic classifier is authoritative. ML/LLM are shadow-only diagnostics.",
         "breaking_note": "Diagnostics only. This page does not trigger alerts.",
+    }
+
+
+def _build_verticals_ui_context(
+    *,
+    settings: Settings,
+    profile_name: str,
+    state: dict[str, Any],
+    message: str = "",
+    message_kind: str = "success",
+) -> dict[str, Any]:
+    from app.personalization.user_profile import load_user_profile
+    from app.verticals.engine import verticals_status_for_profile
+
+    profile = load_user_profile(settings)
+    rows = verticals_status_for_profile(profile=profile)
+    healthcare = next((r for r in rows if r.get("vertical_key") == "healthcare"), {}) or {}
+
+    effective_verticals = ((state.get("effective") or {}).get("verticals") or {})
+    healthcare_cfg = dict(effective_verticals.get("healthcare") or {})
+
+    current_mode = str(healthcare.get("mode") or healthcare_cfg.get("mode") or "off")
+    current_status = str(healthcare.get("activation_status") or ("inactive" if current_mode == "off" else "ready"))
+    current_reason = str(healthcare.get("activation_reason") or ("mode_off" if current_mode == "off" else "configured"))
+    source_status = dict(healthcare.get("source_status") or {})
+    latest = dict(healthcare.get("latest_stored_diagnostic") or {})
+    latest_mode = str(latest.get("mode") or "")
+    latest_differs = bool(latest and latest_mode and latest_mode != current_mode)
+
+    registered_count = len(rows)
+    active_count = sum(1 for row in rows if str(row.get("activation_status") or "") in {"active", "ready"})
+
+    source_cards = []
+    source_map = [
+        ("openfda", "FDA / openFDA", "official"),
+        ("clinicaltrials", "ClinicalTrials.gov", "official"),
+        ("ema", "EMA", "official"),
+        ("sec", "SEC / Company IR", "official"),
+        ("news", "General news", "news"),
+    ]
+    for key, label, tier in source_map:
+        status_obj = source_status.get(key)
+        if isinstance(status_obj, dict):
+            status_value = str(status_obj.get("status") or "unavailable")
+            fetched = status_obj.get("fetched_count")
+            normalized = status_obj.get("normalized_count")
+            last_fetch = status_obj.get("last_success_at") or ""
+        elif status_obj is None:
+            status_value = "unavailable"
+            fetched = None
+            normalized = None
+            last_fetch = ""
+        else:
+            status_value = str(status_obj)
+            fetched = None
+            normalized = None
+            last_fetch = ""
+        source_cards.append(
+            {
+                "key": key,
+                "label": label,
+                "tier": tier,
+                "status": status_value,
+                "fetched_count": fetched,
+                "normalized_count": normalized,
+                "last_fetch": last_fetch,
+            }
+        )
+
+    mode_help = {
+        "off": "Never shown in briefings.",
+        "watch": "Shown only for high-signal catalysts or watchlist relevance.",
+        "active": "Always scans and can render when signal is strong enough.",
+        "portfolio_linked": "Activates when portfolio/watchlist exposure thresholds are met.",
+    }
+
+    why_lines = []
+    if current_mode == "off":
+        why_lines.append("Healthcare is inactive because mode is off.")
+    else:
+        why_lines.append(f"Healthcare mode is {current_mode.replace('_', ' ')}.")
+        why_lines.append(f"Activation reason: {current_reason.replace('_', ' ')}.")
+        p = str(healthcare.get("portfolio_exposure_summary") or "portfolio overlap unavailable")
+        w = str(healthcare.get("watchlist_exposure_summary") or "watchlist overlap unavailable")
+        why_lines.append(p)
+        why_lines.append(w)
+
+    return {
+        "title": "Vertical Intelligence",
+        "subtitle": "Topic-specific intelligence modules linked to your portfolio and watchlist.",
+        "message": message,
+        "message_kind": "error" if str(message_kind).lower() == "error" else "success",
+        "registered_count": registered_count,
+        "active_count": active_count,
+        "healthcare": {
+            "mode": current_mode,
+            "status": current_status,
+            "reason": current_reason,
+            "portfolio_overlap": str(healthcare.get("portfolio_exposure_summary") or "unavailable"),
+            "watchlist_overlap": str(healthcare.get("watchlist_exposure_summary") or "unavailable"),
+            "candidate_count": healthcare.get("candidate_count"),
+            "included_count": healthcare.get("included_count"),
+            "suppressed_count": healthcare.get("suppressed_count"),
+            "updated_at_utc": healthcare.get("updated_at_utc"),
+            "source_status": source_status,
+            "plugin_error": str(healthcare.get("plugin_error") or ""),
+            "latest_stored": latest,
+            "latest_differs": latest_differs,
+        },
+        "config": healthcare_cfg,
+        "mode_help": mode_help,
+        "source_cards": source_cards,
+        "why_lines": why_lines,
+        "planned_verticals": [
+            {"name": "AI / Semiconductors", "status": "planned", "triggers": "Earnings surprises, capex cycles, AI supply chain catalysts."},
+            {"name": "Energy / Geopolitics", "status": "planned", "triggers": "Supply shocks, sanctions, shipping chokepoints, oil volatility."},
+            {"name": "Defence / Aerospace", "status": "planned", "triggers": "Procurement changes, conflict escalation, programme awards."},
+            {"name": "Rates / Macro", "status": "planned", "triggers": "Policy shocks, inflation regimes, curve re-pricing."},
+        ],
+        "deterministic_note": "Verticals are optional topic engines. They do not override the main briefing unless enabled by mode and materiality.",
+        "diagnostic_commands": [
+            "python -m app.cli verticals-status --verbose",
+            "python -m app.cli verticals-history --from YYYY-MM-DD --to today",
+            "python -m app.cli session-audit --date today --vertical-details",
+        ],
     }
 
 

@@ -393,6 +393,20 @@ News Intelligence UI:
   - `/ui/news?profile=default_user&date=today&session=morning&tab=breaking`
 - If no review rows exist for a date, the page renders a safe empty state with CLI commands (`news-review`, `news-label-quality`, `session-audit --classifier-details`).
 
+Vertical Intelligence UI:
+
+- Route: `/ui/briefing/verticals?profile=default_user`
+- Purpose: user-facing control centre for portfolio-linked topic intelligence modules, starting with Healthcare/Biotech.
+- Vertical modes:
+  - `off`: vertical does not run/render
+  - `watch`: conservative activation for higher-signal/watchlist-relevant cases
+  - `active`: runs normally and can render when material signal exists
+  - `portfolio_linked`: activation anchored to portfolio/watchlist threshold settings
+- Source health cards show prepared/stubbed/disabled/active status for FDA/openFDA, ClinicalTrials.gov, EMA, SEC/company IR, and general news.
+- Current configuration is shown separately from latest stored diagnostics so historical runs are not misread as current active state.
+- Planned vertical cards are informational only; they do not enable new live behaviour.
+- Deterministic classifier/rules remain authoritative; ML/LLM are non-authoritative diagnostics.
+
 ---
 
 ## Updating and running latest code

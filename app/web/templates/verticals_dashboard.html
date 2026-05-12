@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vertical Intelligence — Briefly</title>
+  <link rel="stylesheet" href="/static/css/ui-shell.css">
+  <style>
+    :root {
+      --v-surface: rgba(17, 25, 46, 0.88);
+      --v-surface-strong: rgba(19, 28, 52, 0.94);
+      --v-border: rgba(136, 155, 195, 0.34);
+      --v-text: #ecf2ff;
+      --v-muted: #b7c4de;
+      --v-shadow: 0 16px 30px rgba(0, 0, 0, 0.22);
+      --v-accent: #6f9cff;
+      --ok: #1dc47a;
+      --warn: #f0af37;
+      --bad: #ef6a6a;
+      --off: #9ba9c2;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --v-surface: rgba(255, 255, 255, 0.95);
+        --v-surface-strong: rgba(255, 255, 255, 0.98);
+        --v-border: rgba(79, 99, 139, 0.22);
+        --v-text: #13203e;
+        --v-muted: #485a7a;
+        --v-shadow: 0 10px 24px rgba(25, 36, 62, 0.12);
+        --v-accent: #2c5fe5;
+      }
+    }
+    body { margin: 0; color: var(--v-text); font-family: "IBM Plex Sans","Segoe UI",sans-serif; }
+    .shell-wrap { padding: 24px 14px 40px; }
+    .shell { max-width: 1240px; margin: 0 auto; }
+    .hero, .card { border: 1px solid var(--v-border); border-radius: 14px; background: var(--v-surface); box-shadow: var(--v-shadow); }
+    .hero { padding: 18px; margin-bottom: 12px; background: var(--v-surface-strong); }
+    h1 { margin: 0; font-size: 1.9rem; letter-spacing: -0.02em; }
+    .sub { margin: 7px 0 0; color: var(--v-muted); font-size: 0.94rem; }
+    .chips { margin-top: 12px; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); }
+    .chip { border: 1px solid var(--v-border); border-radius: 999px; padding: 7px 11px; font-size: 0.78rem; color: var(--v-muted); background: color-mix(in srgb, var(--v-surface) 90%, transparent); }
+    .chip strong { color: var(--v-text); }
+    .nav { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav a { text-decoration: none; border: 1px solid var(--v-border); border-radius: 999px; padding: 7px 11px; font-size: 0.78rem; color: var(--v-text); background: color-mix(in srgb, var(--v-surface) 87%, transparent); }
+    .grid { display: grid; gap: 12px; grid-template-columns: 1.3fr 1fr; }
+    .grid-2 { display: grid; gap: 12px; grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .grid-4 { display: grid; gap: 10px; grid-template-columns: repeat(4,minmax(0,1fr)); }
+    .card { padding: 14px; }
+    .card h2 { margin: 0 0 8px; font-size: 1rem; }
+    .muted { color: var(--v-muted); font-size: 0.84rem; }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dashed color-mix(in srgb, var(--v-border) 80%, transparent); }
+    .row:last-child { border-bottom: none; }
+    .value { font-weight: 650; text-align: right; }
+    .badge { border-radius: 999px; padding: 2px 8px; font-size: 0.69rem; font-weight: 700; border: 1px solid var(--v-border); text-transform: lowercase; }
+    .active, .ok, .enabled { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 62%, var(--v-border)); }
+    .watch, .partial, .stub_inactive, .disabled, .degraded { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 62%, var(--v-border)); }
+    .error, .failed { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 62%, var(--v-border)); }
+    .off, .inactive, .planned, .unavailable, .unknown { color: var(--off); border-color: color-mix(in srgb, var(--off) 62%, var(--v-border)); }
+    .actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .actions a, .actions button { text-decoration: none; border: 1px solid var(--v-border); border-radius: 999px; padding: 7px 11px; font-size: 0.78rem; color: var(--v-text); background: color-mix(in srgb, var(--v-surface) 90%, transparent); }
+    .actions button { cursor: pointer; }
+    .source-card, .planned-card { border: 1px solid var(--v-border); border-radius: 10px; padding: 10px; background: color-mix(in srgb, var(--v-surface) 92%, transparent); }
+    .source-card .name, .planned-card .name { font-weight: 650; margin-bottom: 4px; }
+    .alert { border-radius: 10px; padding: 10px; margin-bottom: 10px; font-size: 0.83rem; }
+    .alert.success { border: 1px solid color-mix(in srgb, var(--ok) 55%, var(--v-border)); background: color-mix(in srgb, var(--ok) 8%, var(--v-surface)); }
+    .alert.error { border: 1px solid color-mix(in srgb, var(--bad) 55%, var(--v-border)); background: color-mix(in srgb, var(--bad) 9%, var(--v-surface)); }
+    .field-grid { display: grid; gap: 10px; grid-template-columns: repeat(2,minmax(0,1fr)); }
+    label { display: block; font-size: 0.78rem; color: var(--v-muted); margin-bottom: 4px; }
+    input, select { width: 100%; border: 1px solid var(--v-border); border-radius: 8px; background: color-mix(in srgb, var(--v-surface) 95%, transparent); color: var(--v-text); padding: 7px 8px; font: inherit; font-size: 0.84rem; }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: var(--v-muted); font-size: 0.82rem; }
+    code { font-size: 0.78rem; color: var(--v-muted); }
+    .cmd { border: 1px dashed var(--v-border); border-radius: 10px; padding: 8px; margin-top: 8px; background: color-mix(in srgb, var(--v-surface) 93%, transparent); }
+    @media (max-width: 1020px) { .grid, .grid-2, .grid-4, .field-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="briefly-shell">
+    <div class="shell-wrap">
+      <div class="shell">
+        <section class="hero">
+          <h1>{{ vx.title }}</h1>
+          <p class="sub">{{ vx.subtitle }}</p>
+          <div class="chips">
+            <div class="chip"><strong>Active verticals:</strong> {{ vx.active_count }}</div>
+            <div class="chip"><strong>Registered verticals:</strong> {{ vx.registered_count }}</div>
+            <div class="chip"><strong>Healthcare mode:</strong> {{ vx.healthcare.mode }}</div>
+            <div class="chip"><strong>Healthcare status:</strong> {{ vx.healthcare.status }}</div>
+            <div class="chip"><strong>Portfolio overlap:</strong> {{ vx.healthcare.portfolio_overlap }}</div>
+            <div class="chip"><strong>Watchlist overlap:</strong> {{ vx.healthcare.watchlist_overlap }}</div>
+          </div>
+          <p class="muted" style="margin-top:8px;">{{ vx.deterministic_note }}</p>
+          <div class="nav">
+            <a href="/ui?profile={{ state.profile }}">Command Centre</a>
+            <a href="/ui/briefing?profile={{ state.profile }}">Briefings & Delivery</a>
+            <a href="/ui/portfolio?profile={{ state.profile }}">Portfolio</a>
+            <a href="/ui/news?profile={{ state.profile }}">News Intelligence</a>
+            <a href="/ui/briefing/macro?profile={{ state.profile }}">Macro</a>
+            <a href="/ui/settings?profile={{ state.profile }}">Settings</a>
+          </div>
+        </section>
+
+        {% if vx.message %}
+          <div class="alert {{ vx.message_kind }}">{{ vx.message }}</div>
+        {% endif %}
+
+        <section class="grid" style="margin-bottom:12px;">
+          <article class="card">
+            <h2>Healthcare / Biotech</h2>
+            <p class="muted">Healthcare Diagnostics</p>
+            <div class="row"><span>Mode:</span><span class="badge {{ vx.healthcare.mode }}">{{ vx.healthcare.mode }}</span></div>
+            <div class="row"><span>Status:</span><span class="badge {{ vx.healthcare.status }}">{{ vx.healthcare.status|replace("_"," ") }}</span></div>
+            <div class="row"><span>Activation reason</span><span class="value">{{ vx.healthcare.reason|replace("_"," ") }}</span></div>
+            <div class="row"><span>Portfolio overlap</span><span class="value">{{ vx.healthcare.portfolio_overlap }}</span></div>
+            <div class="row"><span>Watchlist overlap</span><span class="value">{{ vx.healthcare.watchlist_overlap }}</span></div>
+            <div class="row"><span>Candidates / included / suppressed</span><span class="value">{{ vx.healthcare.candidate_count if vx.healthcare.candidate_count is not none else "—" }} / {{ vx.healthcare.included_count if vx.healthcare.included_count is not none else "—" }} / {{ vx.healthcare.suppressed_count if vx.healthcare.suppressed_count is not none else "—" }}</span></div>
+            <div class="row"><span>Last run</span><span class="value">{{ vx.healthcare.updated_at_utc or "No vertical run diagnostics yet." }}</span></div>
+            {% if vx.healthcare.plugin_error %}
+              <div class="row"><span>Error</span><span class="value">{{ vx.healthcare.plugin_error }}</span></div>
+            {% endif %}
+            <details>
+              <summary>How Activation Works</summary>
+              {% for line in vx.why_lines %}
+                <p class="muted">{{ line }}</p>
+              {% endfor %}
+              <p class="muted">Suppression happens when signal quality, relevance, or freshness does not meet thresholds.</p>
+            </details>
+            <details>
+              <summary>Why am I seeing this?</summary>
+              {% for line in vx.why_lines %}
+                <p class="muted">{{ line }}</p>
+              {% endfor %}
+              <p class="muted">Suppression happens when signal quality, relevance, or freshness does not meet thresholds.</p>
+            </details>
+          </article>
+
+          <article class="card">
+            <h2>Mode controls</h2>
+            <p class="muted">Changing these settings affects future briefings. This does not change delivery channels.</p>
+            <form action="/ui/briefing/verticals/save?profile={{ state.profile }}" method="post">
+              <div class="field-grid">
+                <div>
+                  <label>Mode</label>
+                  <select name="verticals_healthcare_mode" required>
+                    {% for mode in ["off","watch","active","portfolio_linked"] %}
+                      <option value="{{ mode }}" {% if vx.config.mode == mode %}selected{% endif %}>{{ mode }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div>
+                  <label>Priority</label>
+                  <select name="verticals_healthcare_priority" required>
+                    {% for p in ["low","normal","high"] %}
+                      <option value="{{ p }}" {% if vx.config.priority == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div>
+                  <label>Morning max items</label>
+                  <input type="number" min="0" step="1" name="verticals_healthcare_max_items_morning" value="{{ vx.config.max_items_morning if vx.config.max_items_morning is defined else 4 }}">
+                </div>
+                <div>
+                  <label>Intraday max items</label>
+                  <input type="number" min="0" step="1" name="verticals_healthcare_max_items_intraday" value="{{ vx.config.max_items_intraday if vx.config.max_items_intraday is defined else 3 }}">
+                </div>
+                <div>
+                  <label>Minimum severity</label>
+                  <select name="verticals_healthcare_min_severity" required>
+                    {% for s in ["low","medium","high","critical"] %}
+                      <option value="{{ s }}" {% if vx.config.min_severity == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div>
+                  <label>Portfolio exposure threshold (%)</label>
+                  <input type="number" min="0" step="0.1" name="verticals_healthcare_portfolio_weight_threshold" value="{{ vx.config.portfolio_weight_threshold if vx.config.portfolio_weight_threshold is defined else 0 }}">
+                </div>
+                <div>
+                  <label>Watchlist count threshold</label>
+                  <input type="number" min="0" step="1" name="verticals_healthcare_watchlist_count_threshold" value="{{ vx.config.watchlist_count_threshold if vx.config.watchlist_count_threshold is defined else 1 }}">
+                </div>
+              </div>
+              <div class="actions">
+                <button type="submit">Save vertical settings</button>
+              </div>
+            </form>
+            <details>
+              <summary>Mode guidance</summary>
+              {% for key, text in vx.mode_help.items() %}
+                <p class="muted"><strong>{{ key }}:</strong> {{ text }}</p>
+              {% endfor %}
+              <p class="muted">ML/LLM are not authoritative in this workflow.</p>
+            </details>
+          </article>
+        </section>
+
+        <section class="grid-2" style="margin-bottom:12px;">
+          <article class="card">
+            <h2>Source health</h2>
+            <div class="grid-2">
+              {% for src in vx.source_cards %}
+                <div class="source-card">
+                  <div class="name">{{ src.label }}</div>
+                  <div><span class="badge {{ src.status }}">{{ src.status|replace("_"," ") }}</span></div>
+                  <div class="muted">Tier: {{ src.tier }}</div>
+                  <div class="muted">Fetched: {{ src.fetched_count if src.fetched_count is not none else "—" }} · Normalised: {{ src.normalized_count if src.normalized_count is not none else "—" }}</div>
+                  <div class="muted">{% if src.status in ["stub_inactive","disabled","unavailable"] %}Not active yet. This source is prepared but not currently driving live delivery.{% else %}Last fetch: {{ src.last_fetch or "unavailable" }}{% endif %}</div>
+                </div>
+              {% endfor %}
+            </div>
+          </article>
+
+          <article class="card">
+            <h2>Latest diagnostics</h2>
+            {% if vx.healthcare.latest_stored %}
+              <div class="row"><span>Latest session</span><span class="value">{{ vx.healthcare.latest_stored.session_key or "-" }}</span></div>
+              <div class="row"><span>Latest mode</span><span class="value">{{ vx.healthcare.latest_stored.mode or "-" }}</span></div>
+              <div class="row"><span>Status</span><span class="badge {{ vx.healthcare.latest_stored.activation_status or 'unavailable' }}">{{ (vx.healthcare.latest_stored.activation_status or "unavailable")|replace("_"," ") }}</span></div>
+              <div class="row"><span>Candidates / included / suppressed</span><span class="value">{{ vx.healthcare.latest_stored.candidate_count if vx.healthcare.latest_stored.candidate_count is not none else "—" }} / {{ vx.healthcare.latest_stored.included_count if vx.healthcare.latest_stored.included_count is not none else "—" }} / {{ vx.healthcare.latest_stored.suppressed_count if vx.healthcare.latest_stored.suppressed_count is not none else "—" }}</span></div>
+              <div class="row"><span>Stored timestamp</span><span class="value">{{ vx.healthcare.latest_stored.updated_at_utc or "-" }}</span></div>
+              {% if vx.healthcare.latest_differs %}
+                <p class="muted">Latest stored diagnostic, not current active state (mode differs from current configuration).</p>
+              {% endif %}
+            {% else %}
+              <p class="muted">No vertical run diagnostics yet.</p>
+            {% endif %}
+            {% for cmd in vx.diagnostic_commands %}
+              <div class="cmd"><code>{{ cmd }}</code></div>
+            {% endfor %}
+          </article>
+        </section>
+
+        <section class="card" style="margin-bottom:12px;">
+          <h2>Planned Verticals</h2>
+          <div class="grid-4">
+            {% for v in vx.planned_verticals %}
+              <div class="planned-card">
+                <div class="name">{{ v.name }}</div>
+                <div><span class="badge planned">planned</span></div>
+                <p class="muted">{{ v.triggers }}</p>
+                <p class="muted">Disabled by default. No live behaviour yet.</p>
+              </div>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Advanced diagnostics</h2>
+          <details>
+            <summary>Show technical details</summary>
+            <div class="row"><span>Registry status</span><span class="value">{{ vx.registered_count }} plugin(s) registered</span></div>
+            <div class="row"><span>Current mode</span><span class="value">{{ vx.healthcare.mode }}</span></div>
+            <div class="row"><span>Current activation reason</span><span class="value">{{ vx.healthcare.reason }}</span></div>
+            <div class="row"><span>Source status keys</span><span class="value">{{ vx.healthcare.source_status.keys()|list|join(", ") if vx.healthcare.source_status else "none" }}</span></div>
+          </details>
+        </section>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

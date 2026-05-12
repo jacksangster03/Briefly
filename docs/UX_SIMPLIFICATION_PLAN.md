@@ -170,7 +170,15 @@ No runtime scheduler/delivery/provider logic changes required for UX phases.
 - Empty-state flow includes copyable CLI commands when local review data is not yet populated.
 
 ## UX-6: Verticals polish
-- Card-based vertical lifecycle and diagnostics.
+- Status: implemented.
+- `/ui/briefing/verticals` now presents a summary-first vertical control panel with:
+  - vertical overview hero (active/registered count, healthcare mode/status, overlap summary)
+  - healthcare card with activation reason, candidates/included/suppressed, and last run state
+  - simplified mode controls (`off`, `watch`, `active`, `portfolio_linked`) with guidance
+  - source health mini-cards (FDA, ClinicalTrials.gov, EMA, SEC/company IR, general news)
+  - clear separation of current configuration vs latest stored diagnostics
+  - planned vertical cards (AI/Semis, Energy/Geopolitics, Defence/Aerospace, Rates/Macro)
+  - advanced diagnostics collapsed by default
 
 ## UX-7: Diagnostics consolidation
 - Move noisy internals to one bounded area.
