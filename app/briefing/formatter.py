@@ -55,6 +55,12 @@ from app.briefing.move_context import (
     format_yield_context_line,
     move_context_from_quote,
 )
+from app.briefing.session_tape import (
+    build_session_tape,
+    build_rates_macro_tape,
+    format_session_tape_text,
+    format_watchlist_tape_compact,
+)
 
 
 def format_trigger_line(
@@ -193,6 +199,12 @@ class TelegramFormatter:
         if briefing.data_basis_lines:
             basis_lines = [f"- {line}" for line in briefing.data_basis_lines[:5]]
             sections.append("\n".join(["<b>DATA BASIS</b>"] + basis_lines))
+
+        # Rates & Macro Tape: compact header block before macro policy watch
+        rates_tape = build_rates_macro_tape(briefing)
+        if rates_tape:
+            sections.append(rates_tape)
+
         if briefing.macro_policy_watch:
             watch_lines = [
                 str(line).strip()
@@ -231,6 +243,33 @@ class TelegramFormatter:
         fx_section = getattr(briefing, "fx_pulse_section", "") or ""
         if fx_section:
             sections.append(self._format_fx_section(fx_section, session_key))
+
+        # Session Tape Recap blocks (US cash / Europe cash / watchlist)
+        all_quotes = (
+            list(getattr(briefing.market_setup, "index_quotes", []) or [])
+            + list(getattr(briefing.market_setup, "macro_quotes", []) or [])
+        )
+        if is_closing or is_into_close:
+            us_tape = build_session_tape(all_quotes, session_key, section="us_cash")
+            us_tape_text = format_session_tape_text(us_tape, "us_cash", session_key)
+            if us_tape_text:
+                sections.append(us_tape_text)
+            eu_tape = build_session_tape(all_quotes, session_key, section="europe_cash")
+            eu_tape_text = format_session_tape_text(eu_tape, "europe_cash", session_key)
+            if eu_tape_text:
+                sections.append(eu_tape_text)
+        elif is_midday:
+            eu_tape = build_session_tape(all_quotes, session_key, section="europe_cash")
+            eu_tape_text = format_session_tape_text(eu_tape, "europe_cash", session_key)
+            if eu_tape_text:
+                sections.append(eu_tape_text)
+        # Watchlist session tape (compact, only when intraday OHLC available)
+        watchlist_quotes = list(getattr(briefing, "watchlist_quotes", []) or [])
+        if watchlist_quotes and (is_closing or is_into_close or is_intraday):
+            wl_tape = build_session_tape(watchlist_quotes, session_key, section="watchlist")
+            wl_tape_text = format_watchlist_tape_compact(wl_tape)
+            if wl_tape_text:
+                sections.append(wl_tape_text)
 
         show_regional = is_morning or is_midday or is_preopen or is_closing
         if not show_regional and briefing.regional_skew_summary:

@@ -1430,6 +1430,70 @@ See `docs/FX_DOLLAR_PULSE.md` for full architecture reference.
 
 ---
 
+## Session Tape Recap
+
+**Module**: `app/briefing/session_tape.py`
+
+Adds a deterministic post-session summary section to closing_wrap and into_close briefings. For each instrument it computes where the latest price sits within the session range and what the price action narrative is.
+
+### What it shows
+
+```
+US CASH SESSION RECAP
+- S&P 500: +0.58% vs prior close, +0.42% from open, near highs.
+- Nasdaq: +1.20% vs prior close, +0.85% from open, near highs. rallied from open
+- Russell 2000: +0.17%, faded from highs.
+
+EUROPE CASH SESSION RECAP
+- EURO STOXX 50: -0.32% vs prior close, -0.18% from open, lower half.
+- DAX: -0.41% vs prior close, near lows.
+```
+
+### Range-position buckets
+
+| Position | Label |
+|---|---|
+| Top 20% | near highs |
+| 60-80% | upper half |
+| 40-60% | mid-range |
+| 20-40% | lower half |
+| Bottom 20% | near lows |
+
+### Data availability
+
+OHLC is sourced from the existing provider chain (Finnhub day_high/day_low/open, then yfinance fast_info). When OHLC is unavailable, the entry degrades gracefully to prior-close-only and the range/verdict fields are omitted.
+
+### Session heading logic
+
+- `closing_wrap` / `into_close`: "US CASH SESSION RECAP" and "EUROPE CASH SESSION RECAP"
+- `europe_midday`: "EUROPE SESSION SO FAR"
+- Other sessions: no session tape shown
+
+---
+
+## Rates & Macro Tape
+
+A compact summary of key rates, yield spread, USD direction, WTI, and gold. Shown at the top of briefings for morning, us_pre_open, into_close, and closing_wrap sessions.
+
+### Format
+
+```
+RATES & MACRO TAPE
+2Y 3.95% (+5bp) | 10Y 4.48% (+2bp, above 4.45% trigger) | 10Y-2Y +53bp
+USD stronger | WTI $101.29 (+0.21%, elevated) | Gold $2,340 (+0.3%)
+```
+
+### Rules
+
+- Uses data already in the briefing context: no extra API calls.
+- Yield spread (10Y minus 2Y) shown in basis points.
+- 10Y trigger note: "above 4.45% trigger" when 10Y >= 4.45%.
+- WTI qualitative label: elevated/firm/steady/easing/under pressure.
+- Suppressed when fewer than 3 values are available.
+- In email: rendered as a dedicated header block before the main content sections.
+
+---
+
 ## License
 
 MIT

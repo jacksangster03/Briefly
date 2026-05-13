@@ -12,6 +12,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.briefing.formatter import TelegramFormatter, format_trigger_line
+from app.briefing.session_tape import build_rates_macro_tape
 from app.briefing.move_colors import move_color_hex
 from app.briefing.trust_contract import chart_copy_is_distinct, contract_warning_summary, distinct_lines
 from app.schemas.briefings import MorningBriefing
@@ -216,6 +217,25 @@ class EmailFormatter:
             self._nav_row(),
             "</td></tr>",
         ]
+
+        # Rates & Macro Tape (compact block for relevant sessions)
+        rates_tape_text = build_rates_macro_tape(briefing)
+        if rates_tape_text:
+            tape_lines = [
+                line.strip()
+                for line in rates_tape_text.strip().splitlines()
+                if line.strip()
+            ]
+            if tape_lines:
+                tape_header = tape_lines[0]
+                tape_body = tape_lines[1:]
+                parts.append(
+                    f"<tr><td bgcolor=\"{_SECTION_BG}\" style=\"padding:8px 16px;border-bottom:1px solid {_DIVIDER};background:{_SECTION_BG};background-color:{_SECTION_BG};\">"
+                    f"<div style=\"font-size:10px;line-height:1.4;color:{_TEXT_MUTED};letter-spacing:0.05em;font-weight:800;\">{html.escape(tape_header)}</div>"
+                    f"<div style=\"margin-top:4px;font-size:11.5px;line-height:1.4;color:{_TEXT_SECONDARY};\">"
+                    + "<br>".join(html.escape(line) for line in tape_body)
+                    + "</div></td></tr>"
+                )
 
         if desk_read:
             parts.append(
