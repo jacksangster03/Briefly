@@ -404,3 +404,77 @@ def test_signals_all_unavailable():
     assert signals.materiality_score == 0
     assert len(signals.missing) == 5
     assert len(signals.drivers) == 0
+
+
+# ---------------------------------------------------------------------------
+# Part 7: Compact FX output – no "(n/a)" for missing change (added in audit)
+# ---------------------------------------------------------------------------
+
+def test_compact_fx_none_change_pct_omits_na():
+    """Compact FX output: None daily_change_pct shows value only, not '(n/a)'."""
+    panel = [
+        _make_quote(
+            "EUR/USD",
+            symbol="EURUSD=X",
+            value=1.0823,
+            daily_change_pct=None,  # change unavailable
+        ),
+        _make_quote(
+            "Trade-weighted USD",
+            source="fred",
+            base="USD",
+            quote_ccy="BASKET",
+            value=115.2,
+            daily_change_pct=-0.3,
+        ),
+    ]
+    signals = build_fx_signals(panel)
+    text = build_fx_section_text(panel, signals, {"home_region": "spain"}, "europe_midday")
+    assert "(n/a)" not in text, f"Compact FX must not show '(n/a)'; got: {text!r}"
+
+
+def test_compact_fx_none_value_omits_pair():
+    """Compact FX output: pair with None value is omitted entirely."""
+    from app.briefing.fx_section import _format_full_block
+
+    panel = [
+        _unavailable_quote("EUR/USD"),   # value is None
+        _make_quote(
+            "Trade-weighted USD",
+            source="fred",
+            base="USD",
+            quote_ccy="BASKET",
+            value=115.2,
+            daily_change_pct=-0.3,
+        ),
+    ]
+    signals = build_fx_signals(panel)
+    text = _format_full_block(panel, signals, {"home_region": "spain"})
+    # EUR/USD value is None so it should not appear in output
+    assert "EUR/USD n/a" not in text
+    assert "(n/a)" not in text
+
+
+def test_compact_fx_pair_with_value_and_change_shows_full_format():
+    """Compact FX: pair with both value and change shows the full 'PAIR level change%' format."""
+    panel = [
+        _make_quote(
+            "EUR/USD",
+            symbol="EURUSD=X",
+            value=1.0823,
+            daily_change_pct=-0.4,
+        ),
+        _make_quote(
+            "Trade-weighted USD",
+            source="fred",
+            base="USD",
+            quote_ccy="BASKET",
+            value=115.2,
+            daily_change_pct=-0.3,
+        ),
+    ]
+    signals = build_fx_signals(panel)
+    text = build_fx_section_text(panel, signals, {"home_region": "spain"}, "europe_midday")
+    # Should contain level and change for EUR/USD
+    assert "1.0823" in text
+    assert "-0.40%" in text or "0.40" in text

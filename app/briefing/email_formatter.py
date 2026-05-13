@@ -11,7 +11,7 @@ from datetime import datetime
 
 from zoneinfo import ZoneInfo
 
-from app.briefing.formatter import TelegramFormatter
+from app.briefing.formatter import TelegramFormatter, format_trigger_line
 from app.briefing.move_colors import move_color_hex
 from app.briefing.trust_contract import chart_copy_is_distinct, contract_warning_summary, distinct_lines
 from app.schemas.briefings import MorningBriefing
@@ -695,14 +695,19 @@ class EmailFormatter:
             if any(tok in (q.display_name or q.symbol or "").upper() for tok in ("STOXX", "DAX", "CAC", "FTSE", "IBEX"))
         ]
         europe_avg = (sum(europe_moves) / len(europe_moves)) if europe_moves else None
-        if vix is not None:
-            triggers.append(f"VIX > 20 confirms broader risk-off pressure (now {vix:.2f}).")
-        if ten_y is not None:
-            triggers.append(f"US 10Y > 4.45% would reinforce rates-repricing pressure (now {ten_y:.2f}%).")
-        if oil is not None:
-            triggers.append(f"WTI > $107 would signal escalating energy shock (now ${oil:.2f}).")
+        vix_line = format_trigger_line("VIX", vix, 20.0, "above", "confirms broader risk-off pressure")
+        if vix_line:
+            triggers.append(vix_line)
+        ten_y_line = format_trigger_line("US 10Y", ten_y, 4.45, "above", "reinforce rates-repricing pressure")
+        if ten_y_line:
+            triggers.append(ten_y_line)
+        oil_line = format_trigger_line("WTI", oil, 107.0, "above", "signal escalating energy shock")
+        if oil_line:
+            triggers.append(oil_line)
         if europe_avg is not None:
-            triggers.append(f"Europe average move below -1.5% would confirm deeper regional weakness (now {europe_avg:+.2f}%).")
+            europe_line = format_trigger_line("Europe average move", europe_avg, -1.5, "below", "confirm deeper regional weakness")
+            if europe_line:
+                triggers.append(europe_line)
         triggers.append("Nasdaq turning negative would indicate the growth cushion is failing.")
         return triggers[:5]
 

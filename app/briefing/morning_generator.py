@@ -1438,6 +1438,19 @@ class MorningBriefingGenerator:
         )
         level = raw_level
 
+        # Oil move classification thresholds
+        _OIL_SPIKE_THRESHOLD = 3.0    # abs % for "spiking"
+        _OIL_ELEVATED_THRESHOLD = 1.0  # abs % for "elevated" / "under pressure"
+
+        def _oil_move_label(delta: float) -> str:
+            """Return a calibrated oil-move label based on magnitude."""
+            abs_delta = abs(delta)
+            if abs_delta > _OIL_SPIKE_THRESHOLD:
+                return "oil spiking"
+            if abs_delta > _OIL_ELEVATED_THRESHOLD:
+                return "oil elevated" if delta > 0 else "oil under pressure"
+            return "oil steady"
+
         # Floor rule: oil elevated + active geo headlines → at least ELEVATED, never LOW/MODERATE
         oil_is_elevated = oil_level > 90 or oil_delta >= 2.0
         if has_geo_headlines and oil_is_elevated:
@@ -1446,13 +1459,33 @@ class MorningBriefingGenerator:
                 if _GEO_LEVEL_ORDER.index(level) < _GEO_LEVEL_ORDER.index(floor):
                     level = floor
                     # Build a clean replacement summary — do not concatenate the raw model summary
-                    vix_note = f"VIX {vix_level:.1f}" if vix_level else "VIX n/a"
+                    vix_available_here = vix_level is not None and vix_level > 0
+                    if vix_available_here:
+                        vix_note = f"VIX {vix_level:.1f}"
+                    else:
+                        vix_note = "VIX unavailable"
                     haven_note = "haven neutral" if safe_haven_strength < 0.5 else f"haven +{safe_haven_strength:.2f}"
                     density_note = f"density {density:.2f}" if density is not None else "headline signal stale"
+                    oil_label = _oil_move_label(oil_delta)
+                    # Distinguish confirmed vs incomplete market confirmation
+                    market_confirmed = (
+                        vix_available_here and (vix_level or 0.0) >= 20.0 and oil_delta >= _OIL_ELEVATED_THRESHOLD
+                    )
+                    if market_confirmed:
+                        confirmation_note = f"{vix_note} and {haven_note} confirm elevated stress."
+                    elif not vix_available_here and safe_haven_strength < 0.5 and abs(oil_delta) < _OIL_ELEVATED_THRESHOLD:
+                        confirmation_note = (
+                            "Geo headline risk elevated; market confirmation incomplete "
+                            f"({vix_note}, haven demand neutral)."
+                        )
+                    elif vix_available_here and (vix_level or 0.0) < 20.0:
+                        confirmation_note = "Market signals are not yet confirming broader stress."
+                    else:
+                        confirmation_note = f"{vix_note} and {haven_note} do not confirm broad panic."
                     summary = (
-                        f"Geo risk ELEVATED: oil {oil_level:.0f} USD/bbl ({oil_delta:+.2f}%) "
+                        f"Geo risk ELEVATED: {oil_label} at {oil_level:.0f} USD/bbl ({oil_delta:+.2f}%) "
                         f"with active Middle East/geopolitical headlines; "
-                        f"{vix_note} and {haven_note} do not confirm broad panic. "
+                        f"{confirmation_note} "
                         f"Inputs: {vix_note}, oil {oil_delta:+.2f}%, {haven_note}, {density_note}."
                     )
             except ValueError:

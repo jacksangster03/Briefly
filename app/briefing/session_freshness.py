@@ -88,6 +88,7 @@ def classify_quote_freshness(
     age = max(timedelta(0), now_local - ts_local)
     is_equity_like = _is_equity_like(quote)
     is_us_equity_like = _is_us_equity_like(quote)
+    is_europe_equity = _is_europe_equity_like(quote)
     is_open_session = market_status in {"open", "pre_market", "post_market"}
 
     # Explicit carried-forward flag wins; used by delta engine for repeated context.
@@ -121,12 +122,81 @@ def classify_quote_freshness(
                 display_prefix="prior close",
             )
 
+    # Europe equity during europe_midday/us_pre_open (European cash hours):
+    # Classify by quote timestamp age rather than relying on market_status,
+    # because the session router returns "unknown" for these session keys.
+    if is_europe_equity and session_key in {"europe_midday", "morning", "us_pre_open"}:
+        if ts_local.date() < now_local.date() or age >= timedelta(hours=6):
+            # Provider returned a prior-close quote despite the market being open.
+            _warn = (
+                "provider_returned_prior_close_during_open_session"
+                if session_key in {"europe_midday", "us_pre_open"}
+                else None
+            )
+            return FreshnessMeta(
+                symbol=symbol,
+                label=label,
+                value_timestamp=ts_local,
+                generated_at=generated_at,
+                session_key=session_key,
+                market_status=market_status,
+                freshness_state=FRESHNESS_PRIOR_CLOSE,
+                freshness_label=f"prior close, {ts_local.strftime('%a %d %b %H:%M %Z')}",
+                should_show_as_live=False,
+                display_prefix="prior close",
+                warning=_warn,
+            )
+        # Fresh quote during Europe cash hours: classify by age.
+        if age <= timedelta(minutes=15):
+            return FreshnessMeta(
+                symbol=symbol,
+                label=label,
+                value_timestamp=ts_local,
+                generated_at=generated_at,
+                session_key=session_key,
+                market_status=market_status,
+                freshness_state=FRESHNESS_NEAR_REAL_TIME,
+                freshness_label=f"near-real-time, {ts_local.strftime('%H:%M %Z')}",
+                should_show_as_live=True,
+                display_prefix="live",
+            )
+        if age <= timedelta(minutes=60):
+            return FreshnessMeta(
+                symbol=symbol,
+                label=label,
+                value_timestamp=ts_local,
+                generated_at=generated_at,
+                session_key=session_key,
+                market_status=market_status,
+                freshness_state=FRESHNESS_DELAYED,
+                freshness_label=f"delayed, {ts_local.strftime('%H:%M %Z')}",
+                should_show_as_live=False,
+                display_prefix="delayed",
+            )
+        return FreshnessMeta(
+            symbol=symbol,
+            label=label,
+            value_timestamp=ts_local,
+            generated_at=generated_at,
+            session_key=session_key,
+            market_status=market_status,
+            freshness_state=FRESHNESS_STALE,
+            freshness_label=f"stale, {ts_local.strftime('%H:%M %Z')}",
+            should_show_as_live=False,
+            display_prefix="stale",
+        )
+
     if is_open_session:
         if age <= timedelta(minutes=15):
             state = FRESHNESS_NEAR_REAL_TIME
             label_text = f"near-real-time, {ts_local.strftime('%H:%M %Z')}"
             display_prefix = "live"
             live = True
+        elif age <= timedelta(minutes=30):
+            state = FRESHNESS_DELAYED
+            label_text = f"delayed (near-real-time), {ts_local.strftime('%H:%M %Z')}"
+            display_prefix = "delayed"
+            live = False
         elif age <= timedelta(minutes=60):
             state = FRESHNESS_DELAYED
             label_text = f"delayed, {ts_local.strftime('%H:%M %Z')}"
@@ -243,7 +313,16 @@ def build_data_basis_lines(
             f"US watchlist/pre-market proxies: {us_proxy_basis}"
         )
 
-    if session_key in {"europe_midday", "us_pre_open"} and eu_basis.startswith(("prior close", "delayed", "stale")):
+    if session_key in {"europe_midday", "us_pre_open"} and eu_basis.startswith(("prior close",)):
+        # During Europe cash hours, annotate that provider returned prior-close
+        # quotes while the cash session is open. Keep the legacy wording that
+        # existing tests rely on, and add a more precise label for the basis line.
+        lines[1] = "Europe equities: prior close (provider-returned during open session)"
+        lines.append(
+            "Europe cash is open but provider quotes are prior close/delayed; "
+            "treat as stale context, not live."
+        )
+    elif session_key in {"europe_midday", "us_pre_open"} and eu_basis.startswith(("delayed", "stale")):
         lines.append("Europe cash is open but provider quotes are prior close/delayed.")
 
     # VIX availability note for intraday risk reads.

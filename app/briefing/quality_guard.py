@@ -114,10 +114,18 @@ class BriefingQualityGuard:
 
     # -- Internal -------------------------------------------------------------
 
+    # Brent stale caveat note (injected once only)
+    _BRENT_STALE_CAVEAT = "Brent stale/provider-held; WTI used for live energy impulse."
+    _BRENT_STALE_CAVEAT_RE = re.compile(
+        r"Brent stale[^\.]*?(?:WTI[^\.]*?)?(?:energy[^\.]*?)?[\.;]",
+        re.IGNORECASE,
+    )
+
     def _apply_internal(self, sections: list[str]) -> list[str]:
         cleaned: list[str] = []
         seen_headings: set[str] = set()
         direction_claims: dict[str, str] = {}  # metric_key -> first seen direction
+        brent_caveat_emitted: bool = False
 
         for block in sections:
             text = str(block or "").strip()
@@ -129,7 +137,6 @@ class BriefingQualityGuard:
             if heading:
                 if heading in seen_headings:
                     # Remove the heading line from this block
-                    original_text = text
                     text = _HEADING_RE.sub("", text, count=1).strip()
                     if not text:
                         logger.warning(
@@ -150,13 +157,22 @@ class BriefingQualityGuard:
                 if text != original:
                     logger.warning("quality_guard: replaced VIX confirmation language (vix_available=%s)", self.vix_available)
 
-            # Rule 3: stale Brent
+            # Rule 3: stale Brent — replace confirmation language and deduplicate caveat note.
             if self.brent_stale:
                 original = text
                 text = re.sub(r"\bBrent confirms\b", "Brent stale/provider-held", text, flags=re.IGNORECASE)
                 text = re.sub(r"\bBrent does not confirm\b", "Brent stale/provider-held", text, flags=re.IGNORECASE)
                 if text != original:
                     logger.warning("quality_guard: replaced Brent live-confirmation language (brent_stale=True)")
+
+                # Deduplicate Brent stale caveat notes that appear across sections.
+                if self._BRENT_STALE_CAVEAT_RE.search(text):
+                    if brent_caveat_emitted:
+                        # Remove the duplicate caveat sentence from this block.
+                        text = self._BRENT_STALE_CAVEAT_RE.sub("", text).strip()
+                        logger.warning("quality_guard: removed duplicate Brent stale caveat from block")
+                    else:
+                        brent_caveat_emitted = True
 
             # Rule 4: "review diagnostics" wording
             original = text
@@ -182,7 +198,8 @@ class BriefingQualityGuard:
                     )
                     text = _suppress_direction_claim(text, direction, pos)
 
-            cleaned.append(text)
+            if text:
+                cleaned.append(text)
 
         return cleaned
 
@@ -225,32 +242,65 @@ def apply_quality_guard(
 
 
 def flags_from_briefing(briefing: Any) -> dict[str, bool]:
-    """Extract quality guard flags from a MorningBriefing object."""
+    """Extract quality guard flags from a MorningBriefing object.
+
+    Returns a dict with keys:
+        vix_available (bool): True when a VIX quote with a valid price was fetched.
+        vix_stale (bool): True when VIX timestamp is older than 6 hours.
+        brent_stale (bool): True when Brent freshness state is stale/prior_close.
+    """
     basis_lines = [str(line or "") for line in (getattr(briefing, "data_basis_lines", None) or [])]
     freshness = dict(getattr(briefing, "quote_freshness", None) or {})
 
-    # VIX available: check quote_freshness and canonical prices
+    # VIX available: prefer market_setup quotes as the ground truth.
+    # Fall back to canonical_prices when quotes are absent.
     vix_available = True
+    vix_stale = False
     canonical = dict(getattr(briefing, "canonical_prices", None) or {})
     vix_canon = canonical.get("VIX") or {}
-    if vix_canon:
-        vix_val = (vix_canon or {}).get("value")
-        if vix_val is None:
-            vix_available = False
-    # Also check from market_setup quotes
+
     try:
         index_quotes = list(briefing.market_setup.index_quotes or [])
         macro_quotes = list(briefing.market_setup.macro_quotes or [])
         all_quotes = index_quotes + macro_quotes
-        vix_quotes = [q for q in all_quotes if "vix" in (q.symbol or "").lower() or "vix" in (q.display_name or "").lower()]
+        vix_quotes = [
+            q for q in all_quotes
+            if "vix" in (q.symbol or "").lower() or "vix" in (q.display_name or "").lower()
+        ]
         if vix_quotes:
-            # Found VIX quote; check it has a price
-            vix_available = any(bool(q.current_price) for q in vix_quotes)
-        elif not vix_canon:
-            # No VIX at all
+            # Found VIX quote object(s); availability requires a non-None, non-zero price.
+            vix_available = any(
+                q.current_price is not None and float(q.current_price) > 0
+                for q in vix_quotes
+            )
+        elif vix_canon:
+            # No quote object but canonical price present
+            vix_val = vix_canon.get("value")
+            vix_available = vix_val is not None and float(vix_val) > 0
+        else:
+            # No VIX data at all in this briefing
             vix_available = False
     except Exception:
-        pass
+        # Defensive: fall back to canonical check only
+        if vix_canon:
+            vix_val = vix_canon.get("value")
+            vix_available = vix_val is not None and float(vix_val) > 0
+        else:
+            vix_available = False
+
+    # VIX stale: check freshness map for the VIX entry.
+    vix_meta = (
+        freshness.get("VIX")
+        or freshness.get("^VIX")
+        or {}
+    )
+    vix_freshness_state = str(vix_meta.get("freshness_state") or "").lower()
+    if vix_freshness_state in {"stale", "carried_forward"}:
+        vix_stale = True
+
+    # Belt-and-braces: also check data_basis_lines for legacy stale/unavailable markers.
+    if any("vix:" in line.lower() and "unavailable" in line.lower() for line in basis_lines):
+        vix_available = False
 
     # Brent stale: check quote_freshness
     brent_stale = False
@@ -262,4 +312,8 @@ def flags_from_briefing(briefing: Any) -> dict[str, bool]:
     if any("brent" in line.lower() and "stale" in line.lower() for line in basis_lines):
         brent_stale = True
 
-    return {"vix_available": vix_available, "brent_stale": brent_stale}
+    return {
+        "vix_available": vix_available,
+        "vix_stale": vix_stale,
+        "brent_stale": brent_stale,
+    }

@@ -57,6 +57,45 @@ from app.briefing.move_context import (
 )
 
 
+def format_trigger_line(
+    label: str,
+    metric_value: float | None,
+    threshold: float,
+    direction: str,
+    consequence: str,
+) -> str:
+    """Build a trigger line that reflects the current value relative to threshold.
+
+    Parameters
+    ----------
+    label:
+        Human-readable metric label, e.g. "US 10Y".
+    metric_value:
+        Current value. If None, the trigger line is suppressed entirely.
+    threshold:
+        The numeric threshold level.
+    direction:
+        "above" or "below".
+    consequence:
+        What the breach implies, e.g. "reinforce rates pressure".
+
+    Returns
+    -------
+    str
+        A trigger line string, or empty string when metric_value is None.
+    """
+    if metric_value is None:
+        return ""
+    if direction == "above":
+        if metric_value >= threshold:
+            return f"{label} is above {threshold:.2f}, {consequence} (now {metric_value:.2f})."
+        return f"{label} above {threshold:.2f} would {consequence} (now {metric_value:.2f})."
+    # direction == "below"
+    if metric_value <= threshold:
+        return f"{label} is below {threshold:.2f}, {consequence} (now {metric_value:.2f})."
+    return f"{label} below {threshold:.2f} would {consequence} (now {metric_value:.2f})."
+
+
 _VIX_TOKENS: frozenset[str] = frozenset({"VIX", "^VIX", "UVXY", "SVXY"})
 _COMMODITY_TOKENS: frozenset[str] = frozenset({
     "GOLD", "GLD", "GC", "OIL", "WTI", "CRUDE", "CL", "NG",
@@ -411,12 +450,15 @@ class TelegramFormatter:
             None,
         )
         triggers: list[str] = []
-        if vix is not None and vix < 20.0:
-            triggers.append(f"VIX > 20 confirms broader risk-off pressure (now {vix:.2f}).")
-        if ten_y is not None and ten_y < 4.45:
-            triggers.append(f"US 10Y > 4.45% would reinforce rates pressure (now {ten_y:.2f}%).")
-        if oil is not None and oil < 107.0:
-            triggers.append(f"WTI > $107 would signal escalating energy pressure (now ${oil:.2f}).")
+        vix_line = format_trigger_line("VIX", vix, 20.0, "above", "confirms broader risk-off pressure")
+        if vix_line:
+            triggers.append(vix_line)
+        ten_y_line = format_trigger_line("US 10Y", ten_y, 4.45, "above", "reinforce rates pressure")
+        if ten_y_line:
+            triggers.append(ten_y_line)
+        oil_line = format_trigger_line("WTI", oil, 107.0, "above", "signal escalating energy pressure")
+        if oil_line:
+            triggers.append(oil_line)
         triggers.append("Nasdaq turning negative would indicate the growth cushion is fading.")
         return "\n".join([f"<b>{header}</b>"] + [f"- {line}" for line in triggers[:4]])
 
@@ -799,6 +841,7 @@ class TelegramFormatter:
         except Exception:
             flags = {}
         vix_available = bool(flags.get("vix_available", True))
+        vix_stale = bool(flags.get("vix_stale", False))
         brent_stale = bool(flags.get("brent_stale", False))
 
         # Belt-and-braces: also check data_basis_lines for legacy stale markers
@@ -810,6 +853,7 @@ class TelegramFormatter:
 
         guard = BriefingQualityGuard(
             vix_available=vix_available,
+            vix_stale=vix_stale,
             brent_stale=brent_stale,
         )
         return guard.apply(sections)

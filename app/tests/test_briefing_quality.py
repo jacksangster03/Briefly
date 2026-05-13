@@ -501,3 +501,81 @@ class TestDuplicateHeadingGuard:
         full = "\n".join(result)
         assert "MARKET SETUP" in full
         assert "GLOBAL NEWS" in full
+
+
+# ---------------------------------------------------------------------------
+# 13. Email output does not repeat narrative sections (Part 8 audit)
+# ---------------------------------------------------------------------------
+
+class TestEmailNarrativeNonRepetition:
+    """Email output must not repeat full narrative sections verbatim.
+
+    The email has a pre-chart 'desk read' header row that contains a compact
+    summary (up to 4 lines). The main body (_brief_modules) renders the full
+    Telegram sections. These are structurally different blocks — the desk read
+    is a compact prefix, not a section repeat.
+
+    This test verifies:
+    1. MACRO POLICY WATCH heading appears exactly once.
+    2. The quality guard prevents duplicate headings across section blocks.
+    3. Chart count is not reduced by the quality guard (richness preserved).
+    """
+
+    def _make_briefing(self, macro_content: str = "") -> MorningBriefing:
+        index_quotes = [
+            QuoteData(symbol="SPY", display_name="S&P 500", current_price=500.0, change=2.0, change_percent=0.4),
+        ]
+        macro_quotes = [
+            QuoteData(symbol="^VIX", display_name="VIX", current_price=15.5, change=-0.5, change_percent=-3.1),
+        ]
+        from app.schemas.briefings import MarketSetup
+        setup = MarketSetup(index_quotes=index_quotes, macro_quotes=macro_quotes)
+        return MorningBriefing(
+            generated_at=datetime.now(timezone.utc),
+            session_key="morning",
+            market_setup=setup,
+            macro_policy_watch=macro_content,
+        )
+
+    def test_macro_policy_watch_heading_once_in_email(self):
+        """MACRO POLICY WATCH heading must appear exactly once in email HTML."""
+        import re
+        briefing = self._make_briefing("MACRO POLICY WATCH\nFed: hold · ECB: hold")
+        html_out = EmailFormatter("Europe/Madrid").format_morning_briefing(briefing).html_body
+        count = len(re.findall(r"MACRO POLICY WATCH", html_out, re.IGNORECASE))
+        assert count == 1, f"Expected 1 heading, got {count}"
+
+    def test_quality_guard_deduplication_preserves_content(self):
+        """Quality guard removes heading from second block but keeps body content."""
+        guard = BriefingQualityGuard()
+        sections = [
+            "<b>MACRO POLICY WATCH</b>\nFed: hold. Rates steady.",
+            "<b>MACRO POLICY WATCH</b>\nAdditional rate context.",
+        ]
+        result = guard.apply(sections)
+        full = "\n".join(result)
+        import re
+        count = len(re.findall(r"MACRO POLICY WATCH", full, re.IGNORECASE))
+        assert count == 1, f"Heading should appear once, got {count}"
+        # Both bodies should still be present
+        assert "Fed: hold" in full
+        assert "Additional rate context" in full
+
+    def test_chart_count_not_reduced_by_guard(self):
+        """Quality guard does not remove or suppress charts."""
+        briefing = MorningBriefing(
+            generated_at=datetime.now(timezone.utc),
+            session_key="morning",
+            market_setup=MarketSetup(
+                index_quotes=[
+                    QuoteData(symbol="SPY", display_name="S&P 500", current_price=500.0, change_percent=0.4),
+                ],
+                macro_quotes=[
+                    QuoteData(symbol="^VIX", display_name="VIX", current_price=15.5, change_percent=-3.1),
+                ],
+            ),
+        )
+        from app.briefing.email_formatter import EmailFormatter
+        result = EmailFormatter("Europe/Madrid").format_morning_briefing(briefing)
+        # No charts in this minimal briefing, but chart_assets should remain unchanged
+        assert result.inline_assets == briefing.chart_assets

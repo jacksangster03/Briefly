@@ -43,9 +43,20 @@ def _fmt(value: float | None, decimals: int = 4) -> str:
     return f"{value:.{decimals}f}"
 
 
-def _fmt_chg(change_pct: float | None) -> str:
+def _fmt_chg(change_pct: float | None, *, for_compact: bool = False) -> str:
+    """Format a percentage change.
+
+    Parameters
+    ----------
+    change_pct:
+        The percentage change value. None means unavailable.
+    for_compact:
+        When True, returns an empty string for None (compact output omits
+        the change rather than displaying "(n/a)"). When False (default),
+        returns "n/a" for display in full/expert contexts.
+    """
     if change_pct is None:
-        return "n/a"
+        return "" if for_compact else "n/a"
     sign = "+" if change_pct >= 0 else ""
     return f"{sign}{change_pct:.2f}%"
 
@@ -147,15 +158,18 @@ def _format_full_block(
 
     eur_usd_str = ""
     if eur_usd and eur_usd.value is not None:
-        eur_usd_str = f"EUR/USD {_fmt(eur_usd.value, 4)} ({_fmt_chg(eur_usd.daily_change_pct)})"
+        chg = _fmt_chg(eur_usd.daily_change_pct, for_compact=True)
+        eur_usd_str = f"EUR/USD {_fmt(eur_usd.value, 4)} ({chg})" if chg else f"EUR/USD {_fmt(eur_usd.value, 4)}"
 
     eur_gbp_str = ""
     if eur_gbp and eur_gbp.value is not None:
-        eur_gbp_str = f"EUR/GBP {_fmt(eur_gbp.value, 4)} ({_fmt_chg(eur_gbp.daily_change_pct)})"
+        chg = _fmt_chg(eur_gbp.daily_change_pct, for_compact=True)
+        eur_gbp_str = f"EUR/GBP {_fmt(eur_gbp.value, 4)} ({chg})" if chg else f"EUR/GBP {_fmt(eur_gbp.value, 4)}"
 
     usd_jpy_str = ""
     if usd_jpy and usd_jpy.value is not None:
-        usd_jpy_str = f"USD/JPY {_fmt(usd_jpy.value, 2)} ({_fmt_chg(usd_jpy.daily_change_pct)})"
+        chg = _fmt_chg(usd_jpy.daily_change_pct, for_compact=True)
+        usd_jpy_str = f"USD/JPY {_fmt(usd_jpy.value, 2)} ({chg})" if chg else f"USD/JPY {_fmt(usd_jpy.value, 2)}"
 
     rate_parts = [s for s in [eur_usd_str, eur_gbp_str, usd_jpy_str] if s]
     rates_line = ", ".join(rate_parts) if rate_parts else "no rate data available"
@@ -185,10 +199,9 @@ def _format_short_block(
     if session == _SESSION_EUROPE_MIDDAY:
         eur_usd = _quote_for(panel, "EUR/USD")
         if eur_usd and eur_usd.value is not None:
-            return (
-                f"FX: USD {usd_label}; "
-                f"EUR/USD {_fmt(eur_usd.value, 4)} ({_fmt_chg(eur_usd.daily_change_pct)})."
-            )
+            chg = _fmt_chg(eur_usd.daily_change_pct, for_compact=True)
+            rate_part = f"EUR/USD {_fmt(eur_usd.value, 4)} ({chg})" if chg else f"EUR/USD {_fmt(eur_usd.value, 4)}"
+            return f"FX: USD {usd_label}; {rate_part}."
         return f"FX: USD {usd_label}; EUR/USD data unavailable."
 
     if session == _SESSION_US_PRE_OPEN:
@@ -196,17 +209,19 @@ def _format_short_block(
         usd_cnh = _quote_for(panel, "USD/CNH", "USD/CNY")
         parts: list[str] = [f"USD {usd_label}"]
         if usd_jpy and usd_jpy.value is not None:
-            parts.append(f"USD/JPY {_fmt(usd_jpy.value, 2)} ({_fmt_chg(usd_jpy.daily_change_pct)})")
+            chg = _fmt_chg(usd_jpy.daily_change_pct, for_compact=True)
+            parts.append(f"USD/JPY {_fmt(usd_jpy.value, 2)} ({chg})" if chg else f"USD/JPY {_fmt(usd_jpy.value, 2)}")
         if usd_cnh and usd_cnh.value is not None:
-            parts.append(f"{usd_cnh.instrument.label} {_fmt(usd_cnh.value, 4)} ({_fmt_chg(usd_cnh.daily_change_pct)})")
+            chg = _fmt_chg(usd_cnh.daily_change_pct, for_compact=True)
+            parts.append(f"{usd_cnh.instrument.label} {_fmt(usd_cnh.value, 4)} ({chg})" if chg else f"{usd_cnh.instrument.label} {_fmt(usd_cnh.value, 4)}")
         return "FX: " + "; ".join(parts) + "."
 
     # Generic short
     eur_usd = _quote_for(panel, "EUR/USD")
     if eur_usd and eur_usd.value is not None:
-        return (
-            f"FX: USD {usd_label}; EUR/USD {_fmt(eur_usd.value, 4)} ({_fmt_chg(eur_usd.daily_change_pct)})."
-        )
+        chg = _fmt_chg(eur_usd.daily_change_pct, for_compact=True)
+        rate_part = f"EUR/USD {_fmt(eur_usd.value, 4)} ({chg})" if chg else f"EUR/USD {_fmt(eur_usd.value, 4)}"
+        return f"FX: USD {usd_label}; {rate_part}."
     return f"FX: USD {usd_label}."
 
 

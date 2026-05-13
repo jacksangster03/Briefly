@@ -143,10 +143,110 @@ Valuation context only, not investment advice.
 
 ---
 
+---
+
+## Live vs prior-close freshness rules per session
+
+**Module**: `app/briefing/session_freshness.py`
+
+| Session | US equities | Europe equities | Commodities/FX/rates |
+|---|---|---|---|
+| `morning` | prior close (if ts < today or age >= 8 h) | prior close (if ts < today or age >= 6 h) | by age |
+| `europe_midday` | prior close | prior close with warning if provider-returned stale; otherwise by age | by age |
+| `us_pre_open` | prior close (cash indices); by age (watchlist pre-market proxies) | prior close with warning if provider-returned stale; otherwise by age | by age |
+| `us_intraday_risk` | by age | by age | by age |
+| `into_close` | by age | by age | by age |
+| `closing_wrap` | by age | by age | by age |
+
+Age bands (open session):
+- 0–15 min: `near_real_time` (displayed as "live")
+- 15–60 min: `delayed`
+- >60 min: `stale`
+
+When `session_key` is `europe_midday` or `us_pre_open` AND a Europe equity quote has a prior-day timestamp, `classify_quote_freshness` sets `warning = "provider_returned_prior_close_during_open_session"`. The `build_data_basis_lines` function appends a note: "Europe cash is open but provider quotes are prior close/delayed."
+
+---
+
+## VIX availability, fallback, and stale rules
+
+**Module**: `app/data_sources/market_data.py`, `app/briefing/quality_guard.py`
+
+- yfinance requires `"^VIX"` (caret prefix) for the CBOE Volatility Index. The alias `_YAHOO_SYMBOL_ALIASES["VIX"] = "^VIX"` is applied as a retry path when `"VIX"` returns empty.
+- `flags_from_briefing()` sets `vix_available=False` when:
+  - No VIX quote is found in `market_setup.index_quotes/macro_quotes`, or
+  - The found VIX quote has `current_price` of `None` or `0.0`, or
+  - Any `data_basis_lines` entry contains both "vix:" and "unavailable".
+- `vix_stale=True` is set when the VIX freshness state is `"stale"` or `"carried_forward"`.
+- Both `vix_available=False` and `vix_stale=True` suppress "VIX confirms" language.
+
+---
+
+## Stale Brent handling and WTI fallback
+
+- `brent_stale=True` replaces "Brent confirms" with "Brent stale/provider-held".
+- The quality guard deduplicates Brent stale caveat notes across sections: the caveat "Brent stale/provider-held; WTI used for live energy impulse." appears at most once per briefing output.
+- When Brent is stale, WTI is used as the primary energy reference in geo risk and oil shock assessments.
+
+---
+
+## Trigger wording rules: breached vs conditional
+
+**Module**: `app/briefing/formatter.py` (`format_trigger_line`), `app/briefing/email_formatter.py`
+
+The shared `format_trigger_line(label, metric_value, threshold, direction, consequence)` helper:
+
+| State | Output wording |
+|---|---|
+| `metric_value is None` | Trigger line suppressed entirely |
+| `direction="above"`, `value >= threshold` | "X is above Y, consequence (now Z)." |
+| `direction="above"`, `value < threshold` | "X above Y would consequence (now Z)." |
+| `direction="below"`, `value <= threshold` | "X is below Y, consequence (now Z)." |
+| `direction="below"`, `value > threshold` | "X below Y would consequence (now Z)." |
+
+This ensures trigger lines accurately reflect whether a threshold has already been breached or is still a watchpoint.
+
+---
+
+## Geo headline risk vs market-confirmation distinction
+
+**Module**: `app/briefing/morning_generator.py` (`_build_geo_risk_meter`)
+
+When geo risk level is ELEVATED due to headline density + oil, the summary wording distinguishes between:
+
+| Condition | Wording |
+|---|---|
+| VIX unavailable + haven neutral + oil move < 1% | "Geo headline risk elevated; market confirmation incomplete (VIX unavailable, haven demand neutral)." |
+| VIX available + below 20 | "Market signals are not yet confirming broader stress." |
+| VIX available + above 20 + oil elevated | "VIX X.X and haven +Y confirm elevated stress." |
+
+### Oil move thresholds
+
+| Threshold | Label |
+|---|---|
+| `abs(oil_delta) > 3.0%` | "oil spiking" (positive) / "oil collapsing" (negative) |
+| `abs(oil_delta) > 1.0%` | "oil elevated" (positive) / "oil under pressure" (negative) |
+| `abs(oil_delta) <= 1.0%` | "oil steady" |
+
+---
+
+## Compact FX missing-value rule
+
+**Module**: `app/briefing/fx_section.py`
+
+In compact/short output modes (europe_midday, us_pre_open, one-liner), the `_fmt_chg()` helper uses `for_compact=True`:
+- `daily_change_pct is None`: the change is omitted. Output: "EUR/USD 1.0823" (not "EUR/USD 1.0823 (n/a)").
+- `value is None`: the pair is omitted from compact output entirely.
+- Full/expert mode (full block, `for_compact=False` default): returns "n/a" for unavailable change.
+
+---
+
 ## Tests
 
 All quality-layer behaviour is covered by:
 
-- `app/tests/test_briefing_quality.py`: 28 tests for `BriefingQualityGuard`, `ValuationLens`, chart density, colour palette, wording rules
+- `app/tests/test_briefing_quality.py`: 31 tests for `BriefingQualityGuard`, `ValuationLens`, chart density, colour palette, wording rules, email non-repetition
+- `app/tests/test_market_freshness.py`: VIX availability, Europe equity freshness, Brent stale flags
+- `app/tests/test_geo_risk.py`: oil spike thresholds, incomplete confirmation wording, trigger wording
+- `app/tests/test_fx_module.py`: compact FX output, no "(n/a)" for missing change
 - `app/tests/test_macro_policy_watch_briefing.py`: macro policy watch heading appears exactly once in Telegram and email
 - `app/tests/test_phase64_morning_charts.py`: chart selection, yield curve, watchlist movers with colours

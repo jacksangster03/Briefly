@@ -350,11 +350,19 @@ def _dominant_tape_driver(
     oil_is_driver = oil_move is not None and (abs(oil_move) >= 1.5 or oil_level > 90)
     geo_driver: str | None = None
     if geo_oil_hit and oil_is_driver and cluster_weight >= 5:
-        direction = "spiking" if (oil_move or 0.0) > 0 else "unwinding"
+        _move = oil_move or 0.0
+        _OIL_SPIKE_THRESHOLD = 3.0
+        _OIL_ELEVATED_THRESHOLD = 1.0
+        if abs(_move) > _OIL_SPIKE_THRESHOLD:
+            direction = "spiking" if _move > 0 else "collapsing"
+        elif abs(_move) > _OIL_ELEVATED_THRESHOLD:
+            direction = "elevated" if _move > 0 else "under pressure"
+        else:
+            direction = "steady but elevated" if oil_level > 90 else "moving"
         level_note = f" at {oil_level:.0f} USD/bbl" if oil_level > 0 else ""
         geo_driver = (
             f"Geo-energy: oil {direction}{level_note} on Middle East/Hormuz tensions "
-            f"(WTI {(oil_move or 0.0):+.1f}%), with inflation and transport-cost risk in focus."
+            f"(WTI {_move:+.1f}%), with inflation and transport-cost risk in focus."
         )
 
     # --- 2. Tech/AI earnings and momentum ---
