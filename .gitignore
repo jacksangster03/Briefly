@@ -55,3 +55,6 @@ data/models/news_classifier/
 data/datasets/news_classifier/*.csv
 data/datasets/news_classifier/*.parquet
 data/datasets/news_classifier/*.jsonl
+
+# Local agent planning artifacts
+docs/superpowers/
