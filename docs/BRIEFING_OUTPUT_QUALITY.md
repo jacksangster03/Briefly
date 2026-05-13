@@ -240,11 +240,130 @@ In compact/short output modes (europe_midday, us_pre_open, one-liner), the `_fmt
 
 ---
 
+---
+
+## Session Tape Recap
+
+**Module**: `app/briefing/session_tape.py`
+
+The session tape provides a deterministic, post-session summary of how each instrument moved through its daily range.
+
+### SessionTapeEntry fields
+
+Each entry records:
+- `prior_close`, `session_open`, `session_high`, `session_low`, `latest`: raw prices (None when unavailable)
+- `change_vs_prior_close_pct`: percentage change vs prior session close
+- `change_vs_open_pct`: percentage change from session open to current/close
+- `range_position_pct`: `(latest - low) / (high - low)`, None when H/L unavailable
+- `range_label`: descriptive bucket (see thresholds below)
+- `tape_verdict`: deterministic narrative (see logic below)
+- `data_quality`: "full" | "partial" | "prior_close_only" | "unavailable"
+
+### OHLC data source
+
+OHLC fields (`open`, `high`, `low`) are populated by the existing provider chain (Finnhub `get_quotes`, then yfinance `fast_info.day_high` / `day_low` / `open`). No extra API calls are made. When a provider returns zero for open/high/low, those fields are set to None and the entry degrades gracefully.
+
+### Range-position labels and thresholds
+
+| range_position_pct | label |
+|---|---|
+| >= 0.80 | near highs |
+| >= 0.60 | upper half |
+| >= 0.40 | mid-range |
+| >= 0.20 | lower half |
+| < 0.20 | near lows |
+| None | range unavailable |
+
+### Tape verdict logic (deterministic)
+
+| Condition | Verdict |
+|---|---|
+| change_vs_open > 0.3% AND range_pos >= 0.70 | rallied from open |
+| change_vs_open > 0.3% AND range_pos < 0.40 | faded from highs |
+| change_vs_open < -0.3% AND range_pos >= 0.60 | recovered from lows |
+| range_pos >= 0.80 | closed near highs |
+| range_pos < 0.20 | closed near lows |
+| abs(change_vs_prior_close) < 0.15% | flat/mixed |
+| otherwise | unavailable |
+
+Tape verdicts are appended to closing_wrap lines only.
+
+### Session recap placement per session
+
+| Session | US recap heading | Europe recap heading |
+|---|---|---|
+| closing_wrap | US CASH SESSION RECAP | EUROPE CASH SESSION RECAP |
+| into_close | US CASH SESSION RECAP | EUROPE CASH SESSION RECAP |
+| europe_midday | (absent) | EUROPE SESSION SO FAR |
+| us_pre_open | (absent) | (absent) |
+| morning | (absent) | (absent) |
+
+### Watchlist session tape
+
+Only rendered when at least 3 watchlist instruments have a valid `change_vs_open_pct`. Suppressed (with DEBUG log) when only prior-close data is available.
+
+---
+
+## Rates & Macro Tape
+
+**Module**: `app/briefing/session_tape.build_rates_macro_tape()`
+
+A compact rates/macro header block rendered for: morning, us_pre_open, into_close, closing_wrap.
+
+### Format
+
+```
+RATES & MACRO TAPE
+2Y 3.95% (+5bp) | 10Y 4.48% (+2bp, above 4.45% trigger) | 10Y-2Y +53bp
+USD stronger | WTI $101.29 (+0.21%, elevated) | Gold $2,340 (+0.3%)
+```
+
+### Rules
+
+- Uses data already assembled in the briefing context (no re-fetches).
+- 10Y trigger note: "above 4.45% trigger" when 10Y >= 4.45%; "approaching 4.45%" when >= 4.40%.
+- Spread: 10Y minus 2Y in basis points.
+- USD direction: inferred from fx_pulse_section text.
+- WTI qualitative label: elevated (>=+2%), firm (>=+0.5%), steady, easing (<=-0.5%), under pressure (<=-2%).
+- Suppressed entirely when fewer than 3 values are available.
+- In Telegram: placed after the session header and any "WHAT CHANGED" block, before macro policy watch.
+- In email: placed in the top header area before desk read and trigger lines.
+
+---
+
+## Valuation Lens
+
+**Module**: `app/briefing/valuation_lens.py`
+
+Disabled by default (`include_valuation_lens = False`). Activates when:
+- 10Y >= 4.4% (rates pressure tightening threshold)
+- At least 2 high-multiple names (from `_AI_GROWTH_SYMBOLS`) moved > 2% intraday
+- Watchlist return dispersion >= 3%
+- A valuation/earnings story appears in top themes
+
+### Peer groups
+
+| Group | Symbols | Ratios shown |
+|---|---|---|
+| Mega-cap tech | AAPL, MSFT, GOOGL, AMZN, META, NVDA | fwd P/E, EV/EBITDA |
+| Semis | NVDA, AMD, AVGO, QCOM, TSM, INTC, ASML | P/E, revenue growth |
+| Pharma/biotech | JNJ, PFE, MRK, ABBV, LLY, BMY, etc. | P/E, pipeline context |
+| ETFs/indices | SPY, QQQ, IWM, GLD, TLT, etc. | expense ratio, yield |
+
+Additional ratios supported: FCF yield (freeCashflow / marketCap) and PEG ratio.
+
+### No-hallucination guarantee
+
+All ratios are fetched from yfinance `.info`. If a field is None or absent, it is omitted from output; no substitution or fabrication occurs.
+
+---
+
 ## Tests
 
 All quality-layer behaviour is covered by:
 
-- `app/tests/test_briefing_quality.py`: 31 tests for `BriefingQualityGuard`, `ValuationLens`, chart density, colour palette, wording rules, email non-repetition
+- `app/tests/test_briefing_quality.py`: 52 tests for `BriefingQualityGuard`, `ValuationLens`, chart density, colour palette, wording rules, email non-repetition, rates tape placement, rates tape suppression
+- `app/tests/test_session_tape.py`: 14 tests for session tape range logic, tape verdict, session headings, watchlist suppression, rates tape trigger wording, valuation no-hallucination, chart richness preservation
 - `app/tests/test_market_freshness.py`: VIX availability, Europe equity freshness, Brent stale flags
 - `app/tests/test_geo_risk.py`: oil spike thresholds, incomplete confirmation wording, trigger wording
 - `app/tests/test_fx_module.py`: compact FX output, no "(n/a)" for missing change

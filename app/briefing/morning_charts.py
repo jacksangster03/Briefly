@@ -641,6 +641,32 @@ def _build_candidates(
                 "FX Pulse chart suppressed: materiality_score=%d (need >=5)", fx_score
             )
 
+    # Session range strip: available for closing_wrap when OHLC data is present
+    if _feature_on("FEATURE_SESSION_RANGE_STRIP", True):
+        session_key_lower = str(briefing.session_key or "morning").lower()
+        if session_key_lower in {"closing_wrap", "into_close"}:
+            range_spec = _session_range_strip_spec(briefing)
+            specs.append(
+                ChartCandidate(
+                    chart_key="session_range_strip",
+                    category="support",
+                    priority=6.5,
+                    spec=range_spec if range_spec is not None else {
+                        "chart_key": "session_range_strip",
+                        "variant": "strip",
+                        "available": False,
+                        "priority": 6.5,
+                        "reason_if_hidden": "Insufficient OHLC data (fewer than 3 instruments with full high/low/open).",
+                        "title": "Session Range Strip",
+                        "caption": "",
+                        "series": [],
+                        "annotations": [],
+                        "email_dimensions": {"width": 640, "height": 260},
+                    },
+                    reason="Session range strip shows low-high range with open/close markers per instrument.",
+                )
+            )
+
     for item in specs:
         item.spec["priority"] = round(float(item.priority), 4)
     specs.sort(key=lambda row: row.priority, reverse=True)
@@ -2387,3 +2413,31 @@ def _fx_pulse_chart_spec(
             "note": "Deterministic signal, not a forecast.",
         },
     }
+
+
+def _session_range_strip_spec(briefing: MorningBriefing) -> dict[str, Any] | None:
+    """Build a session range strip chart spec from briefing index/macro quotes.
+
+    Returns None if fewer than 3 instruments have full OHLC (open, high, low, close).
+    When returned, the spec is always added to the candidate list; available=True|False
+    is set based on data availability.
+    """
+    try:
+        from app.briefing.session_tape import build_session_tape, session_range_strip_spec
+    except Exception:
+        return None
+
+    all_quotes = (
+        list(briefing.market_setup.index_quotes or [])
+        + list(briefing.market_setup.macro_quotes or [])
+    )
+    session_key = str(briefing.session_key or "closing_wrap")
+
+    tape_entries = build_session_tape(all_quotes, session_key, section="us_cash")
+    # Include Europe entries too for richer strip
+    tape_entries += build_session_tape(all_quotes, session_key, section="europe_cash")
+
+    if not tape_entries:
+        return None
+
+    return session_range_strip_spec(tape_entries)
