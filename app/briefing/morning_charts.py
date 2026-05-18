@@ -1970,9 +1970,11 @@ def _pnl_waterfall_spec(holdings_quotes: list[QuoteData], profile: UserProfile) 
                     f"(contribution breadth: {positive_count}/{len(bars)} positive)."
                 )
         elif total_contrib > 0:
+            neg_is_real_drag = float(top_neg.get("contribution") or 0.0) < 0.0
+            laggard_label = "largest drag" if neg_is_real_drag else "smallest contributor"
             lens_hint = (
                 f" Main contributor: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}%; "
-                f"largest drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}% "
+                f"{laggard_label}: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}% "
                 f"(contribution breadth: {positive_count}/{len(bars)} positive)."
             )
     return {

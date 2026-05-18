@@ -38,6 +38,7 @@ from app.briefing.theme_builder import build_top_themes
 from app.briefing.news_classifier import annotate_news_events, should_suppress_low_signal
 from app.briefing.llm_news_classifier import run_llm_news_classifier_shadow
 from app.briefing.valuation_lens import ValuationLens
+from app.briefing.session_diagnosis import build_session_diagnosis
 from app.verticals.engine import build_vertical_section
 from app.logger import get_logger
 from app.db.session import get_session
@@ -722,6 +723,14 @@ class MorningBriefingGenerator:
         )
         briefing.portfolio_impact_bullets = impact_bullets
         briefing.portfolio_action_posture = action_posture
+        diagnosis = build_session_diagnosis(briefing)
+        briefing.session_diagnosis = diagnosis.to_dict()
+        briefing.trigger_board = dict(diagnosis.trigger_board or {})
+        briefing.dominant_tape_driver = diagnosis.one_sentence_diagnosis
+        if briefing.market_data_outage:
+            briefing.session_quality_label = "Data degraded"
+            briefing.session_quality_bucket = "DATA_DEGRADED"
+            briefing.session_quality_score = -1.0
         regime_context, alignment = build_regime_context(
             profile_name=self.profile.name,
             current_setup_tags=briefing.market_setup_signal_tags,

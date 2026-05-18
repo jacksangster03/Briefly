@@ -41,7 +41,15 @@ def _region_card(
     global_news: list[NormalisedEvent],
 ) -> dict[str, str]:
     selected = [q for q in quotes if any(token in (q.display_name or q.symbol or "").upper() for token in tokens)]
-    avg_move = _avg([float(q.change_percent or 0.0) for q in selected]) if selected else 0.0
+    if not selected:
+        return {
+            "region": label,
+            "direction": "unavailable",
+            "status": "unavailable",
+            "driver": "insufficient live market inputs",
+            "implication": f"{label} directional read unavailable; wait for provider recovery.",
+        }
+    avg_move = _avg([float(q.change_percent or 0.0) for q in selected])
     direction = "up" if avg_move > 0.15 else "down" if avg_move < -0.15 else "mixed"
     status = "lead" if abs(avg_move) >= 1.0 else "active" if abs(avg_move) >= 0.4 else "monitor"
     driver = _driver_phrase(global_news)
@@ -93,4 +101,3 @@ def _implication(*, direction: str, region: str) -> str:
 
 def _avg(values: list[float]) -> float:
     return float(sum(values) / len(values)) if values else 0.0
-

@@ -93,6 +93,8 @@ class MorningBriefing(BaseModel):
     news_pipeline_status: str = ""
     news_raw_fetched: int = 0
     news_after_fingerprint_dedup: int = 0
+    session_diagnosis: dict[str, object] = Field(default_factory=dict)
+    trigger_board: dict[str, list[str]] = Field(default_factory=dict)
     macro_policy_watch: str = ""
     valuation_lens_lines: list[str] = Field(default_factory=list)
     quote_freshness: dict[str, dict] = Field(default_factory=dict)

@@ -232,6 +232,70 @@ Unavailable vs stale vs true zero:
 
 ---
 
+## Session Diagnosis Engine
+
+**Module**: `app/briefing/session_diagnosis.py`
+
+Briefly now runs a deterministic session diagnosis pass that outputs:
+
+- `primary_driver`
+- `secondary_drivers`
+- `rejected_drivers`
+- `regime_label`
+- `confidence`
+- `one_sentence_diagnosis`
+- `regional_diagnosis`
+- `portfolio_diagnosis`
+- `data_caveats`
+- score map:
+  - `rates_pressure_score`
+  - `energy_geo_score`
+  - `equity_breadth_score`
+  - `regional_divergence_score`
+  - `tech_ai_concentration_score`
+  - `portfolio_transmission_score`
+  - `data_quality_score`
+
+### Confirmation rules (risk-on/risk-off)
+
+- `risk_on_confirmation` requires breadth + regional participation support.
+- `risk_off_confirmation` requires breadth weakness + regional weakness.
+- `rates_headwind` can become primary when 10Y level/change thresholds are breached.
+- `geo_energy_pressure` can become primary when oil + geo stress align.
+- If market data is unavailable, regime is forced to `DATA DEGRADED` (never “Mixed tape”).
+
+### Geo headline vs market confirmation
+
+Geo headline intensity and market confirmation are intentionally separated:
+
+- Geo can remain elevated from headlines/context.
+- If VIX/haven confirmation is missing, diagnosis records this as a rejected confirmation path.
+
+This avoids “headline risk == fully confirmed market stress” shortcuts.
+
+---
+
+## Trigger Board rules
+
+Legacy generic trigger lines are replaced by deterministic trigger-board buckets:
+
+- **Active triggers**: breached thresholds now impacting read-through.
+- **Watch triggers**: conditional thresholds not yet breached.
+- **Cooled / invalidated**: previously hot channels that have cooled.
+
+Session-specific headers:
+
+- Morning: `TODAY'S TRIGGER BOARD`
+- Europe Midday: `EUROPE/US HANDOFF TRIGGERS`
+- US Pre-Open: `OPENING TRIGGER BOARD`
+- US Intraday: `INTRADAY CONFIRMATION TRIGGERS`
+- Into Close: `CLOSE-QUALITY TRIGGERS`
+- Closing Wrap: `TOMORROW TRIGGER BOARD`
+
+All trigger text is deterministic and uses explicit breached/conditional/unavailable wording.
+
+---
+
 ## Geo headline risk vs market-confirmation distinction
 
 **Module**: `app/briefing/morning_generator.py` (`_build_geo_risk_meter`)

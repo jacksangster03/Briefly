@@ -900,6 +900,15 @@ Practical interpretation:
 - Seeing `AMD +1.12%` later intraday can be valid **live session move**.
 - The output should now label this distinction directly in market/watchlist rows and session data-basis lines.
 
+Session diagnosis and triggering are deterministic:
+
+- A `Session Diagnosis Engine` computes primary/secondary/rejected drivers plus data caveats.
+- Triggering is rendered as a three-bucket Trigger Board:
+  - Active triggers
+  - Watch triggers
+  - Cooled / invalidated
+- If market data is unavailable, the narrative uses `DATA DEGRADED` and avoids fake neutral `+0.00%` regional/commodity reads.
+
 ---
 
 ## Interactive Watchlist Chart Explorer

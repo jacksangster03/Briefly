@@ -194,6 +194,7 @@ class TelegramFormatter:
             tags = [str(tag).replace("_", " ").upper() for tag in (briefing.market_setup_signal_tags or [])[:4]]
             driver_line = " | ".join(tags) if tags else "No single driver tag dominated; cross-asset context remained mixed."
             sections.append("\n".join(["<b>CONFIRMED DRIVERS</b>", "- " + driver_line]))
+            sections.append("<b>TOMORROW SETUP</b>\nTrigger board and event risk follow below.")
 
         if not is_morning:
             what_changed = self._format_what_changed(
@@ -234,6 +235,9 @@ class TelegramFormatter:
         setup = self._format_market_setup(briefing) if (is_morning or is_preopen or is_closing) else self._format_session_snapshot(briefing)
         if setup:
             sections.append(setup)
+        diagnosis_block = self._format_session_diagnosis(briefing)
+        if diagnosis_block:
+            sections.append(diagnosis_block)
 
         if is_morning or is_preopen or is_closing:
             macro = self._format_macro(briefing.macro_context)
@@ -486,41 +490,60 @@ class TelegramFormatter:
 
     def _format_watch_triggers(self, briefing: MorningBriefing) -> str:
         session_key = (briefing.session_key or "morning").lower()
-        if session_key == "morning":
+        board = dict(getattr(briefing, "trigger_board", {}) or {})
+        active = [str(line).strip() for line in (board.get("active") or []) if str(line).strip()]
+        watch = [str(line).strip() for line in (board.get("watch") or []) if str(line).strip()]
+        cooled = [str(line).strip() for line in (board.get("cooled") or []) if str(line).strip()]
+        if not (active or watch or cooled):
             return ""
-        if session_key in {"saturday_weekend_briefing", "sunday_weekend_watch"}:
-            header = "MONDAY WATCHPOINTS"
-        elif session_key == "closing_wrap":
-            header = "TOMORROW SETUP"
-        elif session_key in {"us_intraday_risk", "into_close"}:
-            header = "WATCH INTO CLOSE"
-        elif session_key == "us_pre_open":
-            header = "OPENING TRIGGERS"
-        else:
-            header = "SESSION TRIGGERS"
-        index_quotes = briefing.market_setup.index_quotes + briefing.market_setup.macro_quotes
-        vix = next((float(q.current_price or 0.0) for q in index_quotes if "VIX" in (q.display_name or q.symbol or "").upper()), None)
-        ten_y = next((float(q.current_price or 0.0) for q in index_quotes if "10Y" in (q.display_name or q.symbol or "").upper()), None)
-        oil = next(
-            (
-                float(q.current_price or 0.0)
-                for q in index_quotes
-                if ("WTI" in (q.display_name or q.symbol or "").upper()) or ("CRUDE" in (q.display_name or q.symbol or "").upper())
-            ),
-            None,
-        )
-        triggers: list[str] = []
-        vix_line = format_trigger_line("VIX", vix, 20.0, "above", "confirms broader risk-off pressure")
-        if vix_line:
-            triggers.append(vix_line)
-        ten_y_line = format_trigger_line("US 10Y", ten_y, 4.45, "above", "reinforce rates pressure")
-        if ten_y_line:
-            triggers.append(ten_y_line)
-        oil_line = format_trigger_line("WTI", oil, 107.0, "above", "signal escalating energy pressure")
-        if oil_line:
-            triggers.append(oil_line)
-        triggers.append("Nasdaq turning negative would indicate the growth cushion is fading.")
-        return "\n".join([f"<b>{header}</b>"] + [f"- {line}" for line in triggers[:4]])
+        header = self._trigger_board_header(session_key)
+        if session_key == "closing_wrap":
+            # Backward-compatible alias while transitioning to Trigger Board wording.
+            header = f"{header} (TOMORROW SETUP)"
+        lines = [f"<b>{header}</b>"]
+        if active:
+            lines.append("Active triggers:")
+            lines.extend([f"- {line}" for line in active[:3]])
+        if watch:
+            lines.append("Watch triggers:")
+            lines.extend([f"- {line}" for line in watch[:3]])
+        if cooled:
+            lines.append("Cooled / invalidated:")
+            lines.extend([f"- {line}" for line in cooled[:2]])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _trigger_board_header(session_key: str) -> str:
+        mapping = {
+            "morning": "TODAY'S TRIGGER BOARD",
+            "europe_midday": "EUROPE/US HANDOFF TRIGGERS",
+            "us_pre_open": "OPENING TRIGGER BOARD",
+            "us_intraday_risk": "INTRADAY CONFIRMATION TRIGGERS",
+            "into_close": "CLOSE-QUALITY TRIGGERS",
+            "closing_wrap": "TOMORROW TRIGGER BOARD",
+            "saturday_weekend_briefing": "MONDAY WATCHPOINTS",
+            "sunday_weekend_watch": "MONDAY WATCHPOINTS",
+        }
+        return mapping.get(session_key, "SESSION TRIGGER BOARD")
+
+    def _format_session_diagnosis(self, briefing: MorningBriefing) -> str:
+        diag = dict(getattr(briefing, "session_diagnosis", {}) or {})
+        if not diag:
+            return ""
+        lines = ["<b>SESSION DIAGNOSIS</b>"]
+        sentence = str(diag.get("one_sentence_diagnosis") or "").strip()
+        if sentence:
+            lines.append(sentence)
+        regional = str(diag.get("regional_diagnosis") or "").strip()
+        if regional:
+            lines.append(regional)
+        portfolio = str(diag.get("portfolio_diagnosis") or "").strip()
+        if portfolio:
+            lines.append(portfolio)
+        caveats = [str(c).strip() for c in (diag.get("data_caveats") or []) if str(c).strip()]
+        if caveats:
+            lines.append("Data caveats: " + " | ".join(caveats[:2]))
+        return "\n".join(lines)
 
     def _format_healthcare_intelligence(
         self,
@@ -1188,7 +1211,7 @@ class TelegramFormatter:
             intraday_like = (briefing.session_key or "").lower() in {"us_intraday_risk", "into_close"}
             if intraday_like and shown_quotes and live_count >= max(1, int(len(shown_quotes) * 0.7)):
                 parts.append("<i>Watchlist basis changed from prior-close context to live intraday quotes.</i>")
-            freshness = self._format_quotes_freshness_summary(quotes, session_mode)
+            freshness = self._format_quotes_freshness_summary(quotes, session_mode, briefing)
             if freshness:
                 parts.append(f"<i>{freshness}</i>")
 
@@ -1395,9 +1418,26 @@ class TelegramFormatter:
         self,
         quotes: list[QuoteData],
         session_mode: str,
+        briefing: MorningBriefing | None = None,
     ) -> str:
         if not quotes:
             return ""
+        if briefing is not None:
+            states = [
+                str(self._freshness_meta(briefing, quote).get("freshness_state") or "")
+                for quote in quotes
+            ]
+            states = [s for s in states if s]
+            if states:
+                state_counts: dict[str, int] = {}
+                for state in states:
+                    state_counts[state] = state_counts.get(state, 0) + 1
+                state_summary = ", ".join(f"{k}:{v}" for k, v in sorted(state_counts.items()))
+            else:
+                state_summary = "unknown"
+        else:
+            state_summary = "unknown"
+
         latest = max(quotes, key=lambda quote: self._coerce_utc_ts(quote.timestamp))
         latest_ts = self._coerce_utc_ts(latest.timestamp)
         local_label = latest_ts.astimezone(self.local_tz).strftime("%H:%M %Z")
@@ -1410,7 +1450,7 @@ class TelegramFormatter:
             for source, count in sorted(source_counts.items(), key=lambda item: item[0])
         )
         reference = "vs Friday close" if session_mode in {"saturday", "sunday"} else "vs prior close"
-        return f"Quotes as of {local_label} | sources: {source_summary} | {reference}"
+        return f"Quotes as of {local_label} | freshness: {state_summary} | sources: {source_summary} | {reference}"
 
     def _format_quote_freshness_line(
         self,
