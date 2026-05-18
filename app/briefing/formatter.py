@@ -172,6 +172,12 @@ class TelegramFormatter:
             f"<b>{header}</b>\n{date_str}"
             + (f"\n<i>{tldr}</i>" if tldr else "")
         )
+        if briefing.market_data_outage:
+            sections.append(
+                "<b>DATA OUTAGE / PROVIDER DEGRADED</b>\n"
+                "Market data unavailable; no directional read generated. "
+                "Provider data outage; see diagnostics."
+            )
 
         session_key = (briefing.session_key or "morning").lower()
         is_morning = session_key == "morning"
@@ -310,29 +316,39 @@ class TelegramFormatter:
             if global_news:
                 sections.append(global_news)
         elif not briefing.global_news:
-            since = self._since_label_from_header(briefing.what_changed_header)
-            weekend_elevated_geo = (
-                is_weekend
-                and str(briefing.geo_risk_level or "").strip().lower()
-                in {"elevated", "high", "severe"}
-            )
-            empty_line = (
-                "No new material headlines since the last weekend scan; existing risk context remains active"
-                if weekend_elevated_geo
-                else (
-                    f"No material new headlines since {since}."
-                    if since
-                    else "No material new headlines this session."
+            if briefing.news_data_outage:
+                sections.append(
+                    "\n".join(
+                        [
+                            f"<b>{SECTION_HEADERS['global_news']}</b>",
+                            "News scan returned no usable items; provider diagnostics required.",
+                        ]
+                    )
                 )
-            )
-            sections.append(
-                "\n".join(
-                    [
-                        f"<b>{SECTION_HEADERS['global_news']}</b>",
-                        empty_line,
-                    ]
+            else:
+                since = self._since_label_from_header(briefing.what_changed_header)
+                weekend_elevated_geo = (
+                    is_weekend
+                    and str(briefing.geo_risk_level or "").strip().lower()
+                    in {"elevated", "high", "severe"}
                 )
-            )
+                empty_line = (
+                    "No new material headlines since the last weekend scan; existing risk context remains active"
+                    if weekend_elevated_geo
+                    else (
+                        f"No material new headlines since {since}."
+                        if since
+                        else "No material new headlines this session."
+                    )
+                )
+                sections.append(
+                    "\n".join(
+                        [
+                            f"<b>{SECTION_HEADERS['global_news']}</b>",
+                            empty_line,
+                        ]
+                    )
+                )
 
         themes = self._format_themes_for_mode(briefing.top_themes, briefing.session_mode)
         if themes and (is_morning or is_preopen or is_closing):
@@ -373,12 +389,17 @@ class TelegramFormatter:
             sections.append(watchlist)
 
         # Footer
-        sections.append(
-            f"<i>{SECTION_HEADERS['footer']} | "
+        footer_line = (
+            f"{SECTION_HEADERS['footer']} | "
             f"{briefing.events_fetched} fetched, "
             f"{briefing.events_after_dedup} unique, "
-            f"{briefing.events_sent} sent</i>"
+            f"{briefing.events_sent} sent"
         )
+        if briefing.news_data_outage:
+            footer_line += " | provider outage (raw fetch 0)"
+        elif briefing.news_raw_fetched > 0 and briefing.events_fetched <= 0:
+            footer_line += f" | {briefing.news_raw_fetched} raw fetched, 0 selected after filters"
+        sections.append(f"<i>{footer_line}</i>")
         provider_health = (briefing.data_freshness or {}).get("Provider Health", "").strip()
         if provider_health:
             note = self._provider_health_note(provider_health)

@@ -207,6 +207,31 @@ This ensures trigger lines accurately reflect whether a threshold has already be
 
 ---
 
+## Provider outage handling (market + news)
+
+When live providers are unavailable in-cycle (for example DNS/network failure or multiple provider circuit-breakers open), the morning briefing now uses explicit outage semantics:
+
+- Header includes: `DATA OUTAGE / PROVIDER DEGRADED`
+- Market tape uses: `Market data unavailable; no directional read generated.`
+- News block uses: `News scan returned no usable items; provider diagnostics required.`
+- Footer distinguishes provider outage vs filtering:
+  - `provider outage (raw fetch 0)` when raw provider ingestion is zero
+  - `X raw fetched, 0 selected after filters` when ingestion succeeded but ranking/suppression removed all candidates
+
+Deterministic suppression safeguards:
+
+- Oil transmission chart is hidden when both WTI and Brent are unavailable.
+- Geo confirmation ladder is hidden when all confirmation inputs are unavailable.
+- Snapshot delta no longer writes fake portfolio contribution deltas from incomplete quote sets.
+
+Unavailable vs stale vs true zero:
+
+- `unavailable`: provider did not return usable data.
+- `stale/prior_close`: value exists but is not live for the active session context.
+- `0.00%`: treated as a real move only when a valid quote/value exists; missing values are not coerced into neutral-looking zeroes.
+
+---
+
 ## Geo headline risk vs market-confirmation distinction
 
 **Module**: `app/briefing/morning_generator.py` (`_build_geo_risk_meter`)

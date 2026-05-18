@@ -529,6 +529,9 @@ class MorningBriefingGenerator:
             watchlist=self.profile.all_watchlist_tickers[:20]  # limit API calls
         )
         briefing.events_fetched = len(all_events)
+        hub_stats = dict(getattr(getattr(self.news_svc, "global_hub", None), "last_run_stats", {}) or {})
+        briefing.news_raw_fetched = int(hub_stats.get("fetched_total", 0) or 0)
+        briefing.news_after_fingerprint_dedup = int(hub_stats.get("deduped_total", 0) or 0)
 
         # 4. Process, cluster, classify, and rank
         # Sector enrichment runs inside the pipeline after ticker resolution
@@ -839,6 +842,42 @@ class MorningBriefingGenerator:
         provider_health = self._provider_health_summary()
         if provider_health:
             briefing.data_freshness["Provider Health"] = provider_health
+        market_quote_count = len(list(briefing.market_setup.index_quotes) + list(briefing.market_setup.macro_quotes))
+        has_macro_points = bool(briefing.macro_context or briefing.commodity_strip)
+        has_breadth = bool(briefing.market_setup.market_breadth)
+        briefing.market_data_outage = market_quote_count == 0 and not has_macro_points and not has_breadth
+
+        provider_health_lower = str(provider_health or "").lower()
+        provider_outage_signals = ("unavailable:", "core providers degraded", "provider failures")
+        global_outage = briefing.news_raw_fetched <= 0 and briefing.events_fetched <= 0
+        briefing.news_data_outage = global_outage and any(token in provider_health_lower for token in provider_outage_signals)
+        if briefing.news_data_outage:
+            briefing.news_pipeline_status = "provider_outage_raw_fetch_0"
+        elif briefing.news_raw_fetched > 0 and briefing.events_after_dedup <= 0:
+            briefing.news_pipeline_status = "raw_fetched_but_filtered_to_0"
+        else:
+            briefing.news_pipeline_status = "ok"
+
+        if briefing.market_data_outage:
+            briefing.market_setup_analysis = "Market data unavailable; no directional read generated."
+            briefing.dominant_tape_driver = "Provider data outage; market tape unavailable."
+            briefing.market_setup_signal_tags = ["data_outage"]
+            briefing.data_freshness["Market data"] = "outage"
+            briefing.data_basis_lines.append("Market data unavailable; no directional read generated.")
+            briefing.data_basis_lines.append("Provider data outage; see diagnostics.")
+
+        if briefing.news_data_outage:
+            briefing.data_freshness["News pipeline"] = "provider_outage_raw_fetch_0"
+            briefing.data_basis_lines.append("News scan returned no usable items; provider diagnostics required.")
+        elif briefing.news_raw_fetched > 0 and briefing.events_fetched <= 0:
+            briefing.data_freshness["News pipeline"] = "raw_fetched_but_selected_0"
+            briefing.data_basis_lines.append(
+                f"News: {briefing.news_raw_fetched} fetched, 0 selected after filters/suppression."
+            )
+        else:
+            briefing.data_freshness["News pipeline"] = (
+                f"raw={briefing.news_raw_fetched}, merged={briefing.events_fetched}, deduped={briefing.events_after_dedup}"
+            )
         sent_ids: set[str] = set()
         for event in (
             briefing.global_news
@@ -1382,24 +1421,24 @@ class MorningBriefingGenerator:
             except Exception:
                 return None
 
-        oil_delta = _canon_float("WTI", "change_percent") or 0.0
-        oil_level = _canon_float("WTI", "value") or 0.0
-        gold_delta = _canon_float("GOLD", "change_percent") or 0.0
+        oil_delta = _canon_float("WTI", "change_percent")
+        oil_level = _canon_float("WTI", "value")
+        gold_delta = _canon_float("GOLD", "change_percent")
         usd_delta = 0.0
-        brent_delta = _canon_float("BRENT", "change_percent") or 0.0
-        brent_level = _canon_float("BRENT", "value") or 0.0
+        brent_delta = _canon_float("BRENT", "change_percent")
+        brent_level = _canon_float("BRENT", "value")
         natgas_delta = 0.0
         for quote in briefing.market_setup.macro_quotes:
             text = f"{quote.display_name} {quote.symbol}".lower()
-            if ("wti" in text or "crude" in text) and oil_level <= 0:
+            if ("wti" in text or "crude" in text) and (oil_level is None or oil_level <= 0):
                 oil_delta = float(quote.change_percent or 0.0)
                 oil_level = float(quote.current_price or 0.0)
-            elif "brent" in text and brent_level <= 0:
+            elif "brent" in text and (brent_level is None or brent_level <= 0):
                 brent_delta = float(quote.change_percent or 0.0)
                 brent_level = float(quote.current_price or 0.0)
             elif "natural gas" in text or "ng1:com" in text or "ng=f" in text:
                 natgas_delta = float(quote.change_percent or 0.0)
-            elif "gold" in text and abs(gold_delta) < 1e-12:
+            elif "gold" in text and (gold_delta is None or abs(gold_delta) < 1e-12):
                 gold_delta = float(quote.change_percent or 0.0)
             elif "usd" in text or "dollar" in text or "dxy" in text:
                 usd_delta = float(quote.change_percent or 0.0)
@@ -1407,10 +1446,11 @@ class MorningBriefingGenerator:
         for pt in briefing.commodity_strip:
             key = (pt.name or pt.series_id or "").upper()
             if "WTI" in key or "DCOILWTICO" in key:
-                oil_level = oil_level or float(pt.value or 0.0)
+                if oil_level is None:
+                    oil_level = float(pt.value or 0.0)
                 break
 
-        safe_haven_strength = max(0.0, gold_delta) + max(0.0, usd_delta)
+        safe_haven_strength = max(0.0, float(gold_delta or 0.0)) + max(0.0, usd_delta)
         geo_terms = ("iran", "israel", "hormuz", "blockade", "missile", "ceasefire", "sanction", "shipping", "war", "attack", "strike", "invasion")
         events = briefing.global_news + briefing.top_themes
 
@@ -1452,7 +1492,10 @@ class MorningBriefingGenerator:
             return "oil steady"
 
         # Floor rule: oil elevated + active geo headlines → at least ELEVATED, never LOW/MODERATE
-        oil_is_elevated = oil_level > 90 or oil_delta >= 2.0
+        oil_is_elevated = (
+            (oil_level is not None and oil_level > 90)
+            or (oil_delta is not None and oil_delta >= 2.0)
+        )
         if has_geo_headlines and oil_is_elevated:
             floor = "ELEVATED"
             try:
@@ -1511,23 +1554,24 @@ class MorningBriefingGenerator:
                     f"but oil ({oil_delta:+.2f}%) and haven signals do not confirm a fresh shock."
                 )
             energy_channel_active = (
-                oil_level > 90
-                or brent_level > 100
-                or oil_delta >= 1.0
-                or brent_delta >= 1.0
+                (oil_level is not None and oil_level > 90)
+                or (brent_level is not None and brent_level > 100)
+                or (oil_delta is not None and oil_delta >= 1.0)
+                or (brent_delta is not None and brent_delta >= 1.0)
                 or natgas_delta >= 4.0
             )
             if recent_geo_context and energy_channel_active and (vix_rising or europe_avg <= -0.4):
                 level = "LOW-TO-MODERATE"
                 brent_note = (
-                    f"Brent {brent_delta:+.2f}%"
-                    if (brent_level > 0 or abs(brent_delta) > 1e-12)
+                    f"Brent {float(brent_delta):+.2f}%"
+                    if (brent_level is not None and brent_level > 0) or (brent_delta is not None and abs(brent_delta) > 1e-12)
                     else "Brent unavailable"
                 )
+                oil_note = f"WTI {float(oil_delta):+.2f}%" if oil_delta is not None else "WTI unavailable"
                 summary = (
-                    f"Geo risk LOW-TO-MODERATE, market-contained: WTI {oil_delta:+.2f}% / {brent_note}"
+                    f"Geo risk LOW-TO-MODERATE, market-contained: {oil_note} / {brent_note}"
                     f"{' / NatGas ' + format(natgas_delta, '+.2f') + '%' if natgas_delta else ''}, "
-                    f"VIX {vix_display}, gold {gold_delta:+.2f}%, with recent Middle East/Hormuz context still active."
+                    f"VIX {vix_display}, gold {float(gold_delta or 0.0):+.2f}%, with recent Middle East/Hormuz context still active."
                 )
 
         return level, raw_level, summary
@@ -2010,6 +2054,8 @@ class MorningBriefingGenerator:
         contributions = dict(stats.get("provider_contributions", {}) or {})
         if not contributions:
             return ""
+        fetched_total = int(stats.get("fetched_total", 0) or 0)
+        deduped_total = int(stats.get("deduped_total", 0) or 0)
         unavailable = sorted(name for name, count in contributions.items() if int(count or 0) <= 0)
         active = sorted(name for name, count in contributions.items() if int(count or 0) > 0)
         notes: list[str] = []
@@ -2017,4 +2063,8 @@ class MorningBriefingGenerator:
             notes.append("Unavailable: " + ", ".join(unavailable[:3]))
         if active:
             notes.append("Core providers active")
+        if fetched_total <= 0:
+            notes.append("Provider failures: raw fetch 0")
+        elif deduped_total <= 0:
+            notes.append("Fetched but deduped to 0")
         return " · ".join(notes) if notes else ""

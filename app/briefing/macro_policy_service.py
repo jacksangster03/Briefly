@@ -652,7 +652,7 @@ def _aggregate_status(statuses: list[str]) -> str:
     if all(s == "ok" for s in vals):
         return "ok"
     if all(s == "stale" for s in vals):
-        return "stale"
+        return "partial"
     if any(s == "ok" for s in vals):
         return "partial"
     if any(s == "stale" for s in vals):

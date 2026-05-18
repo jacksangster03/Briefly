@@ -29,6 +29,14 @@ def interpret_market_setup(
     macro_quotes = list(setup.macro_quotes or [])
     macro_points = list(macro_context or [])
 
+    if not index_quotes and not macro_quotes and not macro_points:
+        return MarketSetupInterpretation(
+            narrative="Market data unavailable; no directional read generated.",
+            dominant_driver="Provider data outage; market tape unavailable.",
+            tags=["data_outage"],
+            confidence="low",
+        )
+
     risk_score = _risk_appetite_score(index_quotes)
     rates_score = _rates_impulse_score(setup=setup, macro_points=macro_points)
     commodity_score = _commodity_impulse_score(macro_quotes)

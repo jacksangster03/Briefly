@@ -85,7 +85,15 @@ def snapshot_metrics(briefing: MorningBriefing) -> dict[str, float]:
     charts = {str(row.get("chart_key")): row for row in (bundle.get("charts") or [])}
     pnl = charts.get("pnl_attribution_waterfall") or {}
     total_meta = ((pnl.get("meta") or {}).get("total_contribution"))
-    total_contrib = float(total_meta) if total_meta is not None else None
+    portfolio_has_live_quotes = any(
+        q.current_price is not None and q.change_percent is not None
+        for q in (briefing.portfolio_quotes or [])
+    )
+    total_contrib = (
+        float(total_meta)
+        if (total_meta is not None and portfolio_has_live_quotes)
+        else None
+    )
     watchlist_moves = [float(q.change_percent or 0.0) for q in (briefing.watchlist_quotes or [])]
     leader = max(watchlist_moves) if watchlist_moves else None
     laggard = min(watchlist_moves) if watchlist_moves else None

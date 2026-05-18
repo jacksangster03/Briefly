@@ -1505,6 +1505,14 @@ def _geo_confirmation_ladder_spec(briefing: MorningBriefing, metrics: dict[str, 
         {"name": "Gold/Haven", "state": "YES" if haven_confirm else "NO", "value": gold},
         {"name": "Equities", "state": "YES" if equity_confirm else "PARTIAL", "value": (us + eu + asia) / 3.0},
     ]
+    no_confirmation_inputs = (
+        not vix_available
+        and abs(oil) < 1e-9
+        and abs(gold) < 1e-9
+        and abs(us) < 1e-9
+        and abs(eu) < 1e-9
+        and abs(asia) < 1e-9
+    )
     if oil_confirm and vix_confirm and haven_confirm and equity_confirm:
         conclusion = "broad stress confirmed"
     elif oil_confirm or vix_confirm:
@@ -1514,8 +1522,12 @@ def _geo_confirmation_ladder_spec(briefing: MorningBriefing, metrics: dict[str, 
     return {
         "chart_key": "geo_confirmation_ladder",
         "variant": "confirmations",
-        "available": True,
-        "reason_if_hidden": None,
+        "available": not no_confirmation_inputs,
+        "reason_if_hidden": (
+            "All geo confirmation inputs unavailable."
+            if no_confirmation_inputs
+            else None
+        ),
         "title": "Geo Confirmation Ladder",
         "caption": (
             f"Oil {'confirms' if oil_confirm else 'is mild'}, "
@@ -1584,11 +1596,16 @@ def _oil_transmission_card_spec(briefing: MorningBriefing, metrics: dict[str, An
         else (f"Brent {brent_v:+.2f}%" if brent is not None else "Brent unavailable")
     )
     vix_caption = f"VIX {vix_v:+.2f}%" if metrics.get("vix_delta_pct") is not None else "VIX unavailable"
+    no_energy_inputs = oil is None and brent is None
     return {
         "chart_key": "oil_transmission_card",
         "variant": "macro_transmission",
-        "available": True,
-        "reason_if_hidden": None,
+        "available": not no_energy_inputs,
+        "reason_if_hidden": (
+            "WTI/Brent unavailable; no live energy transmission read."
+            if no_energy_inputs
+            else None
+        ),
         "title": "Oil Transmission",
         "caption": (
             f"WTI {oil_v:+.2f}% / {brent_caption} with XLE {xle_v:+.2f}%, "

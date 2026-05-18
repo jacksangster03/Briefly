@@ -849,6 +849,19 @@ See [docs/roadmap.md](docs/roadmap.md) for the full phase-by-phase development h
 
 **Missed a session.** Run `schedule-status` to confirm the scheduler is running and check its lock status. Run `daily-summary` to see what was and was not sent. Run `delivery-log` for exact records. Check `logs/` for scheduler errors.
 
+**Briefing showed `0 fetched` and market sections unavailable.** This usually indicates a transient provider/network outage (for example DNS resolution failure) or open circuit-breakers across multiple providers. Use:
+
+- `python -m app.cli schedule-status`
+- `python -m app.cli session-audit --date today --live-check --classifier-details --vertical-details`
+- `python -m app.cli delivery-log --date today`
+- `tail -n 300 logs/briefly.log`
+
+Output now distinguishes:
+- provider outage (`raw fetch 0`)
+- fetched-but-filtered (`X raw fetched, 0 selected after filters`)
+
+and explicitly labels market tape outages rather than showing neutral `+0.00%` placeholders.
+
 **All six sessions arrived at startup.** This is startup catch-up (Phase 9.1): on scheduler start, any sessions that elapsed today before the scheduler was running are delivered automatically. Already-sent sessions are skipped via idempotency.
 
 **Snapshot archive shows 0/6.** Only live scheduler sessions are archived. Backfills, dry runs, manual `session-send`, and `day-replay` are excluded.
