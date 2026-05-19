@@ -1629,12 +1629,20 @@ def _breadth_leadership_spec(metrics: dict[str, Any]) -> dict[str, Any]:
     breadth_pct = float(metrics.get("breadth") or 0.0) * 100.0
     rows = [
         {"name": "Breadth % Up", "value": round(breadth_pct, 3), "unit": "pct"},
-        {"name": "US Avg Move", "value": round(float(metrics.get("us_avg") or 0.0), 3), "unit": "pct"},
-        {"name": "Europe Avg Move", "value": round(float(metrics.get("eu_avg") or 0.0), 3), "unit": "pct"},
-        {"name": "Asia Avg Move", "value": round(float(metrics.get("asia_avg") or 0.0), 3), "unit": "pct"},
         {"name": "Small-Large", "value": round(float(metrics.get("small_vs_large") or 0.0), 3), "unit": "pct"},
         {"name": "Growth-Defensive", "value": round(float(metrics.get("growth_vs_defensive") or 0.0), 3), "unit": "pct"},
     ]
+    for key, label in (
+        ("semis_vs_market", "Semis-Market"),
+        ("energy_vs_market", "Energy-Market"),
+        ("financials_vs_market", "Financials-Market"),
+        ("tech_vs_market", "Tech-Market"),
+    ):
+        value = metrics.get(key)
+        if value is None:
+            continue
+        rows.append({"name": label, "value": round(float(value), 3), "unit": "pct"})
+    rows = [row for row in rows if row.get("name") == "Breadth % Up" or row.get("value") is not None]
     available = total > 0
     return {
         "chart_key": "breadth_leadership_panel",

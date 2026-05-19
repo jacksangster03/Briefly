@@ -76,6 +76,7 @@ class MorningBriefing(BaseModel):
     global_news: list[NormalisedEvent] = Field(default_factory=list)
     top_themes: list[NormalisedEvent] = Field(default_factory=list)
     portfolio_focus: list[NormalisedEvent] = Field(default_factory=list)
+    applied_news_stack: list[dict[str, object]] = Field(default_factory=list)
     sector_scan: list[SectorSnapshot] = Field(default_factory=list)
     earnings_calendar: list[EarningsEvent] = Field(default_factory=list)
     earnings_relevance: dict[str, str] = Field(default_factory=dict)

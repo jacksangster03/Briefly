@@ -723,6 +723,7 @@ class MorningBriefingGenerator:
         )
         briefing.portfolio_impact_bullets = impact_bullets
         briefing.portfolio_action_posture = action_posture
+        briefing.applied_news_stack = self._build_applied_news_stack(briefing)
         diagnosis = build_session_diagnosis(briefing)
         briefing.session_diagnosis = diagnosis.to_dict()
         briefing.trigger_board = dict(diagnosis.trigger_board or {})
@@ -1156,6 +1157,95 @@ class MorningBriefingGenerator:
                 continue
             cleaned.append(self._apply_news_hygiene(evt, section="portfolio_watchlist_themes"))
         return cleaned
+
+    def _build_applied_news_stack(self, briefing: MorningBriefing) -> list[dict[str, object]]:
+        """Build a compact deterministic morning applied-news stack."""
+        if (briefing.session_key or "morning").lower() != "morning":
+            return []
+        pools: list[tuple[str, list[NormalisedEvent]]] = [
+            ("macro_rates", list(briefing.top_themes or [])),
+            ("regional", list(briefing.global_news or [])),
+            ("sector", [evt for snap in (briefing.sector_scan or []) for evt in (snap.top_events or [])]),
+            ("watchlist", list(briefing.watchlist_events or [])),
+            ("portfolio", list(briefing.portfolio_focus or [])),
+            ("event_risk", list(briefing.top_themes or [])),
+            ("geopolitical", list(briefing.global_news or [])),
+        ]
+        keywords: dict[str, tuple[str, ...]] = {
+            "macro_rates": ("yield", "treasury", "inflation", "fed", "ecb", "rates", "bond"),
+            "regional": ("europe", "us", "asia", "china", "japan", "eurozone"),
+            "sector": ("sector", "semiconductor", "energy", "financial", "tech", "bank"),
+            "watchlist": tuple(symbol.lower() for symbol in self.profile.all_watchlist_tickers[:20]),
+            "portfolio": tuple(symbol.lower() for symbol in self.profile.portfolio_symbols[:20]),
+            "event_risk": ("cpi", "pce", "payroll", "fomc", "ecb", "earnings", "guidance"),
+            "geopolitical": ("iran", "israel", "hormuz", "sanction", "war", "missile", "ceasefire"),
+        }
+        built: list[dict[str, object]] = []
+        used_ids: set[str] = set()
+        for bucket, events in pools:
+            evt = next(
+                (
+                    candidate
+                    for candidate in events
+                    if candidate.event_id not in used_ids
+                    and self._applied_news_match(candidate, keywords.get(bucket, ()))
+                ),
+                None,
+            )
+            if evt is None:
+                continue
+            used_ids.add(evt.event_id)
+            built.append(
+                {
+                    "bucket": bucket,
+                    "headline": evt.title,
+                    "why_it_matters": self._applied_news_why(bucket, evt),
+                    "affected_assets": list(evt.tickers[:4]),
+                    "source_count": int(evt.cluster_size or 1),
+                    "price_confirmation": self._applied_news_confirmation(bucket, briefing),
+                }
+            )
+            if len(built) >= 7:
+                break
+        return built
+
+    @staticmethod
+    def _applied_news_match(event: NormalisedEvent, keys: tuple[str, ...]) -> bool:
+        if not keys:
+            return False
+        text = f"{event.title} {event.summary}".lower()
+        return any(k and k in text for k in keys)
+
+    @staticmethod
+    def _applied_news_confirmation(bucket: str, briefing: MorningBriefing) -> str:
+        tags = {str(tag).lower() for tag in (briefing.market_setup_signal_tags or [])}
+        if bucket == "macro_rates":
+            return "confirmed" if ("rates_headwind" in tags or "rates_supportive" in tags) else "unconfirmed"
+        if bucket == "geopolitical":
+            return "partial" if briefing.geo_risk_level else "unconfirmed"
+        if bucket in {"watchlist", "portfolio"}:
+            return "confirmed" if (briefing.portfolio_quotes or briefing.watchlist_quotes) else "unconfirmed"
+        return "optional"
+
+    @staticmethod
+    def _applied_news_why(bucket: str, event: NormalisedEvent) -> str:
+        if bucket == "macro_rates":
+            return "Rates context can reset valuation-sensitive growth and duration risk."
+        if bucket == "regional":
+            return "Regional dispersion helps explain mixed index direction."
+        if bucket == "sector":
+            return "Sector leadership affects breadth quality and index resilience."
+        if bucket == "watchlist":
+            names = ", ".join(event.tickers[:3]) or "watchlist names"
+            return f"Direct watchlist relevance for {names}."
+        if bucket == "portfolio":
+            names = ", ".join(event.tickers[:3]) or "portfolio names"
+            return f"Portfolio transmission risk through {names}."
+        if bucket == "event_risk":
+            return "Upcoming catalysts can invalidate or reinforce the setup."
+        if bucket == "geopolitical":
+            return "Headline risk matters only if cross-asset confirmation follows."
+        return "Market relevance under review."
 
     def _build_global_news(
         self,

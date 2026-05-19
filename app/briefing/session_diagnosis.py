@@ -60,6 +60,7 @@ def build_session_diagnosis(briefing: MorningBriefing) -> SessionDiagnosis:
     ten_y_chg = _canon_val("US10Y", "change")
     vix_level = _canon_val("VIX", "value")
     vix_delta = _canon_val("VIX", "change_percent")
+    spx, nasdaq, dow, russell = _major_us_index_moves(briefing)
 
     breadth_rows = list(briefing.market_setup.market_breadth or [])
     breadth_score = 0.0
@@ -175,6 +176,11 @@ def build_session_diagnosis(briefing: MorningBriefing) -> SessionDiagnosis:
         wti_pct=wti_pct,
         geo_level=geo_level,
         vix_available=vix_available,
+        us=us,
+        europe=europe,
+        nasdaq=nasdaq,
+        russell=russell,
+        spx=spx,
     )
 
     regional_diag = _regional_sentence(us=us, europe=europe, asia=asia, market_data_outage=briefing.market_data_outage)
@@ -265,6 +271,11 @@ def _session_sentence(
     wti_pct: float | None,
     geo_level: str,
     vix_available: bool,
+    us: float | None,
+    europe: float | None,
+    nasdaq: float | None,
+    russell: float | None,
+    spx: float | None,
 ) -> str:
     prefix = {
         "morning": "Overnight setup",
@@ -278,6 +289,20 @@ def _session_sentence(
     if primary_driver == "data_degraded":
         return f"{prefix}: provider data degraded; no directional read generated."
     if primary_driver == "rates_headwind":
+        if (
+            us is not None
+            and europe is not None
+            and us < 0.0
+            and europe > 0.0
+            and (
+                (nasdaq is not None and spx is not None and nasdaq < spx)
+                or (russell is not None and spx is not None and russell < spx)
+            )
+        ):
+            return (
+                f"{prefix}: rates are the main macro pressure point, but the equity reaction is regionally split "
+                f"rather than broad risk-off; Europe is firmer while US growth/small caps lag."
+            )
         return f"{prefix}: rates are the main headwind with cross-asset pressure still active."
     if primary_driver == "geo_energy_pressure":
         return f"{prefix}: geo/energy pressure is leading; monitor transmission into rates and equities."
@@ -293,6 +318,22 @@ def _session_sentence(
         f"{prefix}: mixed cross-asset signals (regional {reg}, rates score {rates_pressure_score:+.2f}, "
         f"oil {oil_desc}, geo {geo_level or 'n/a'}, VIX {vix_desc})."
     )
+
+
+def _major_us_index_moves(briefing: MorningBriefing) -> tuple[float | None, float | None, float | None, float | None]:
+    spx = nasdaq = dow = russell = None
+    for quote in (briefing.market_setup.index_quotes or []):
+        name = f"{quote.display_name} {quote.symbol}".lower()
+        change = float(quote.change_percent or 0.0)
+        if ("s&p" in name or "spx" in name) and spx is None:
+            spx = change
+        elif ("nasdaq" in name or "ixic" in name) and nasdaq is None:
+            nasdaq = change
+        elif ("dow" in name or "dji" in name) and dow is None:
+            dow = change
+        elif ("russell" in name or "rut" in name) and russell is None:
+            russell = change
+    return spx, nasdaq, dow, russell
 
 
 def _regional_sentence(*, us: float | None, europe: float | None, asia: float | None, market_data_outage: bool) -> str:

@@ -357,6 +357,9 @@ class TelegramFormatter:
         themes = self._format_themes_for_mode(briefing.top_themes, briefing.session_mode)
         if themes and (is_morning or is_preopen or is_closing):
             sections.append(themes)
+        applied_news = self._format_applied_news_stack(briefing.applied_news_stack)
+        if applied_news and is_morning:
+            sections.append(applied_news)
 
         portfolio_focus = self._format_portfolio_focus(briefing.portfolio_focus)
         if portfolio_focus and (is_morning or is_preopen or is_closing):
@@ -1062,6 +1065,35 @@ class TelegramFormatter:
             )
             if meta:
                 lines.append(f"  <i>{' | '.join(meta)}</i>")
+        return "\n".join(lines)
+
+    def _format_applied_news_stack(self, rows: list[dict[str, object]]) -> str:
+        if not rows:
+            return ""
+        bucket_labels = {
+            "macro_rates": "Macro/Rates",
+            "regional": "Regional",
+            "sector": "Sector",
+            "watchlist": "Watchlist",
+            "portfolio": "Portfolio",
+            "event_risk": "Event Risk",
+            "geopolitical": "Geopolitical",
+        }
+        lines = ["<b>APPLIED NEWS STACK</b>"]
+        for row in rows[:7]:
+            bucket = bucket_labels.get(str(row.get("bucket") or ""), "Theme")
+            headline = str(row.get("headline") or "").strip()
+            why = str(row.get("why_it_matters") or "").strip()
+            assets = [str(a).strip() for a in (row.get("affected_assets") or []) if str(a).strip()]
+            conf = str(row.get("price_confirmation") or "optional")
+            src_ct = int(row.get("source_count") or 1)
+            if headline:
+                lines.append(f"- <b>{bucket}:</b> {headline}")
+            if why:
+                lines.append(f"  Why it matters: {why}")
+            if assets:
+                lines.append(f"  Affected: {', '.join(assets[:4])}")
+            lines.append(f"  Signal: {conf} · sources: {src_ct}")
         return "\n".join(lines)
 
     def _format_global_risk_update(self, events: list[NormalisedEvent]) -> str:

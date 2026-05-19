@@ -458,3 +458,58 @@ All quality-layer behaviour is covered by:
 - `app/tests/test_fx_module.py`: compact FX output, no "(n/a)" for missing change
 - `app/tests/test_macro_policy_watch_briefing.py`: macro policy watch heading appears exactly once in Telegram and email
 - `app/tests/test_phase64_morning_charts.py`: chart selection, yield curve, watchlist movers with colours
+
+---
+
+## Morning Diagnosis Upgrade (Deterministic)
+
+Morning diagnosis now prefers measurable drivers over generic text:
+
+- rates/valuation pressure is explicitly named when 10Y and leadership inputs support it
+- regional split is explicitly named when Europe/US diverge
+- mixed fallback remains only when no stronger deterministic driver is present
+
+This prevents generic "balanced factors" language when a clear rates or regional regime is visible.
+
+---
+
+## Chart Clarity Updates
+
+- **Breadth & Leadership** no longer repeats US/Europe/Asia bars (those stay in Regional Divergence).
+- **Yield Curve Shape** now labels:
+  - today values + bp vs 1W
+  - available 1W values per tenor (`1W: x.xx%`) near the grey dashed points
+
+If prior-week value is missing for a tenor, only that tenor's grey label is omitted.
+
+---
+
+## Market Setup Formatting Rules
+
+- Colour styling is applied to the **actual move** only.
+- Range text remains neutral:
+  - `| range -0.7% to +0.3% | closed upper half`
+  - `| range ... | trading near highs`
+- Range remains instrument-specific from each quote's own OHLC inputs.
+
+---
+
+## Applied News Stack
+
+Morning briefings can include a compact deterministic **Applied News Stack**:
+
+- Macro/Rates
+- Regional
+- Sector
+- Watchlist
+- Portfolio
+- Event Risk
+- Geopolitical
+
+Each line includes:
+- headline
+- why it matters
+- affected assets (when available)
+- confirmation state and source count
+
+Low-signal items are not force-filled just to populate sections.

@@ -1507,6 +1507,18 @@ class ChartRenderer:
                 label += f"\n{sign}{change:.0f}bp"
             ax.text(tenor, val + max(0.03, (y_max - y_min) * 0.08),
                     label, ha="center", va="bottom", fontsize=8.2, color=ACCENT, weight="bold", zorder=5)
+            week_val = week_ago_vals[i]
+            if week_val is not None:
+                ax.text(
+                    tenor,
+                    float(week_val) - max(0.03, (y_max - y_min) * 0.09),
+                    f"1W: {float(week_val):.2f}%",
+                    ha="center",
+                    va="top",
+                    fontsize=7.6,
+                    color=MUTED,
+                    zorder=5,
+                )
 
         meta = dict(spec.get("meta") or {})
         shape = str(meta.get("shape") or "")

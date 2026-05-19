@@ -1377,6 +1377,13 @@ The pipeline includes a deterministic post-processing layer that runs before dis
 
 **Macro Policy Watch heading**: the heading "MACRO POLICY WATCH" appears exactly once per briefing in both Telegram and email output.
 
+**Morning diagnosis and setup clarity**:
+- Morning diagnosis prefers explicit rates/regional drivers over generic mixed wording when thresholds are met.
+- Breadth & Leadership no longer duplicates regional US/Europe/Asia bars from Regional Divergence.
+- Yield Curve chart shows both current labels and available 1W tenor labels.
+- Market Setup colours only the actual move; range/location text remains neutral.
+- Optional Applied News Stack can provide deterministic "why it matters" mapping without changing classifier authority.
+
 **Chart output**: full density mode (`email_density_mode: full`) has no arbitrary chart cap; all rendered charts are returned. Desk mode caps at 5, medium at 6. Set `delivery.max_email_charts` to impose a user-level cap in any mode.
 
 **Watchlist performance chart**: each ticker is assigned a stable categorical colour using `assign_watchlist_colours()` (alphabetical sort index into a 10-colour palette). The same ticker always gets the same colour within a fixed watchlist.

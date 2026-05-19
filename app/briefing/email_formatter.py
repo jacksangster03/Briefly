@@ -798,8 +798,17 @@ class EmailFormatter:
 
         # Then colorize remaining parenthetical changes: (-0.0200)
         out = _PAREN_MOVE_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), tail)
-        # Finally colorize standalone % tokens in compact strips.
-        out = _MOVE_TOKEN_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), out)
+        # Keep range text neutral in market setup rows: only colorize the pre-range segment.
+        lower_out = out.lower()
+        range_idx = lower_out.find("| range ")
+        if range_idx >= 0:
+            lead = out[:range_idx]
+            rest = out[range_idx:]
+            lead = _MOVE_TOKEN_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), lead)
+            out = f"{lead}{rest}"
+        else:
+            # Finally colorize standalone % tokens in compact strips.
+            out = _MOVE_TOKEN_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), out)
         return f"{head}{sep}{out}"
 
     @staticmethod
