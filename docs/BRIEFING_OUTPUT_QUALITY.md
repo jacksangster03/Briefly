@@ -218,6 +218,15 @@ When live providers are unavailable in-cycle (for example DNS/network failure or
   - `provider outage (raw fetch 0)` when raw provider ingestion is zero
   - `X raw fetched, 0 selected after filters` when ingestion succeeded but ranking/suppression removed all candidates
 
+---
+
+## Vertical intelligence shadow quality (Phase 1)
+
+- Vertical source adapters are API/RSS-first and fail-soft.
+- Geopolitics and AI/Tech sources are diagnostics-first; briefing output remains off by default.
+- Optional shadow briefing lines are deterministic summaries only and capped for compactness.
+- Vertical shadow output never changes alert eligibility or delivery authority.
+
 Deterministic suppression safeguards:
 
 - Oil transmission chart is hidden when both WTI and Brent are unavailable.

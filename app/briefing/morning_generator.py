@@ -40,6 +40,7 @@ from app.briefing.llm_news_classifier import run_llm_news_classifier_shadow
 from app.briefing.valuation_lens import ValuationLens
 from app.briefing.session_diagnosis import build_session_diagnosis
 from app.verticals.engine import build_vertical_section
+from app.verticals.shadow_summary import build_vertical_shadow_lines
 from app.logger import get_logger
 from app.db.session import get_session
 from app.personalization.delivery_rules import load_alert_rules
@@ -594,6 +595,13 @@ class MorningBriefingGenerator:
             session_key=briefing.session_key,
             candidate_events=healthcare_candidates,
         )
+        try:
+            briefing.vertical_shadow_lines = build_vertical_shadow_lines(
+                profile=self.profile,
+                session_key=str(briefing.session_key or "morning").lower(),
+            )
+        except Exception:
+            logger.debug("vertical shadow summary unavailable", exc_info=True)
         if should_include_macro_policy_watch(
             profile=self.profile,
             session_key=briefing.session_key or "morning",

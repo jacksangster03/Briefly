@@ -4436,7 +4436,10 @@ def _build_verticals_ui_context(
 
     profile = load_user_profile(settings)
     rows = verticals_status_for_profile(profile=profile)
-    healthcare = next((r for r in rows if r.get("vertical_key") == "healthcare"), {}) or {}
+    by_key = {str(r.get("vertical_key")): dict(r) for r in rows}
+    healthcare = by_key.get("healthcare", {}) or {}
+    geopolitics = by_key.get("geopolitics", {}) or {}
+    ai_tech = by_key.get("ai_tech", {}) or {}
 
     effective_verticals = ((state.get("effective") or {}).get("verticals") or {})
     healthcare_cfg = dict(effective_verticals.get("healthcare") or {})
@@ -4480,6 +4483,7 @@ def _build_verticals_ui_context(
         source_cards.append(
             {
                 "key": key,
+                "vertical": "healthcare",
                 "label": label,
                 "tier": tier,
                 "status": status_value,
@@ -4488,6 +4492,40 @@ def _build_verticals_ui_context(
                 "last_fetch": last_fetch,
             }
         )
+    for vertical_key, vertical_label, source_map_rows in (
+        ("geopolitics", "Geopolitics", [("gdelt", "GDELT", "primary"), ("newsapi", "NewsAPI", "broad_media"), ("finnhub", "Finnhub News", "broad_media")]),
+        ("ai_tech", "AI / Tech", [("sec", "SEC / EDGAR", "official"), ("arxiv", "arXiv", "primary"), ("github", "GitHub", "trusted_media")]),
+    ):
+        source_blob = dict((by_key.get(vertical_key, {}) or {}).get("source_status") or {})
+        for key, label, tier in source_map_rows:
+            status_obj = source_blob.get(key)
+            if isinstance(status_obj, dict):
+                status_value = str(status_obj.get("status") or "unavailable")
+                fetched = status_obj.get("fetched_count")
+                normalized = status_obj.get("accepted_count", status_obj.get("normalized_count"))
+                last_fetch = status_obj.get("last_success_at") or ""
+            elif status_obj is None:
+                status_value = "unavailable"
+                fetched = None
+                normalized = None
+                last_fetch = ""
+            else:
+                status_value = str(status_obj)
+                fetched = None
+                normalized = None
+                last_fetch = ""
+            source_cards.append(
+                {
+                    "key": key,
+                    "vertical": vertical_label,
+                    "label": label,
+                    "tier": tier,
+                    "status": status_value,
+                    "fetched_count": fetched,
+                    "normalized_count": normalized,
+                    "last_fetch": last_fetch,
+                }
+            )
 
     mode_help = {
         "off": "Never shown in briefings.",
@@ -4529,13 +4567,35 @@ def _build_verticals_ui_context(
             "latest_stored": latest,
             "latest_differs": latest_differs,
         },
+        "geopolitics": {
+            "mode": str(geopolitics.get("mode") or "off"),
+            "status": str(geopolitics.get("activation_status") or "inactive"),
+            "reason": str(geopolitics.get("activation_reason") or "mode_off"),
+            "candidate_count": geopolitics.get("candidate_count"),
+            "included_count": geopolitics.get("included_count"),
+            "suppressed_count": geopolitics.get("suppressed_count"),
+            "source_status": dict(geopolitics.get("source_status") or {}),
+            "plugin_error": str(geopolitics.get("plugin_error") or ""),
+            "updated_at_utc": geopolitics.get("updated_at_utc"),
+        },
+        "ai_tech": {
+            "mode": str(ai_tech.get("mode") or "off"),
+            "status": str(ai_tech.get("activation_status") or "inactive"),
+            "reason": str(ai_tech.get("activation_reason") or "mode_off"),
+            "candidate_count": ai_tech.get("candidate_count"),
+            "included_count": ai_tech.get("included_count"),
+            "suppressed_count": ai_tech.get("suppressed_count"),
+            "source_status": dict(ai_tech.get("source_status") or {}),
+            "plugin_error": str(ai_tech.get("plugin_error") or ""),
+            "updated_at_utc": ai_tech.get("updated_at_utc"),
+        },
         "config": healthcare_cfg,
         "mode_help": mode_help,
         "source_cards": source_cards,
         "why_lines": why_lines,
         "planned_verticals": [
-            {"name": "AI / Semiconductors", "status": "planned", "triggers": "Earnings surprises, capex cycles, AI supply chain catalysts."},
-            {"name": "Energy / Geopolitics", "status": "planned", "triggers": "Supply shocks, sanctions, shipping chokepoints, oil volatility."},
+            {"name": "AI / Semiconductors", "status": "planned", "triggers": "Live SEC/arXiv adapters now wired; briefing output remains shadow/off by default."},
+            {"name": "Energy / Geopolitics", "status": "planned", "triggers": "Live GDELT adapter wired; official policy feeds still additive future work."},
             {"name": "Defence / Aerospace", "status": "planned", "triggers": "Procurement changes, conflict escalation, programme awards."},
             {"name": "Rates / Macro", "status": "planned", "triggers": "Policy shocks, inflation regimes, curve re-pricing."},
         ],

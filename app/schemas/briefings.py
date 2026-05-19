@@ -97,6 +97,7 @@ class MorningBriefing(BaseModel):
     session_diagnosis: dict[str, object] = Field(default_factory=dict)
     trigger_board: dict[str, list[str]] = Field(default_factory=dict)
     macro_policy_watch: str = ""
+    vertical_shadow_lines: list[str] = Field(default_factory=list)
     valuation_lens_lines: list[str] = Field(default_factory=list)
     quote_freshness: dict[str, dict] = Field(default_factory=dict)
     data_basis_lines: list[str] = Field(default_factory=list)

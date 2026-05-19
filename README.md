@@ -418,16 +418,23 @@ News Intelligence UI:
 Vertical Intelligence UI:
 
 - Route: `/ui/briefing/verticals?profile=default_user`
-- Purpose: user-facing control centre for portfolio-linked topic intelligence modules, starting with Healthcare/Biotech.
+- Purpose: user-facing control centre for portfolio-linked topic intelligence modules (Healthcare, Geopolitics, AI/Tech).
 - Vertical modes:
   - `off`: vertical does not run/render
   - `watch`: conservative activation for higher-signal/watchlist-relevant cases
   - `active`: runs normally and can render when material signal exists
   - `portfolio_linked`: activation anchored to portfolio/watchlist threshold settings
-- Source health cards show prepared/stubbed/disabled/active status for FDA/openFDA, ClinicalTrials.gov, EMA, SEC/company IR, and general news.
+- Source health cards show prepared/stubbed/disabled/active status for:
+  - Healthcare: FDA/openFDA, ClinicalTrials.gov, EMA, SEC/company IR, general news
+  - Geopolitics: GDELT + confirmation sources
+  - AI/Tech: SEC EDGAR, arXiv, GitHub (optional fail-soft source)
 - Current configuration is shown separately from latest stored diagnostics so historical runs are not misread as current active state.
 - Planned vertical cards are informational only; they do not enable new live behaviour.
 - Deterministic classifier/rules remain authoritative; ML/LLM are non-authoritative diagnostics.
+- Shared vertical source events are persisted in `vertical_source_events` (metadata only; no full article text).
+- Optional compact shadow briefing integration is disabled by default:
+  - `verticals.include_in_briefing=false`
+  - `verticals.briefing_sessions=["morning"]`
 
 ---
 

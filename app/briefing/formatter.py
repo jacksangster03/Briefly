@@ -368,6 +368,9 @@ class TelegramFormatter:
         healthcare = self._format_healthcare_intelligence(briefing.healthcare_intelligence, session_key=session_key)
         if healthcare:
             sections.append(healthcare)
+        vertical_shadow = self._format_vertical_shadow(briefing)
+        if vertical_shadow:
+            sections.append(vertical_shadow)
 
         if is_weekend:
             week_ahead = self._format_week_ahead(briefing)
@@ -584,6 +587,16 @@ class TelegramFormatter:
             if meta:
                 lines.append(f"   <i>{' | '.join(meta)}</i>")
         return "\n".join(lines)
+
+    def _format_vertical_shadow(self, briefing: MorningBriefing) -> str:
+        lines = [str(x).strip() for x in (getattr(briefing, "vertical_shadow_lines", []) or []) if str(x).strip()]
+        if not lines:
+            return ""
+        rendered = ["<b>VERTICAL INTELLIGENCE (SHADOW)</b>"]
+        for line in lines[:9]:
+            rendered.append(f"- {truncate(line, 220)}")
+        rendered.append("Deterministic signal summaries; not a live alert authority.")
+        return "\n".join(rendered)
 
     def format_intraday_update(self, update: IntradayUpdate) -> list[str]:
         """Format an hourly intraday update."""
