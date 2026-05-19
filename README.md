@@ -479,6 +479,8 @@ make setup
 make test
 ```
 
+`.env.example` is the canonical tracked environment template. Keep real secrets only in local `.env`.
+
 Minimum required environment variables:
 
 ```bash

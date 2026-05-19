@@ -3,9 +3,9 @@
 ## 1) Quick start
 1. Copy an env template:
    - `cp .env.example .env`
-   - or use `myenv.example` as a minimal local variant.
 2. Fill only the keys you need (leave others blank).
-3. Keep vertical shadow output off by default:
+3. Never commit `.env`; keep real secrets in local `.env` only.
+4. Keep vertical shadow output off by default:
    - `VERTICALS_INCLUDE_IN_BRIEFING=false`
 4. Run diagnostics safely (no live sends required).
 

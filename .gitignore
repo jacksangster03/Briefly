@@ -9,6 +9,9 @@ build/
 
 # Environment
 .env
+.env.local
+myenv
+myenv.local
 .venv/
 venv/
 env/
