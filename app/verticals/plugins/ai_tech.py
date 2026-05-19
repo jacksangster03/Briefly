@@ -70,7 +70,13 @@ class AITechVerticalPlugin:
         _ = candidate_events
         mode = self.resolve_mode(profile=profile)
         activated, reason = self.activation_state(profile=profile, mode=mode, session_key=session_key, candidate_events=[])
-        events = self._collect(profile=profile) if mode != "off" else []
+        should_collect_live = bool(mode != "off" and session_key not in {"status", "ui"})
+        events = self._collect(profile=profile) if should_collect_live else list(self._last_events or [])
+        source_status = self._last_source_health or {
+            "sec": {"status": "disabled" if mode == "off" else "unavailable"},
+            "arxiv": {"status": "stub_inactive"},
+            "github": {"status": "stub_inactive"},
+        }
         return {
             "vertical_key": self.vertical_key,
             "display_name": self.display_name,
@@ -80,7 +86,7 @@ class AITechVerticalPlugin:
             "candidate_count": len(events),
             "included_count": min(3, len(events)) if events else 0,
             "suppressed_count": max(0, len(events) - 3),
-            "source_status": self._last_source_health or {"sec": {"status": "disabled"}, "arxiv": {"status": "stub_inactive"}, "github": {"status": "stub_inactive"}},
+            "source_status": source_status,
             "portfolio_exposure_summary": f"watchlist_overlap={len(set(getattr(profile, 'all_watchlist_tickers', [])))}",
             "watchlist_exposure_summary": f"ai_event_count={len(events)}",
             "official_candidate_count": 0,

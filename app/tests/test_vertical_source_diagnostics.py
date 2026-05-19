@@ -27,3 +27,15 @@ def test_verticals_ui_renders_with_unavailable_sources(validation_test_settings)
     assert "Vertical Intelligence" in html
     assert "Geopolitics" in html
     assert "AI / Tech" in html
+
+
+def test_verticals_ui_status_render_does_not_require_live_provider_calls(validation_test_settings, monkeypatch):
+    def _boom(*args, **kwargs):
+        raise AssertionError("live provider call should not execute on status render")
+
+    monkeypatch.setattr("app.verticals.sources.geopolitics.collect_geopolitics_events", _boom)
+    monkeypatch.setattr("app.verticals.sources.ai_tech.collect_ai_tech_events", _boom)
+    app = create_web_app(validation_test_settings)
+    client = TestClient(app)
+    response = client.get("/ui/briefing/verticals?profile=default_user")
+    assert response.status_code == 200

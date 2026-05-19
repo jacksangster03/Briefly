@@ -40,6 +40,7 @@ def _classify_ai_event_type(title: str, summary: str) -> str:
 def _collect_sec_ai_events(settings: Settings, watchlist: set[str], limit: int = 25) -> tuple[list[VerticalEvent], dict[str, Any]]:
     health = {"status": "disabled", "fetched_count": 0, "accepted_count": 0, "suppressed_count": 0, "last_error": "", "last_success_at": ""}
     if not settings.sec_user_agent:
+        health["last_error"] = "missing SEC_USER_AGENT"
         return [], health
     provider = SECProvider(user_agent=settings.sec_user_agent, timeout=settings.provider_timeout, max_retries=settings.provider_max_retries)
     query = "AI OR artificial intelligence OR datacenter OR semiconductor OR GPU OR inference"

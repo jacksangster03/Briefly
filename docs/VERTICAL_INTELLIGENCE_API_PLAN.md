@@ -25,9 +25,18 @@ Phase 1 adds API/RSS-first vertical foundations for:
   - arXiv (primary research trend signal)
   - GitHub source is scaffolded as optional/fail-soft in this phase.
 
+### Source health behaviour
+- GDELT failures/timeouts are represented as `status=error` with `last_error`.
+- Missing `SEC_USER_AGENT` marks SEC AI/Tech source as `status=disabled` with reason `missing SEC_USER_AGENT`.
+- arXiv/GitHub failures degrade safely into diagnostics without crashing plugin/briefing paths.
+- Healthcare source status remains backward compatible with existing `sec/openfda/clinicaltrials/ema` keys.
+
 ## Persistence
 - Generic event archive:
   - `vertical_source_events` (`VerticalSourceEventRecord`)
+  - unique key: `(vertical, source_name, payload_hash)` prevents duplicate inserts.
+  - metadata-only persistence; no full raw copyrighted text storage.
+  - upsert path is best-effort and non-blocking (DB failures do not crash briefing generation).
 - Existing run diagnostics retained:
   - `vertical_run_diagnostics`
 
@@ -40,3 +49,14 @@ Phase 1 adds API/RSS-first vertical foundations for:
   - `verticals.include_in_briefing = false` (default behavior)
   - `verticals.briefing_sessions = ["morning"]`
 - Optional compact summaries are deterministic and non-authoritative.
+
+## Known limitations (Phase 1)
+- Geopolitics and AI/Tech are diagnostics-first; full rich sections are intentionally not enabled live by default.
+- arXiv/GitHub outputs are trend/context signals and cannot independently claim market-confirmed catalysts.
+- No scraping/page-monitoring collectors are implemented in this phase.
+
+## Phase 1b recommendations
+- Add official policy/sanctions feeds for geopolitics as higher-trust confirmations.
+- Add richer SEC filing taxonomy for AI capex/regulation/event typing.
+- Add intraday materiality gate for optional vertical shadow bullets (if intraday sessions are enabled in preferences).
+- Add explicit per-source cooldown/rate-limit visibility to `/ui/diagnostics`.

@@ -61,3 +61,9 @@ def test_broad_media_does_not_dominate_official():
     official = VerticalEvent(vertical="ai_tech", source_name="sec_edgar", source_tier="official", title="Official filing", market_relevance=0.7, portfolio_relevance=0.4, novelty_score=0.6, diagnostics={"freshness_score": 0.7})
     broad = VerticalEvent(vertical="ai_tech", source_name="media", source_tier="broad_media", title="Media story", market_relevance=0.8, portfolio_relevance=0.4, novelty_score=0.6, diagnostics={"freshness_score": 0.7})
     assert deterministic_vertical_score(official) > deterministic_vertical_score(broad)
+
+
+def test_missing_sec_user_agent_is_disabled_with_reason():
+    _events, health = collect_ai_tech_events(settings=Settings(sec_user_agent=""))
+    assert health["sec"]["status"] == "disabled"
+    assert "missing SEC_USER_AGENT" in str(health["sec"]["last_error"])

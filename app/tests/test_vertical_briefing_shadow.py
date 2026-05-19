@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from app.personalization.user_profile import UserProfile
+from app.briefing.formatter import TelegramFormatter
+from app.schemas.briefings import MorningBriefing
 from app.verticals.shadow_summary import build_vertical_shadow_lines
 
 
@@ -32,3 +34,11 @@ def test_vertical_shadow_enabled_for_morning():
 def test_vertical_shadow_intraday_not_rendered_without_session_opt_in():
     lines = build_vertical_shadow_lines(profile=_profile(enabled=True, sessions=["morning"]), session_key="us_intraday_risk")
     assert lines == []
+
+
+def test_default_off_briefing_output_unchanged_for_vertical_shadow():
+    formatter = TelegramFormatter(timezone_name="Europe/Madrid")
+    briefing = MorningBriefing(session_key="morning", session_title="Morning Briefing")
+    parts = formatter.format_morning_briefing(briefing)
+    text = "\n".join(parts)
+    assert "VERTICAL INTELLIGENCE (SHADOW)" not in text
