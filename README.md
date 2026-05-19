@@ -436,6 +436,13 @@ Vertical Intelligence UI:
   - `verticals.include_in_briefing=false`
   - `verticals.briefing_sessions=["morning"]`
 
+Vertical Intelligence API setup:
+
+- See [docs/API_SETUP.md](docs/API_SETUP.md) for local environment/API setup.
+- Source architecture and current limitations: [docs/VERTICAL_INTELLIGENCE_API_PLAN.md](docs/VERTICAL_INTELLIGENCE_API_PLAN.md)
+- LLM shadow governance (non-authoritative): [docs/LLM_VERTICAL_SHADOW_PLAN.md](docs/LLM_VERTICAL_SHADOW_PLAN.md)
+- Vertical intelligence is shadow/off by default and can be diagnosed without live sends.
+
 ---
 
 ## Updating and running latest code

@@ -8,6 +8,7 @@
 - Prefer RSS/API-first ingestion from allowed/public sources.
 - Use scraping only for explicitly permitted, robots-compatible public pages.
 - Do not store full copyrighted article bodies when not licensed.
+- No scraping-first rollouts: API/RSS and official feeds are always the first integration tier.
 
 ## Trust Tiers
 - Tier 1: Official filings/regulators/central banks.
@@ -22,6 +23,7 @@
 - cross_source_confirmation
 - market_price_confirmation
 - watchlist_or_portfolio_relevance
+- **Important guardrail**: headline density alone is insufficient for “market-confirmed” risk.
 
 ## LLM Role (Shadow/Assist Only)
 - Summarisation of already-selected clusters.
@@ -45,3 +47,11 @@
 - Phase 1: design + telemetry shape only.
 - Phase 2: shadow trend extraction and UI diagnostics in News Intelligence.
 - Phase 3: deterministic trend score integration after coverage/quality checks.
+
+## Geopolitics Trend Radar Activation Criteria (planned)
+- Activate geopolitics trend-radar emphasis when:
+  - density is elevated **and**
+  - cross-source confirmation improves **or**
+  - asset transmission confirms (oil/VIX/gold/FX) **or**
+  - portfolio/watchlist exposure relevance is high.
+- If confirmation is missing, keep output in “headline risk elevated, market confirmation incomplete” state.
