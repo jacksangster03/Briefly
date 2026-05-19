@@ -317,7 +317,7 @@ def build_data_basis_lines(
         # During Europe cash hours, annotate that provider returned prior-close
         # quotes while the cash session is open. Keep the legacy wording that
         # existing tests rely on, and add a more precise label for the basis line.
-        lines[1] = "Europe equities: prior close (provider-returned during open session)"
+        lines[1] = "Europe equities: provider-held prior close during open session"
         lines.append(
             "Europe cash is open but provider quotes are prior close/delayed; "
             "treat as stale context, not live."
@@ -325,8 +325,8 @@ def build_data_basis_lines(
     elif session_key in {"europe_midday", "us_pre_open"} and eu_basis.startswith(("delayed", "stale")):
         lines.append("Europe cash is open but provider quotes are prior close/delayed.")
 
-    # VIX availability note for intraday risk reads.
-    if session_key in {"us_intraday_risk", "into_close"}:
+    # VIX availability note for all core briefing sessions.
+    if session_key in {"morning", "europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"}:
         vix_quote = next(
             (
                 q for q in index_quotes + macro_quotes
@@ -335,7 +335,7 @@ def build_data_basis_lines(
             None,
         )
         if vix_quote is None:
-            lines.append("VIX: unavailable (provider path did not return a live quote this cycle).")
+            lines.append("VIX: unavailable (provider returned no quote this cycle).")
         else:
             vix_meta = classify_quote_freshness(
                 quote=vix_quote,

@@ -57,7 +57,7 @@ from app.processing.article_quality import (
 )
 from app.processing.pipeline import is_actionable_event, process_event_stream
 from app.schemas.briefings import MarketSetup, MorningBriefing, session_mode_for
-from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, QuoteData, SectorSnapshot
+from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, PricePoint, QuoteData, SectorSnapshot
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
 from app.universe.ticker_metadata import TICKER_DISPLAY_NAMES, company_name_for_ticker
@@ -1054,7 +1054,14 @@ class MorningBriefingGenerator:
             briefing.market_setup.macro_quotes,
             key=lambda q: (_rank(q.display_name or q.symbol, priority_macro_tokens), abs(float(q.change_percent or 0.0)) * -1),
         )
-        briefing.market_setup.index_quotes = index_quotes[:max_index]
+        selected_index = list(index_quotes[:max_index])
+        vix_row = next((q for q in index_quotes if "VIX" in f"{q.display_name} {q.symbol}".upper()), None)
+        if vix_row is not None and all("VIX" not in f"{q.display_name} {q.symbol}".upper() for q in selected_index):
+            if selected_index:
+                selected_index = selected_index[:-1] + [vix_row]
+            else:
+                selected_index = [vix_row]
+        briefing.market_setup.index_quotes = selected_index
         briefing.market_setup.macro_quotes = macro_quotes[:max_macro]
 
     @staticmethod
@@ -1093,6 +1100,7 @@ class MorningBriefingGenerator:
             for q in quotes:
                 q.display_name = name_map.get(q.symbol, q.symbol)
             setup.index_quotes = quotes
+            self._ensure_vix_quote(setup)
 
         # Macro instrument quotes (gold, oil, USD, BTC)
         macro_symbols = self.universe.all_macro_symbols
@@ -1122,6 +1130,37 @@ class MorningBriefingGenerator:
             setup.market_breadth = breadth_rows
 
         return setup
+
+    def _ensure_vix_quote(self, setup: MarketSetup) -> None:
+        """Keep VIX available as a core risk instrument across sessions.
+
+        Falls back to latest available history point when live quote fetch misses.
+        """
+        has_vix = any("VIX" in f"{q.display_name} {q.symbol}".upper() for q in (setup.index_quotes or []))
+        if has_vix:
+            return
+        history = self.market_svc.get_price_history("^VIX", period="5d", interval="1d")
+        if not history:
+            return
+        latest: PricePoint = history[-1]
+        close = float(latest.close or 0.0)
+        if close <= 0:
+            return
+        prev_close = float(history[-2].close) if len(history) > 1 else close
+        change = close - prev_close
+        change_pct = ((close / prev_close) - 1.0) * 100.0 if prev_close else 0.0
+        setup.index_quotes.append(
+            QuoteData(
+                symbol="^VIX",
+                display_name="VIX",
+                current_price=close,
+                change=change,
+                change_percent=change_pct,
+                previous_close=prev_close,
+                timestamp=latest.timestamp,
+                source="yfinance_history_fallback",
+            )
+        )
 
     def _build_top_themes(
         self,

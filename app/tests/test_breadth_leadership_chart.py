@@ -24,3 +24,17 @@ def test_breadth_chart_does_not_repeat_regional_average_bars():
     assert "Small-Large" in names
     assert "Growth-Defensive" in names
 
+
+def test_breadth_chart_omits_unavailable_optional_factors():
+    spec = _breadth_leadership_spec(
+        {
+            "total_indices": 4,
+            "up_indices": 2,
+            "breadth": 0.5,
+            "small_vs_large": 0.2,
+            "growth_vs_defensive": -0.1,
+            "semis_vs_market": None,
+        }
+    )
+    names = [str(row.get("name")) for row in spec.get("series", [])]
+    assert "Semis-Market" not in names

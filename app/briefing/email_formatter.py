@@ -684,6 +684,16 @@ class EmailFormatter:
         return lines[:4]
 
     def _trigger_lines(self, briefing: MorningBriefing) -> list[str]:
+        board = dict(getattr(briefing, "trigger_board", {}) or {})
+        board_lines: list[str] = []
+        for key in ("active", "watch", "cooled"):
+            for line in (board.get(key) or []):
+                text = str(line).strip()
+                if text:
+                    board_lines.append(text)
+        if board_lines:
+            return board_lines[:5]
+
         triggers: list[str] = []
         vix = next(
             (

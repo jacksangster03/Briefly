@@ -494,6 +494,64 @@ If prior-week value is missing for a tenor, only that tenor's grey label is omit
 
 ---
 
+## VIX Availability Rules (All Core Sessions)
+
+VIX is treated as a core risk instrument in:
+- morning
+- europe_midday
+- us_pre_open
+- us_intraday_risk
+- into_close
+- closing_wrap
+
+Rules:
+- VIX is pinned in trimmed market-setup rows (it is not dropped by density trimming).
+- If live quote fetch misses VIX, generator attempts latest available fallback from recent `^VIX` history.
+- Data-basis lines always include explicit VIX status for core sessions.
+- If VIX is unavailable, risk wording must use **unconfirmed** framing (never silent neutral confirmation).
+
+---
+
+## Regional vs Breadth Separation
+
+- **Regional Divergence** owns regional bars (US/Europe/Asia).
+- **Breadth & Leadership** owns internals/factor structure:
+  - Breadth % Up
+  - Small-Large
+  - Growth-Defensive
+  - optional factor spreads (Semis/Tech/Energy/Financials vs market when available)
+
+Regional bars must not be repeated inside Breadth & Leadership.
+
+---
+
+## Yield Curve Prior-Week Labelling
+
+Yield curve rendering now includes:
+- orange today labels (`x.xx%` and `+/-bp vs 1W`)
+- grey dashed prior-week labels per tenor (`1W: x.xx%`) when available
+
+Missing prior-week value for one tenor suppresses only that tenor's grey label.
+
+---
+
+## Live Risk Board Rules
+
+Trigger output is stateful, not purely hypothetical:
+
+- `ACTIVE`: threshold already breached now
+- `ELEVATED`: risk active but below escalation zone
+- `WATCH`: threshold not breached yet
+- `CONTAINED` / `COOLED`: stress easing
+- `UNAVAILABLE` / `UNCONFIRMED`: required input missing
+
+Examples:
+- Rates above 4.45% => `Rates: ACTIVE ... already above 4.45%`
+- WTI +1% to +3% => `Oil: ELEVATED`
+- VIX unavailable => `Volatility: UNCONFIRMED`
+
+---
+
 ## Applied News Stack
 
 Morning briefings can include a compact deterministic **Applied News Stack**:

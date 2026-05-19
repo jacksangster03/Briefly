@@ -234,30 +234,35 @@ def build_trigger_board(
     cooled: list[str] = []
 
     if ten_y is None:
-        watch.append("US 10Y unavailable; monitor rates confirmation once live quotes return.")
+        watch.append("Rates: UNAVAILABLE. US 10Y quote missing; rates-pressure confirmation incomplete.")
     elif ten_y >= 4.45:
-        active.append(f"US 10Y is above 4.45% ({ten_y:.2f}%), keeping pressure on duration/growth multiples.")
+        zone = "4.70%" if ten_y < 4.70 else "4.80%"
+        active.append(
+            f"Rates: ACTIVE. US 10Y is {ten_y:.2f}%, already above 4.45%; valuation-sensitive growth and duration remain under pressure. Next stress zone: {zone}."
+        )
     else:
-        watch.append(f"US 10Y above 4.45% would reinforce rates pressure (now {ten_y:.2f}%).")
+        watch.append(f"Rates: WATCH. US 10Y is {ten_y:.2f}%; a move above 4.45% would re-activate rates pressure.")
 
     if wti_pct is None:
-        watch.append("WTI unavailable; energy impulse confirmation pending.")
-    elif wti_pct >= 1.5:
-        active.append(f"WTI is elevated at {wti_pct:+.2f}%, reinforcing energy/inflation stress.")
+        watch.append("Oil: UNAVAILABLE. WTI quote missing; energy impulse confirmation pending.")
+    elif wti_pct >= 3.0:
+        active.append(f"Oil: ACTIVE SHOCK. WTI is {wti_pct:+.2f}% and confirms escalating energy/inflation pressure.")
+    elif wti_pct >= 1.0:
+        active.append(f"Oil: ELEVATED. WTI is {wti_pct:+.2f}%, keeping energy/inflation risk active but below escalation shock.")
     elif wti_pct <= -1.0:
-        cooled.append(f"Oil impulse cooled ({wti_pct:+.2f}%), reducing immediate energy-shock pressure.")
+        cooled.append(f"Oil: COOLED. WTI impulse eased ({wti_pct:+.2f}%), reducing immediate energy-shock pressure.")
     else:
-        watch.append(f"WTI above +1.50% would re-escalate energy stress (now {wti_pct:+.2f}%).")
+        watch.append(f"Oil: WATCH. WTI is {wti_pct:+.2f}%; a move above +1.00% would re-elevate energy stress.")
 
     if vix_level is None:
-        watch.append("VIX unavailable; volatility confirmation incomplete.")
+        watch.append("Volatility: UNCONFIRMED. VIX unavailable, so market-stress confirmation is incomplete.")
     elif vix_level >= 20:
-        active.append(f"VIX at {vix_level:.2f} confirms broader risk-off pressure.")
+        active.append(f"Volatility: ACTIVE. VIX is {vix_level:.2f}, confirming broader risk stress.")
     else:
-        cooled.append(f"VIX remains contained at {vix_level:.2f}; broad stress confirmation is limited.")
+        cooled.append(f"Volatility: CONTAINED. VIX is {vix_level:.2f}; this is not a panic tape.")
 
     if regional_avg is not None and regional_avg < -0.5:
-        active.append(f"Regional average move {regional_avg:+.2f}% keeps downside breadth in focus.")
+        active.append(f"Regional split: ACTIVE. Regional average is {regional_avg:+.2f}%, keeping downside breadth risk in focus.")
 
     return {"active": active[:4], "watch": watch[:4], "cooled": cooled[:3]}
 
@@ -299,6 +304,21 @@ def _session_sentence(
                 or (russell is not None and spx is not None and russell < spx)
             )
         ):
+            if session_key == "europe_midday":
+                return (
+                    f"{prefix}: Europe is carrying the tape while US growth/small caps lag, but this is not clean risk-on because "
+                    "rates remain above pressure thresholds and leadership quality is uneven."
+                )
+            if session_key == "us_pre_open":
+                return (
+                    f"{prefix}: Europe remains firmer but US setup is rates-sensitive; with 10Y above pressure levels, "
+                    "US open risk still skews toward a valuation-led fade."
+                )
+            if session_key == "us_intraday_risk":
+                return (
+                    f"{prefix}: US reaction is confirming weaker quality under high rates; Europe still leads, "
+                    "so this remains regional split rather than synchronized risk-on."
+                )
             return (
                 f"{prefix}: rates are the main macro pressure point, but the equity reaction is regionally split "
                 f"rather than broad risk-off; Europe is firmer while US growth/small caps lag."

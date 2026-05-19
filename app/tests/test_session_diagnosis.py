@@ -32,8 +32,8 @@ def test_trigger_board_active_watch_cooled():
     board = diag.trigger_board
     assert board["active"]
     assert board["watch"] or board["cooled"]
-    assert any("US 10Y is above 4.45%" in line for line in board["active"])
-    assert any("cooled" in line.lower() for line in board["cooled"])
+    assert any("Rates: ACTIVE" in line for line in board["active"])
+    assert any("COOLED" in line for line in board["cooled"])
 
 
 def test_six_sessions_have_distinct_prefix():
@@ -64,7 +64,7 @@ def test_geo_headline_vs_market_confirmation_split_when_vix_missing():
 def test_formatter_uses_trigger_board_labels():
     briefing = _briefing(session_key="closing_wrap")
     briefing.trigger_board = {
-        "active": ["US 10Y is above 4.45%, keeping pressure on duration/growth multiples."],
+        "active": ["Rates: ACTIVE. US 10Y is 4.62%, already above 4.45%; valuation-sensitive growth and duration remain under pressure."],
         "watch": [],
         "cooled": [],
     }
