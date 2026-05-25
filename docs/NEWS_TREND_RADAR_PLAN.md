@@ -55,3 +55,46 @@
   - asset transmission confirms (oil/VIX/gold/FX) **or**
   - portfolio/watchlist exposure relevance is high.
 - If confirmation is missing, keep output in “headline risk elevated, market confirmation incomplete” state.
+
+---
+
+## Trusted Source Hierarchy and Integration Plan
+
+### Principle: API and RSS first, scraping last
+
+All news ingestion follows a strict tier order. Scraping is permitted only for sources that explicitly allow it (via robots.txt or explicit licence) and only after API and RSS coverage has been exhausted for that source.
+
+### Source Tiers
+
+| Tier | Type | Examples | Authority in output |
+|---|---|---|---|
+| 1 | Official filings, regulators, central banks | SEC EDGAR, ECB, FRED, BIS, FDA | Highest: directional authority |
+| 2 | High-trust wires and major financial data providers | Reuters RSS, AP, Bloomberg (licensed), Finnhub news | High: primary confirmation |
+| 3 | Secondary aggregators, sector journals | MarketWatch RSS, Seeking Alpha (licensed tier), STAT News | Supporting: adds context |
+| 4 | Low-trust commentary, opinion, social signals | Twitter/X, Reddit, aggregated blogs | Context only: never authority |
+
+### Causal Channel Mapping
+
+Before publishing a news-driven signal, the system checks for causal transmission evidence:
+
+- Oil spike news: check WTI/Brent price move confirms direction.
+- Rate/inflation news: check US 10Y change confirms direction.
+- Geopolitical news: check VIX, gold, and haven FX moves confirm stress signal.
+- Earnings news: check company price move or futures confirm reaction.
+
+If causal channel confirmation is absent, the signal is labelled “headline-only, unconfirmed by market”. It may appear in output but cannot drive alert eligibility.
+
+### Guardrail: Headline Density is Not Market Confirmation
+
+Headline density (many sources covering the same topic) raises the cluster_growth and novelty scores but does NOT constitute “market-confirmed” risk. A dense news cluster with no asset-price confirmation is labelled “headline risk elevated; market confirmation incomplete”.
+
+This prevents a surge of geopolitical headlines from generating a false “market stress” signal when equities, VIX, and rates are unmoved.
+
+### Scraping Policy
+
+Scraping is permitted only:
+- For sources where robots.txt allows the relevant path.
+- For sources with explicit public data licences.
+- As a last-resort fallback after API and RSS fail for the same source.
+- Never for full article bodies when the source requires a subscription.
+- Never before a stable API or RSS feed has been implemented for that source.

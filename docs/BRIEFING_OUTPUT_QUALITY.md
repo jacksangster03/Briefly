@@ -4,6 +4,79 @@ This document describes the deterministic quality layer applied to every briefin
 
 ---
 
+## Holiday-aware Market Status
+
+**Module**: `app/markets/calendar.py`
+
+All exchange holiday logic is static and deterministic, with no live API calls. The 2026 tables cover NYSE, LSE, Xetra, and Euronext. Key rules:
+
+- NYSE (US cash) is CLOSED on Memorial Day (2026-05-25), UK Spring Bank Holiday also applies to LSE.
+- Xetra (DAX) and Euronext (CAC, EURO STOXX, IBEX) are OPEN on Whit Monday (2026-05-25); this date is NOT in their holiday tables.
+- `regional_market_status(dt_utc)` returns a dict with keys: `us_cash`, `uk_equities`, `continental_europe`, `asia`.
+- Possible values per key: `open`, `closed`, `holiday:<name>`, `pre_market`, `after_hours`, `weekend`, `partial:<detail>`.
+
+---
+
+## US Holiday Labelling
+
+On a US market holiday (NYSE closed):
+
+- The 13:30-15:25 CEST session window is re-titled "US Holiday / Europe Handoff" instead of "US Pre-Open Setup".
+- The market clock shows "US cash closed: Memorial Day" (or the relevant holiday name) instead of "Opening next: US cash".
+- The closing wrap is re-titled "Holiday / Next-Day Setup" when US cash was closed all day.
+- Data basis lines show "Friday close, not live (Memorial Day)" not "near-real-time" for US equities.
+- The desk read opens with "Holiday-thinned tape: ..." and names which markets are open and which are closed.
+- Portfolio P&L notes include: "US holdings based on Friday close due to Memorial Day".
+
+---
+
+## Europe Partial-Open Logic
+
+**Module**: `app/briefing/regional_lens.py`
+
+Europe is never labelled "unavailable" when continental index data (DAX, EURO STOXX, CAC, IBEX) is present.
+
+| UK status | Continental data | Europe status |
+|---|---|---|
+| Open | Any | "active" / "lead" / "monitor" (normal) |
+| Closed (holiday/weekend) | >= 1 valid input | "partial: UK closed, continental open" |
+| Closed | None | "unavailable" |
+
+The regional skew summary must not say "Europe unavailable" while simultaneously using Europe data in a region average.
+
+Asia prior/closed context is labelled as "prior_closed_context", not "unavailable", when closed-session values are present.
+
+---
+
+## Weekend / Monday Setup Title Rule
+
+**Module**: `app/briefing/formatter.py`, `app/briefing/email_formatter.py`
+
+Briefing titles use the local timezone date, not the UTC stored timestamp:
+
+- A briefing generated at 00:00 CEST (= 22:00 UTC Sunday) is formatted with local CEST date = Monday 25 May.
+- This prevents the title "Weekend Briefing | Sun 24 May" for a briefing whose local generation time is Monday 00:00.
+- Both `TelegramFormatter` and `EmailFormatter` convert `generated_at` to the profile timezone before calling `.strftime("%a %d %b")`.
+- `session_mode` (set from UTC weekday in the generator) is cross-checked against the local weekday; if they disagree, the local weekday takes priority for title selection.
+
+---
+
+## User-Facing Desk-Read Rules
+
+**Module**: `app/briefing/email_formatter.py` (`_top_desk_read_lines`)
+
+Rules that apply to every desk-read line:
+
+1. No "rates score +X.XX" in user-facing output. Internal scores appear only in diagnosis logs.
+2. No "regional unavailable" in user-facing text. If regional data is absent, the line is omitted or replaced with "regional data pending".
+3. On a US holiday: desk read opens with "Holiday-thinned tape: ..." and states which markets are open and closed in plain language.
+4. If geo headline risk is high (ELEVATED/HIGH/EXTREME) but VIX is unavailable, the geo lens line appends: "(note: VIX unavailable, market confirmation of geo risk is incomplete)".
+5. Portfolio posture on a US holiday appends: "(US holdings based on Friday close due to Memorial Day)" or the relevant holiday name.
+
+---
+
+---
+
 ## Quality guard (`BriefingQualityGuard`)
 
 **Module**: `app/briefing/quality_guard.py`

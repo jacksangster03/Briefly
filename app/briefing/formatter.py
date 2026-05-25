@@ -153,15 +153,26 @@ class TelegramFormatter:
         (split if exceeding Telegram's 4096 char limit).
         """
         sections = []
-        is_weekend = briefing.session_mode in {"saturday", "sunday"}
 
-        # Header
-        date_str = briefing.generated_at.strftime("%a %d %b %Y")
+        # Convert UTC generated_at to local timezone before determining day/title.
+        # A briefing generated at 00:00 CEST (= 22:00 UTC Sunday) must show
+        # Monday's date and a non-weekend header, not "Sun 24 May".
+        gen = briefing.generated_at
+        if gen.tzinfo is None:
+            from datetime import timezone as _tz
+            gen = gen.replace(tzinfo=_tz.utc)
+        local_gen = gen.astimezone(self.local_tz)
+        local_weekday = local_gen.weekday()  # 0=Mon, 6=Sun
+
+        is_weekend = briefing.session_mode in {"saturday", "sunday"} and local_weekday >= 5
+
+        # Header: use local date to avoid cross-midnight UTC artefacts.
+        date_str = local_gen.strftime("%a %d %b %Y")
         if briefing.session_title and briefing.session_key not in {"morning", ""}:
             header = briefing.session_title.upper()
-        elif briefing.session_mode == "saturday":
+        elif briefing.session_mode == "saturday" and local_weekday == 5:
             header = SECTION_HEADERS["weekend_title_saturday"]
-        elif briefing.session_mode == "sunday":
+        elif briefing.session_mode == "sunday" and local_weekday == 6:
             header = SECTION_HEADERS["weekend_title_sunday"]
         else:
             header = SECTION_HEADERS["morning_title"]

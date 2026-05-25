@@ -331,13 +331,24 @@ def _session_sentence(
     if primary_driver == "risk_off_confirmation":
         return f"{prefix}: risk-off confirmation is broad across regions and volatility."
 
-    reg = "unavailable" if regional_avg is None else f"{regional_avg:+.2f}%"
-    oil_desc = "unavailable" if wti_pct is None else f"{wti_pct:+.2f}%"
-    vix_desc = "unavailable" if not vix_available else "available"
-    return (
-        f"{prefix}: mixed cross-asset signals (regional {reg}, rates score {rates_pressure_score:+.2f}, "
-        f"oil {oil_desc}, geo {geo_level or 'n/a'}, VIX {vix_desc})."
-    )
+    # Build a plain-language mixed-signal summary without internal score values.
+    parts: list[str] = []
+    if regional_avg is not None:
+        parts.append(f"regional average {regional_avg:+.2f}%")
+    if rates_pressure_score >= 1.0:
+        parts.append("rates above pressure threshold")
+    elif rates_pressure_score >= 0.5:
+        parts.append("rates near pressure threshold")
+    if wti_pct is not None and abs(wti_pct) >= 1.0:
+        parts.append(f"oil {wti_pct:+.2f}%")
+    if geo_level in {"ELEVATED", "HIGH", "EXTREME"} and not vix_available:
+        parts.append(f"geo risk {geo_level.lower()} but market confirmation incomplete (VIX unavailable)")
+    elif geo_level in {"ELEVATED", "HIGH", "EXTREME"}:
+        parts.append(f"geo risk {geo_level.lower()}")
+    if not vix_available:
+        parts.append("VIX unavailable")
+    body = "; ".join(parts) if parts else "cross-asset picture mixed"
+    return f"{prefix}: mixed signals: {body}."
 
 
 def _major_us_index_moves(briefing: MorningBriefing) -> tuple[float | None, float | None, float | None, float | None]:

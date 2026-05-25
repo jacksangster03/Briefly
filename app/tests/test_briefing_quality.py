@@ -672,3 +672,180 @@ class TestRatesMacroTapeSuppressedWhenInsufficientData:
         if result:
             assert "RATES & MACRO TAPE" in result
         # The test is that it does not crash and obeys its own rules
+
+
+# ---------------------------------------------------------------------------
+# 17. Holiday-aware desk-read quality tests
+# ---------------------------------------------------------------------------
+
+class TestHolidayDeskRead:
+    """Desk-read lines on a US market holiday must follow holiday wording rules."""
+
+    def _make_holiday_briefing(self) -> MorningBriefing:
+        """Briefing generated at 2026-05-25 15:00 UTC (Memorial Day)."""
+        from datetime import timezone as _tz
+        gen = datetime(2026, 5, 25, 15, 0, tzinfo=_tz.utc)
+        return MorningBriefing(
+            generated_at=gen,
+            session_key="us_holiday_handoff",
+            session_title="US Holiday / Europe Handoff",
+            market_setup=MarketSetup(
+                index_quotes=[
+                    QuoteData(symbol="SPY", display_name="S&P 500", current_price=500.0, change_percent=0.0),
+                    QuoteData(symbol="DAX", display_name="DAX", current_price=18000.0, change_percent=0.35),
+                ],
+                macro_quotes=[],
+            ),
+        )
+
+    def test_desk_read_does_not_contain_rates_score(self):
+        """Desk-read must not contain 'rates score' phrase."""
+        briefing = self._make_holiday_briefing()
+        formatter = EmailFormatter("Europe/Madrid")
+        lines = formatter._top_desk_read_lines(briefing)
+        full = " ".join(lines).lower()
+        assert "rates score" not in full, (
+            f"'rates score' found in desk-read: {lines}"
+        )
+
+    def test_desk_read_does_not_contain_regional_unavailable(self):
+        """Desk-read must not contain 'regional unavailable' phrase."""
+        briefing = self._make_holiday_briefing()
+        briefing.regional_skew_summary = "regional unavailable, rates score +0.40, oil -0.88%"
+        formatter = EmailFormatter("Europe/Madrid")
+        lines = formatter._top_desk_read_lines(briefing)
+        full = " ".join(lines).lower()
+        assert "regional unavailable" not in full, (
+            f"'regional unavailable' found in desk-read: {lines}"
+        )
+        assert "rates score" not in full, (
+            f"'rates score' found in desk-read after cleaning: {lines}"
+        )
+
+    def test_desk_read_mentions_us_holiday_on_holiday(self):
+        """Desk-read must mention the US holiday on Memorial Day."""
+        briefing = self._make_holiday_briefing()
+        formatter = EmailFormatter("Europe/Madrid")
+        lines = formatter._top_desk_read_lines(briefing)
+        full = " ".join(lines).lower()
+        assert "memorial day" in full or "holiday" in full, (
+            f"Holiday not mentioned in desk-read on Memorial Day: {lines}"
+        )
+
+    def test_desk_read_no_holiday_mention_on_normal_day(self):
+        """Desk-read must not mention holiday on a normal trading day."""
+        from datetime import timezone as _tz
+        gen = datetime(2026, 5, 26, 15, 0, tzinfo=_tz.utc)  # Regular Tuesday
+        briefing = MorningBriefing(
+            generated_at=gen,
+            session_key="us_intraday_risk",
+            market_setup=MarketSetup(index_quotes=[], macro_quotes=[]),
+        )
+        formatter = EmailFormatter("Europe/Madrid")
+        lines = formatter._top_desk_read_lines(briefing)
+        full = " ".join(lines).lower()
+        assert "memorial day" not in full
+
+
+# ---------------------------------------------------------------------------
+# 18. Weekend/Monday title tests
+# ---------------------------------------------------------------------------
+
+class TestWeekendMondayTitle:
+    """Generated 2026-05-25 00:00 CEST must not title 'Weekend Briefing | Sun 24 May'."""
+
+    def _make_monday_briefing(self) -> MorningBriefing:
+        """Briefing generated at 2026-05-25 00:00 CEST = 2026-05-24 22:00 UTC."""
+        from datetime import timezone as _tz
+        gen_utc = datetime(2026, 5, 24, 22, 0, tzinfo=_tz.utc)
+        # session_mode set from UTC weekday: UTC says Sunday (6), local CEST says Monday (0)
+        return MorningBriefing(
+            generated_at=gen_utc,
+            session_mode="sunday",  # incorrectly set from UTC weekday
+            session_key="morning",
+            session_title="Morning Briefing",
+        )
+
+    def test_email_subject_uses_local_date(self):
+        """Email subject must use Europe/Madrid local date, not UTC date."""
+        briefing = self._make_monday_briefing()
+        formatter = EmailFormatter("Europe/Madrid")
+        result = formatter.format_morning_briefing(briefing)
+        assert "Sun 24 May" not in result.subject, (
+            f"Expected Monday date in subject, got: {result.subject}"
+        )
+        assert "Mon 25 May" in result.subject, (
+            f"Expected 'Mon 25 May' in subject, got: {result.subject}"
+        )
+
+    def test_email_subject_no_weekend_briefing_label_for_monday(self):
+        """A briefing generated at Monday 00:00 CEST must not be titled 'Weekend Briefing'."""
+        briefing = self._make_monday_briefing()
+        formatter = EmailFormatter("Europe/Madrid")
+        result = formatter.format_morning_briefing(briefing)
+        assert "Weekend Briefing" not in result.subject, (
+            f"'Weekend Briefing' label must not appear for Monday briefing: {result.subject}"
+        )
+
+    def test_telegram_header_uses_local_date(self):
+        """Telegram header must use local date, not UTC date."""
+        from app.briefing.formatter import TelegramFormatter
+        briefing = self._make_monday_briefing()
+        formatter = TelegramFormatter("Europe/Madrid")
+        output = "\n".join(formatter.format_morning_briefing(briefing))
+        assert "Sun 24 May" not in output, (
+            f"Expected Monday date in Telegram output, found Sunday: {output[:200]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 19. Regional lens consistency tests
+# ---------------------------------------------------------------------------
+
+class TestRegionalLensConsistency:
+    """Europe must not be 'unavailable' when DAX/EURO STOXX data exists."""
+
+    def _make_europe_quotes(self) -> list[QuoteData]:
+        return [
+            QuoteData(symbol="DAX", display_name="DAX", current_price=18000.0, change_percent=0.35),
+            QuoteData(symbol="^STOXX50E", display_name="EURO STOXX 50", current_price=4800.0, change_percent=0.2),
+        ]
+
+    def test_europe_not_unavailable_when_dax_and_stoxx_present(self):
+        """Europe status must not be 'unavailable' when DAX + EURO STOXX data exists."""
+        from app.briefing.regional_lens import build_regional_lens
+        quotes = self._make_europe_quotes()
+        regions, skew = build_regional_lens(index_quotes=quotes, global_news=[])
+        europe = next(r for r in regions if r["region"] == "Europe")
+        assert europe["direction"] != "unavailable", (
+            f"Europe should not be unavailable when DAX + STOXX data present: {europe}"
+        )
+        assert europe["status"] != "unavailable", (
+            f"Europe status should not be 'unavailable': {europe}"
+        )
+
+    def test_europe_partial_when_uk_closed_dax_valid(self):
+        """When UK is closed and DAX is valid, Europe status should be 'partial'."""
+        from app.briefing.regional_lens import _europe_region_card
+        from unittest.mock import patch
+        quotes = [
+            QuoteData(symbol="DAX", display_name="DAX", current_price=18000.0, change_percent=0.35),
+        ]
+        # Patch _uk_closed_today to return True
+        with patch("app.briefing.regional_lens._uk_closed_today", return_value=True):
+            card = _europe_region_card(quotes, [])
+        assert card["status"] == "partial", (
+            f"Expected 'partial' when UK closed + DAX valid, got: {card}"
+        )
+
+    def test_regional_skew_not_contradictory(self):
+        """Regional skew must not say 'Europe unavailable' when using Europe data."""
+        from app.briefing.regional_lens import build_regional_lens
+        quotes = self._make_europe_quotes() + [
+            QuoteData(symbol="SPY", display_name="S&P 500", current_price=500.0, change_percent=0.1),
+        ]
+        regions, skew = build_regional_lens(index_quotes=quotes, global_news=[])
+        # Skew should not contain "unavailable" when data is present
+        assert "unavailable" not in skew.lower() or "Asia" in skew, (
+            f"Skew contains 'unavailable' while Europe data is present: {skew}"
+        )

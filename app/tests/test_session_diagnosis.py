@@ -110,3 +110,48 @@ def test_positive_contribution_not_called_drag():
     spec = _pnl_waterfall_spec(quotes, profile)
     caption = str(spec.get("caption") or "")
     assert "largest drag" not in caption.lower()
+
+
+# ---------------------------------------------------------------------------
+# Holiday-aware session diagnosis tests
+# ---------------------------------------------------------------------------
+
+def test_no_rates_score_in_user_facing_diagnosis():
+    """The one_sentence_diagnosis must not contain 'rates score' text."""
+    briefing = _briefing(session_key="us_pre_open")
+    briefing.canonical_prices = {
+        "US10Y": {"value": 4.52, "change": 0.04},
+        "WTI": {"change_percent": -0.5},
+    }
+    diag = build_session_diagnosis(briefing)
+    assert "rates score" not in diag.one_sentence_diagnosis.lower(), (
+        f"'rates score' must not appear in user-facing output: {diag.one_sentence_diagnosis}"
+    )
+
+
+def test_mixed_signals_sentence_no_raw_score():
+    """Mixed-signals fallback must not include raw internal score values."""
+    briefing = _briefing(session_key="morning")
+    # Deliberately set no canonical prices to trigger mixed fallback
+    briefing.canonical_prices = {}
+    diag = build_session_diagnosis(briefing)
+    sentence = diag.one_sentence_diagnosis.lower()
+    # Must not include patterns like "rates score +0.40" or "rates score -0.40"
+    import re
+    assert not re.search(r"rates score [+\-]?\d+\.\d+", sentence), (
+        f"Raw score value found in diagnosis: {diag.one_sentence_diagnosis}"
+    )
+
+
+def test_geo_high_vix_unavailable_flagged_in_plain_language():
+    """When geo risk is high and VIX unavailable, diagnosis mentions incomplete confirmation."""
+    briefing = _briefing(session_key="morning")
+    briefing.geo_risk_level = "HIGH"
+    briefing.quote_freshness = {"VIX": {"freshness_state": "unavailable"}}
+    briefing.canonical_prices = {}
+    diag = build_session_diagnosis(briefing)
+    # The mixed-signals sentence should mention incomplete confirmation
+    sentence = diag.one_sentence_diagnosis.lower()
+    assert "incomplete" in sentence or "unavailable" in sentence, (
+        f"Expected incomplete confirmation mention: {diag.one_sentence_diagnosis}"
+    )

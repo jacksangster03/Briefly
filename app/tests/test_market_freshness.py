@@ -268,3 +268,76 @@ class TestBrentStaleHandling:
         )
         flags = flags_from_briefing(briefing)
         assert flags["brent_stale"] is False
+
+
+# ---------------------------------------------------------------------------
+# Part 5: US holiday data freshness tests
+# ---------------------------------------------------------------------------
+
+class TestUSHolidayDataFreshness:
+    """On a US market holiday, US equity basis must never say near-real-time."""
+
+    def test_memorial_day_us_basis_is_not_near_real_time(self):
+        """build_data_basis_lines on Memorial Day must not say 'near-real-time' for US equities."""
+        # 2026-05-25 15:00 UTC: Memorial Day, NYSE closed
+        generated = datetime(2026, 5, 25, 15, 0, tzinfo=timezone.utc)
+        # Simulate a quote with a recent timestamp (as if provider returned something)
+        recent_ts = datetime(2026, 5, 25, 14, 30, tzinfo=timezone.utc)
+        us_q = _q("SPY", "S&P 500", recent_ts)
+
+        lines = build_data_basis_lines(
+            session_key="us_pre_open",
+            generated_at=generated,
+            timezone_name="Europe/Madrid",
+            index_quotes=[us_q],
+            macro_quotes=[],
+            watchlist_quotes=[],
+        )
+        full = " ".join(lines).lower()
+        # Must not claim live/near-real-time US equity data on a holiday.
+        # "not live" is acceptable (appears in "Friday close, not live").
+        # "live scan" is acceptable (news scan line).
+        sanitised = full.replace("not live", "").replace("live scan", "")
+        assert "near-real-time" not in sanitised, (
+            f"US equity basis should not be near-real-time on a holiday. Lines: {lines}"
+        )
+        assert "holiday" in full or "friday close" in full, (
+            f"US holiday context should appear in basis lines. Lines: {lines}"
+        )
+
+    def test_memorial_day_basis_includes_holiday_caveat(self):
+        """build_data_basis_lines on Memorial Day must include a holiday caveat line."""
+        generated = datetime(2026, 5, 25, 15, 0, tzinfo=timezone.utc)
+        recent_ts = datetime(2026, 5, 25, 14, 30, tzinfo=timezone.utc)
+        us_q = _q("SPY", "S&P 500", recent_ts)
+
+        lines = build_data_basis_lines(
+            session_key="morning",
+            generated_at=generated,
+            timezone_name="Europe/Madrid",
+            index_quotes=[us_q],
+            macro_quotes=[],
+            watchlist_quotes=[],
+        )
+        # At least one line must mention the holiday
+        holiday_lines = [l for l in lines if "memorial day" in l.lower() or "holiday" in l.lower()]
+        assert holiday_lines, f"Expected at least one holiday caveat line. Lines: {lines}"
+
+    def test_non_holiday_weekday_us_basis_can_be_near_real_time(self):
+        """On a regular trading day, near-real-time US basis is valid."""
+        # 2026-05-26 15:00 UTC: regular Tuesday
+        generated = datetime(2026, 5, 26, 15, 0, tzinfo=timezone.utc)
+        recent_ts = datetime(2026, 5, 26, 14, 50, tzinfo=timezone.utc)  # 10 min ago
+        us_q = _q("SPY", "S&P 500", recent_ts)
+
+        lines = build_data_basis_lines(
+            session_key="us_intraday_risk",
+            generated_at=generated,
+            timezone_name="Europe/Madrid",
+            index_quotes=[us_q],
+            macro_quotes=[],
+            watchlist_quotes=[],
+        )
+        full = " ".join(lines).lower()
+        # Should NOT have a holiday caveat on a normal day
+        assert "memorial day" not in full
