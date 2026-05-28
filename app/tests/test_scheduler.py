@@ -505,6 +505,11 @@ def test_scheduler_live_send_path_calls_create_session_snapshot(
                 session_key=session_key,
                 session_title=session_title,
                 data_freshness={"Market Prices": "2026-05-06 08:00 CEST"},
+                # Pre-classify as live+fresh so the freshness gate does not suppress
+                market_data_status="live",
+                news_status="fresh",
+                fresh_news_count=1,
+                fresh_news_materiality_score=3.0,
             )
 
     class _StubTelegramFormatter:

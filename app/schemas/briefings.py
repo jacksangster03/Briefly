@@ -119,6 +119,15 @@ class MorningBriefing(BaseModel):
     stale_snapshot_used: bool = False
     stale_snapshot_session: str | None = None
     stale_snapshot_time: str | None = None
+    # Freshness status contract
+    market_data_status: str = "live"   # live | partial | stale_snapshot | unavailable
+    news_status: str = "fresh"         # fresh | stale | empty | provider_outage
+    briefing_mode: str = "normal"      # normal | market_only | news_only | degraded_context | suppressed
+    suppress_reason: str = ""
+    last_valid_market_snapshot_session: str = ""
+    last_valid_market_snapshot_time: str = ""
+    fresh_news_count: int = 0
+    fresh_news_materiality_score: float = 0.0
 
 
 class IntradayUpdate(BaseModel):

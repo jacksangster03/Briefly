@@ -176,6 +176,12 @@ class TelegramFormatter:
             header = SECTION_HEADERS["weekend_title_sunday"]
         else:
             header = SECTION_HEADERS["morning_title"]
+        briefing_mode = getattr(briefing, "briefing_mode", "normal")
+
+        # Mode-specific title override for news_only
+        if briefing_mode == "news_only":
+            header = f"FRESH NEWS UPDATE — {header}"
+
         tldr = briefing.dominant_tape_driver or briefing.market_setup_analysis or ""
         if tldr:
             tldr = tldr[:130] + ("…" if len(tldr) > 130 else "")
@@ -183,7 +189,40 @@ class TelegramFormatter:
             f"<b>{header}</b>\n{date_str}"
             + (f"\n<i>{tldr}</i>" if tldr else "")
         )
-        if briefing.market_data_outage:
+
+        # Degraded context banner (covers both degraded_context mode and legacy stale snapshot)
+        if briefing_mode == "degraded_context":
+            snap_sess = (
+                getattr(briefing, "stale_snapshot_session", "")
+                or getattr(briefing, "last_valid_market_snapshot_session", "")
+                or "prior session"
+            )
+            snap_time = (
+                getattr(briefing, "stale_snapshot_time", "")
+                or getattr(briefing, "last_valid_market_snapshot_time", "")
+                or "unknown time"
+            )
+            sections.append(
+                f"⚠️ <b>LIVE MARKET DATA DEGRADED</b>\n"
+                f"Provider fetch failed. Using {snap_sess} snapshot ({snap_time}). "
+                f"Treat all levels as stale."
+            )
+        elif briefing_mode == "news_only":
+            snap_sess = (
+                getattr(briefing, "last_valid_market_snapshot_session", "")
+                or getattr(briefing, "stale_snapshot_session", "")
+            )
+            snap_time = (
+                getattr(briefing, "last_valid_market_snapshot_time", "")
+                or getattr(briefing, "stale_snapshot_time", "")
+            )
+            if snap_sess or snap_time:
+                sections.append(
+                    f"⚠️ Live market data unavailable. Last valid snapshot: "
+                    f"{snap_sess or 'prior session'} at {snap_time or 'unknown time'}. "
+                    f"Levels below are stale."
+                )
+        elif briefing.market_data_outage:
             sections.append(
                 "<b>DATA OUTAGE / PROVIDER DEGRADED</b>\n"
                 "Market data unavailable; no directional read generated. "

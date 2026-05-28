@@ -291,6 +291,23 @@ When live providers are unavailable in-cycle (for example DNS/network failure or
   - `provider outage (raw fetch 0)` when raw provider ingestion is zero
   - `X raw fetched, 0 selected after filters` when ingestion succeeded but ranking/suppression removed all candidates
 
+## Freshness-aware send gating
+
+The send-decision layer (`app/briefing/send_decision.py`) classifies every briefing before delivery using two status dimensions:
+
+- `market_data_status`: `live` | `partial` | `stale_snapshot` | `unavailable`
+- `news_status`: `fresh` | `stale` | `empty` | `provider_outage`
+
+Based on these, `make_send_decision()` assigns a `briefing_mode` and `should_send` flag:
+
+- `normal`: live/partial market + fresh news. Full send.
+- `market_only`: live/partial market + no fresh news. Send without news-led sections.
+- `degraded_context`: stale snapshot market + material fresh news. Send with stale caveat banner.
+- `news_only`: unavailable market + material fresh news. Send news sections only; suppress stale market analysis.
+- `suppressed`: degraded market + no material fresh news. Do not send; log with `skipped_degraded_no_fresh_data`.
+
+A stale snapshot briefing with no fresh news scores enough on the materiality scorer (because it sees market levels), but is now correctly suppressed by the freshness gate before delivery.
+
 ---
 
 ## Vertical intelligence shadow quality (Phase 1)

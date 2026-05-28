@@ -55,3 +55,22 @@ Then show last-known SPX/VIX/US10Y/WTI/watchlist with stale label.
 
 **Provider outage with no snapshot:**
 Show compact outage block. Suppress regime shift and portfolio transmission sections.
+
+## Send-Decision Matrix (Freshness-Aware Gating)
+
+| Market Data | News Status | Scheduled | Mode | Action |
+|---|---|---|---|---|
+| live / partial | fresh | yes | normal | send |
+| live / partial | stale/empty | yes | market_only | send |
+| stale_snapshot | fresh + material | yes | degraded_context | send with stale caveat |
+| unavailable | fresh + material | yes | news_only | send news only |
+| stale_snapshot / unavailable | no fresh news | yes | suppressed | do not send; log skipped_degraded_no_fresh_data |
+| any | any | dry-run | degraded_context | always render, never suppress |
+
+Stale snapshots provide context only. They are never the primary basis for a normal briefing send.
+
+`briefing_mode` field values: `normal`, `market_only`, `news_only`, `degraded_context`, `suppressed`.
+`market_data_status` field values: `live`, `partial`, `stale_snapshot`, `unavailable`.
+`news_status` field values: `fresh`, `stale`, `empty`, `provider_outage`.
+
+Suppressed sessions are logged to `SessionSendState` with `channel="suppressed"` and `error_message="suppressed: <reason>"`. They are distinct from failed deliveries (`success=False` with a real error).

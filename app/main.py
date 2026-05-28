@@ -873,6 +873,44 @@ def _record_delivery(
         session.add(record)
 
 
+def _record_suppressed_session(
+    *,
+    profile_name: str,
+    session_key: str,
+    local_date,
+    suppress_reason: str,
+    command_source: str,
+) -> None:
+    """Write a suppressed-session delivery log entry. Never raises."""
+    try:
+        from app.db.models import SessionSendState
+        from datetime import datetime as _dt, timezone as _tz
+        import os
+        now_utc = _dt.now(_tz.utc)
+        with get_session() as db_sess:
+            db_sess.add(SessionSendState(
+                profile_name=profile_name,
+                channel="suppressed",
+                session_key=session_key,
+                local_date=local_date,
+                replay_namespace="live",
+                message_type=f"session_brief:{session_key}",
+                idempotency_key=(
+                    f"{profile_name}:suppressed:session_brief:{session_key}"
+                    f":{local_date.isoformat()}:live:suppressed_{now_utc.strftime('%H%M%S')}"
+                ),
+                in_progress=False,
+                success=False,
+                command_source=command_source,
+                process_id=os.getpid(),
+                created_at=now_utc,
+                updated_at=now_utc,
+                error_message=f"suppressed: {suppress_reason}"[:500],
+            ))
+    except Exception:
+        pass  # suppression logging is best-effort
+
+
 def _load_recent_sent_tracking_ids(lookback_hours: int = 24) -> set[str]:
     """Return recently delivered event tracking IDs from SentMessage rows."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
@@ -1413,6 +1451,34 @@ def run_morning_briefing(
                 )
                 run_breaking_check(settings)
                 return
+
+    # Freshness-aware send gating: suppress stale-snapshot briefings without fresh news.
+    from app.briefing.send_decision import classify_briefing_statuses, make_send_decision
+    classify_briefing_statuses(briefing)
+    _is_scheduled = command_source == "scheduler"
+    _is_dry_run = getattr(backfill_context, "is_dry_run", False) if backfill_context else False
+    _send_dec = make_send_decision(
+        briefing,
+        is_scheduled=_is_scheduled,
+        is_dry_run=_is_dry_run,
+    )
+    briefing.briefing_mode = _send_dec.mode
+    if not _send_dec.should_send and _is_scheduled:
+        logger.info(
+            "Freshness gate: suppressed | session=%s log_label=%s reason=%s",
+            briefing.session_key,
+            _send_dec.log_label,
+            _send_dec.suppress_reason,
+        )
+        # Record suppression in delivery log (non-failing state)
+        _record_suppressed_session(
+            profile_name=profile.name,
+            session_key=briefing.session_key,
+            local_date=local_now.date(),
+            suppress_reason=_send_dec.suppress_reason,
+            command_source=command_source,
+        )
+        return
 
     formatter = TelegramFormatter(profile.timezone)
     messages = formatter.format_morning_briefing(briefing)
