@@ -116,6 +116,9 @@ class MorningBriefing(BaseModel):
     events_sent: int = 0
     fx_pulse_section: str = ""
     fx_materiality_score: int = 0
+    stale_snapshot_used: bool = False
+    stale_snapshot_session: str | None = None
+    stale_snapshot_time: str | None = None
 
 
 class IntradayUpdate(BaseModel):

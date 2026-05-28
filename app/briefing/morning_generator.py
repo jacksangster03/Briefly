@@ -438,6 +438,43 @@ class MorningBriefingGenerator:
         # 1. Market setup (quotes for indices + macro instruments)
         briefing.market_setup = self._build_market_setup()
 
+        # Snapshot fallback: if live providers returned nothing, try prior session.
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            from app.data_sources.quote_fallback import load_snapshot_fallback_quotes
+            _local_date = now.astimezone(_ZI(self.profile.timezone or self.settings.timezone or "Europe/Madrid")).date()
+            _all_live_quotes = (
+                list(briefing.market_setup.index_quotes)
+                + list(briefing.market_setup.macro_quotes)
+            )
+            if not _all_live_quotes:
+                _fb_quotes, _fb_session, _fb_time = load_snapshot_fallback_quotes(
+                    profile_name=self.profile.name,
+                    session_key=session_key,
+                    local_date=_local_date,
+                )
+                if _fb_quotes:
+                    # Split fallback quotes into index vs macro by heuristic
+                    _index_tokens = ("S&P", "NASDAQ", "DOW", "RUSSELL", "STOXX", "DAX", "NIKKEI", "VIX", "FTSE", "CAC", "IBEX")
+                    _macro_tokens = ("WTI", "BRENT", "GOLD", "USD", "BTC", "NG", "CRUDE", "10Y", "2Y")
+                    for _fbq in _fb_quotes:
+                        _upper = ((_fbq.display_name or "") + " " + (_fbq.symbol or "")).upper()
+                        if any(t in _upper for t in _index_tokens):
+                            briefing.market_setup.index_quotes.append(_fbq)
+                        elif any(t in _upper for t in _macro_tokens):
+                            briefing.market_setup.macro_quotes.append(_fbq)
+                        else:
+                            briefing.market_setup.index_quotes.append(_fbq)
+                    briefing.stale_snapshot_session = _fb_session
+                    briefing.stale_snapshot_time = _fb_time
+                    briefing.stale_snapshot_used = True
+                    logger.warning(
+                        "Live market data empty; using stale snapshot from session=%s time=%s",
+                        _fb_session, _fb_time,
+                    )
+        except Exception:
+            logger.debug("Snapshot fallback load failed", exc_info=True)
+
         # 2. Macro context: FRED core + ECB/Eurostat when configured
         briefing.macro_context = self.macro_svc.get_morning_macro()
         briefing.macro_context.extend(self.macro_svc.get_ecb_snapshot())
@@ -883,6 +920,17 @@ class MorningBriefingGenerator:
             briefing.data_freshness["Market data"] = "outage"
             briefing.data_basis_lines.append("Market data unavailable; no directional read generated.")
             briefing.data_basis_lines.append("Provider data outage; see diagnostics.")
+        elif getattr(briefing, "stale_snapshot_used", False):
+            _snap_sess = getattr(briefing, "stale_snapshot_session", "prior session")
+            _snap_time = getattr(briefing, "stale_snapshot_time", "unknown time")
+            _degrade_banner = (
+                f"LIVE DATA DEGRADED: provider fetch failed at "
+                f"{now.astimezone(ZoneInfo(self.profile.timezone or 'Europe/Madrid')).strftime('%H:%M')}; "
+                f"using latest valid snapshot from {_snap_time} ({_snap_sess} session). "
+                f"Treat levels as stale until provider recovery."
+            )
+            briefing.data_freshness["Market data"] = "stale_snapshot"
+            briefing.data_basis_lines.insert(0, _degrade_banner)
 
         if briefing.news_data_outage:
             briefing.data_freshness["News pipeline"] = "provider_outage_raw_fetch_0"
@@ -996,10 +1044,23 @@ class MorningBriefingGenerator:
             self._trim_market_snapshot_quotes(briefing, max_index=8, max_macro=5)
             return
 
-        if key in {"us_intraday_risk", "into_close"}:
+        if key == "us_intraday_risk":
             briefing.global_news = list(briefing.global_news[:2])
             briefing.top_themes = list(briefing.top_themes[:2])
             briefing.portfolio_focus = list(briefing.portfolio_focus[:3])
+            briefing.watchlist_events = list(briefing.watchlist_events[:4])
+            briefing.sector_scan = []
+            briefing.macro_context = []
+            briefing.commodity_strip = list(briefing.commodity_strip[:3])
+            self._trim_market_snapshot_quotes(briefing, max_index=6, max_macro=4)
+            if briefing.healthcare_intelligence and briefing.healthcare_intelligence.items:
+                briefing.healthcare_intelligence.items = list(briefing.healthcare_intelligence.items[:3])
+            return
+
+        if key == "into_close":
+            briefing.global_news = list(briefing.global_news[:3])
+            briefing.top_themes = list(briefing.top_themes[:2])
+            briefing.portfolio_focus = list(briefing.portfolio_focus[:4])
             briefing.watchlist_events = list(briefing.watchlist_events[:4])
             briefing.sector_scan = []
             briefing.macro_context = []

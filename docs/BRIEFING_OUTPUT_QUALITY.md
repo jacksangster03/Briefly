@@ -653,3 +653,29 @@ Each line includes:
 - confirmation state and source count
 
 Low-signal items are not force-filled just to populate sections.
+
+---
+
+## Provider Outage and Stale Snapshot Behaviour
+
+### Fallback Hierarchy
+Described in `docs/SESSION_DESIGN.md`.
+
+### Internal Score Leakage Guard
+The following strings must NEVER appear in user-facing output:
+- "rates score" (raw internal score values)
+- "regional unavailable" (when regional data exists)
+- "oil unavailable" (use natural language: "oil data is currently unavailable")
+- "geo LOW" as raw tuple text
+- "VIX available" as an internal flag string
+
+### Brent Stale Handling
+If Brent is unchanged across sessions while WTI moves >=0.25%, Brent is marked as stale/provider-held. The caveat appears at most once per email.
+
+### Cross-Asset Impulse Thresholds
+Minimum move required to qualify as "largest impulse":
+- Yields: >= 2bp
+- Commodities: >= 0.5%
+- VIX: >= 1%
+- FX: >= 0.25%
+If no impulse passes threshold: "Cross-asset impulse is muted; no single macro market is leading."

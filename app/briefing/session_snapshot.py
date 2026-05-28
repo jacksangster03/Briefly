@@ -239,10 +239,10 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
         if is_rate:
             bp = round(d * 100)
             abs_bp = abs(bp)
-            if abs_bp < 1:
+            if abs_bp < 2:
                 if suppress_if_flat and not strategic:
                     return
-                qualifier = "unchanged but still important" if strategic else "flat"
+                qualifier = "unchanged but still important" if strategic else "flat (< 2bp)"
             elif abs_bp < 3:
                 qualifier = "little changed"
             else:
@@ -321,4 +321,7 @@ def build_what_changed_lines(*, previous: dict[str, float], current: dict[str, f
             lines.append("Brent: unchanged while WTI moved; treat Brent as stale/provider-held context.")
     if magnitudes and max(magnitudes) < 0.05:
         return ["Little changed since prior session: cross-asset signals stable."]
+    # Muted tape: if no meaningful impulse lines were generated, say so
+    if not lines:
+        return ["Cross-asset impulse is muted; no single macro market is leading."]
     return lines[:8]

@@ -189,6 +189,14 @@ class TelegramFormatter:
                 "Market data unavailable; no directional read generated. "
                 "Provider data outage; see diagnostics."
             )
+        elif getattr(briefing, "stale_snapshot_used", False):
+            snap_time = getattr(briefing, "stale_snapshot_time", "prior session")
+            snap_sess = getattr(briefing, "stale_snapshot_session", "prior session")
+            sections.append(
+                f"⚠️ <b>LIVE DATA DEGRADED</b>\n"
+                f"Provider fetch failed; using {snap_sess} snapshot ({snap_time}). "
+                f"Treat all levels as stale until providers recover."
+            )
 
         session_key = (briefing.session_key or "morning").lower()
         is_morning = session_key == "morning"

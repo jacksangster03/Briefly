@@ -137,6 +137,7 @@ def run_pre_send_lints(
     warnings.extend(_lint_index_level_integrity(briefing))
     warnings.extend(_lint_rates_direction_conflict(briefing))
     warnings.extend(_lint_chart_commodity_consistency(briefing))
+    warnings.extend(_lint_news_ticker_relevance(briefing))
     return warnings
 
 
@@ -602,6 +603,35 @@ def _lint_chart_commodity_consistency(briefing: MorningBriefing) -> list[str]:
                     _check("BRENT", observed, "cross_asset")
                 elif "GOLD" in name:
                     _check("GOLD", observed, "cross_asset")
+    return warnings
+
+
+def _lint_news_ticker_relevance(briefing: MorningBriefing) -> list[str]:
+    """Guard against generic consumer stories mapped to wrong tickers."""
+    warnings: list[str] = []
+    sections = [
+        ("top_themes", briefing.top_themes),
+        ("global_news", briefing.global_news),
+        ("watchlist_events", briefing.watchlist_events),
+    ]
+    for section_name, events in sections:
+        for evt in (events or []):
+            title_lower = (evt.title or "").lower()
+            # "custard apple" / "custard apples" must not map to AAPL
+            if "custard" in title_lower and "AAPL" in (evt.tickers or []):
+                warnings.append(
+                    f"[{section_name}] Irrelevant consumer story mapped to AAPL: '{(evt.title or '')[:60]}'"
+                )
+            # Glasses/eyewear/vision/warby stories must mention Google/Alphabet to map to GOOGL
+            if (
+                any(kw in title_lower for kw in ("glasses", "eyewear", "vision", "warby"))
+                and "GOOGL" in (evt.tickers or [])
+            ):
+                body = f"{evt.title} {evt.summary}".lower()
+                if "alphabet" not in body and "google" not in body:
+                    warnings.append(
+                        f"[{section_name}] Weak GOOGL mapping for glasses story: '{(evt.title or '')[:60]}'"
+                    )
     return warnings
 
 
