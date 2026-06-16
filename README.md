@@ -4,6 +4,29 @@ Briefly is a local-first portfolio intelligence platform. It generates structure
 
 ---
 
+## Documentation Index
+
+This README is the primary reference. For deeper detail, see `docs/`:
+
+| Doc | What it's for |
+|---|---|
+| [`docs/BRIEFLY.md`](docs/BRIEFLY.md) | Master reference: full repo-grounded map of every module, schema, config, and data flow. Start here for system-wide detail beyond this README. |
+| [`docs/SESSION_DESIGN.md`](docs/SESSION_DESIGN.md) | Per-session roles, content rules, and the freshness-aware send-decision matrix. |
+| [`docs/deployment.md`](docs/deployment.md) | Always-on deployment profile: Docker, scheduler process, ops details. |
+| [`docs/API_SETUP.md`](docs/API_SETUP.md) | Local API/key setup for vertical intelligence sources (current; supersedes the old `api_keys.md`). |
+| [`docs/BRIEFING_OUTPUT_QUALITY.md`](docs/BRIEFING_OUTPUT_QUALITY.md) | Degraded-briefing gating by freshness and materiality. |
+| [`docs/FX_DOLLAR_PULSE.md`](docs/FX_DOLLAR_PULSE.md) | Profile-aware FX basket and Dollar Pulse module detail. |
+| [`docs/roadmap.md`](docs/roadmap.md) | Phase-by-phase technical development history (completed work log, not a forward plan despite the filename). |
+| [`docs/trading_safety.md`](docs/trading_safety.md) | Guardrails for the (currently deferred) Trading Lab module. |
+| [`docs/NEWS_TREND_RADAR_PLAN.md`](docs/NEWS_TREND_RADAR_PLAN.md), [`docs/LLM_VERTICAL_SHADOW_PLAN.md`](docs/LLM_VERTICAL_SHADOW_PLAN.md), [`docs/VERTICAL_INTELLIGENCE_API_PLAN.md`](docs/VERTICAL_INTELLIGENCE_API_PLAN.md) | Forward-looking plans for the vertical intelligence framework (healthcare/geopolitics/ai_tech). Partially implemented; check `docs/BRIEFLY.md` Section 7 for current state before treating these as up to date. |
+| [`docs/UX_SIMPLIFICATION_PLAN.md`](docs/UX_SIMPLIFICATION_PLAN.md) | Web UI information-architecture plan. Most of the proposed structure (Command Centre, Portfolio, Macro, News Intelligence, Verticals, Diagnostics, Settings) already exists in `app/web/templates/`; treat as largely implemented and verify before acting on remaining items. |
+| [`docs/FUTURE_ENHANCEMENTS.md`](docs/FUTURE_ENHANCEMENTS.md) | Forward-looking enhancement ideas, not yet built. |
+| [`docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md`](docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md) | Strategy for evolving the news/research layer into a research agent. Forward-looking, not yet implemented. |
+
+Removed as outdated (superseded by the README and `docs/BRIEFLY.md`, or factually contradicted by the current code/config): `docs/architecture.md`, `docs/product_modules.md`, `docs/personalization.md`, `docs/provider_strategy.md`, `docs/scheduling.md`, `docs/setup.md`, `docs/api_keys.md`, `docs/message_examples.md`, `docs/README_RESTRUCTURE_PLAN.md`, `docs/AUDIT_CURRENT_STATE.md`, and the root `README_DRAFT.md`.
+
+---
+
 ## What Briefly does
 
 **Market Briefing** generates and delivers session-aware briefings across six canonical weekday windows: a morning overview, Europe and US intraday updates, and a closing wrap. Briefings cover market setup, macro context, news intelligence, portfolio-relevant themes, and breaking alerts.
