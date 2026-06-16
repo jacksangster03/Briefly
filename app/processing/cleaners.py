@@ -88,3 +88,18 @@ def strip_title_suffix(title: str) -> str:
 def strip_html(text: str) -> str:
     """Remove HTML tags from text."""
     return re.sub(r"<[^>]+>", "", text)
+
+
+def title_similarity(a: str, b: str) -> float:
+    """Jaccard similarity between two headlines' normalised token sets.
+
+    Returns 0.0 if either title is empty. 1.0 means identical token sets
+    (not necessarily identical strings: word order and punctuation don't
+    matter). Used to tell "same story, reworded" apart from "new story"
+    without relying on exact string equality.
+    """
+    tokens_a = set(normalise_for_comparison(a).split())
+    tokens_b = set(normalise_for_comparison(b).split())
+    if not tokens_a or not tokens_b:
+        return 0.0
+    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
