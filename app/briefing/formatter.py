@@ -1149,6 +1149,9 @@ class TelegramFormatter:
             "portfolio": "Portfolio",
             "event_risk": "Event Risk",
             "geopolitical": "Geopolitical",
+            "regulatory": "Regulatory",
+            "supply_chain": "Supply Chain",
+            "sentiment": "Analyst/Sentiment",
         }
         lines = ["<b>APPLIED NEWS STACK</b>"]
         for row in rows[:7]:

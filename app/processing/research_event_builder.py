@@ -108,3 +108,28 @@ def build_research_event(
         apply_price_confirmation(research_event, event, quotes_by_symbol)
 
     return research_event
+
+
+def composite_research_score(re: "ResearchEvent") -> float:
+    """Composite ranking score per BRIEFLY_RESEARCH_AGENT_STRATEGY.md Part 17.4.
+
+    Weights are additive bonuses on top of a 0-1 source_quality_score base,
+    matching the scale of the existing final_score / _editorial_score patterns.
+    """
+    score = re.source_quality_score
+    score += re.novelty_score * 0.50
+    score += re.corroboration_score * 0.40
+    score += re.portfolio_relevance_score * 0.60
+    score += re.watchlist_relevance_score * 0.40
+    score += re.confidence * 0.30
+    if re.source_tier in {"highest", "official"}:
+        score += 0.25
+    if re.price_confirmation_status == "confirmed":
+        score += 0.30
+    elif re.price_confirmation_status == "pending":
+        score += 0.10
+    if re.causal_channel != "other":
+        score += 0.15
+    if re.causal_channel == "earnings":
+        score += 0.15
+    return score

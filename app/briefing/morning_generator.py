@@ -57,6 +57,8 @@ from app.processing.article_quality import (
     neutralize_headline,
 )
 from app.processing.pipeline import is_actionable_event, process_event_stream
+from app.processing.research_event_builder import build_research_event, composite_research_score
+from app.schemas.research_event import ResearchEvent
 from app.schemas.briefings import MarketSetup, MorningBriefing, session_mode_for
 from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, PricePoint, QuoteData, SectorSnapshot
 from app.settings import Settings
@@ -613,8 +615,22 @@ class MorningBriefingGenerator:
             logger.debug("llm news shadow classifier failed", exc_info=True)
 
         # 7. Assemble sections
+        _preferred_symbols: set[str] = {
+            s.upper()
+            for s in (
+                list(self.profile.portfolio_symbols) + list(self.profile.all_watchlist_tickers)
+            )
+            if s
+        }
+        _research_index = (
+            self._build_research_event_index(eligible, _preferred_symbols)
+            if getattr(self.settings, "use_research_event_ranking", False)
+            else None
+        )
         briefing.global_news = self._build_global_news(eligible, briefing.session_mode)
-        briefing.top_themes = self._build_top_themes(eligible, briefing.session_mode)
+        briefing.top_themes = self._build_top_themes(
+            eligible, briefing.session_mode, research_index=_research_index
+        )
         briefing.portfolio_focus = self._build_portfolio_focus(eligible)
         briefing.sector_scan = self._build_sector_scan(eligible, briefing.session_mode)
         briefing.earnings_calendar = self._fetch_earnings()
@@ -768,7 +784,9 @@ class MorningBriefingGenerator:
         )
         briefing.portfolio_impact_bullets = impact_bullets
         briefing.portfolio_action_posture = action_posture
-        briefing.applied_news_stack = self._build_applied_news_stack(briefing)
+        briefing.applied_news_stack = self._build_applied_news_stack(
+            briefing, research_index=_research_index
+        )
         diagnosis = build_session_diagnosis(briefing)
         briefing.session_diagnosis = diagnosis.to_dict()
         briefing.trigger_board = dict(diagnosis.trigger_board or {})
@@ -1156,6 +1174,29 @@ class MorningBriefingGenerator:
 
     # -- Section builders -----------------------------------------------------
 
+    def _build_research_event_index(
+        self,
+        eligible: list[NormalisedEvent],
+        preferred_symbols: set[str],
+    ) -> dict[str, tuple[ResearchEvent, float]]:
+        """Build event_id -> (ResearchEvent, composite_score) for re-ranking.
+
+        Called only when settings.use_research_event_ranking is True. Pure
+        computation: no provider or DB calls. Price confirmation is skipped
+        here (quotes not yet available at section-assembly time) so
+        price_confirmation_status will be "unavailable" for all events; the
+        causal_channel/corroboration/novelty/portfolio signals still re-rank
+        meaningfully without it.
+        """
+        index: dict[str, tuple[ResearchEvent, float]] = {}
+        for evt in eligible:
+            try:
+                re = build_research_event(evt, preferred_symbols=preferred_symbols)
+                index[evt.event_id] = (re, composite_research_score(re))
+            except Exception:
+                logger.debug("research event build failed for %s", evt.event_id, exc_info=True)
+        return index
+
     def _build_market_setup(self) -> MarketSetup:
         """Fetch quotes for indices and macro instruments."""
         setup = MarketSetup()
@@ -1235,8 +1276,15 @@ class MorningBriefingGenerator:
         self,
         scored_events: list[NormalisedEvent],
         session_mode: str,
+        research_index: dict[str, tuple[ResearchEvent, float]] | None = None,
     ) -> list[NormalisedEvent]:
-        """Build top themes with an editorial trust gate."""
+        """Build top themes with an editorial trust gate.
+
+        When research_index is provided (use_research_event_ranking=True), sorts
+        candidates by composite_research_score instead of the theme_builder's
+        final_score + portfolio/watchlist bonus formula. All editorial gates and
+        hygiene passes are unchanged.
+        """
         preferred_symbols = {
             symbol.upper()
             for symbol in (
@@ -1245,16 +1293,35 @@ class MorningBriefingGenerator:
             )
             if symbol
         }
-        themes = build_top_themes(
-            scored_events,
-            max_themes=self.rules.max_themes,
-            editorial_gate=lambda evt: self._is_editorially_trustworthy(
-                evt,
-                session_mode,
-                section="top_themes",
-            ),
-            preferred_symbols=preferred_symbols,
-        )
+        if research_index:
+            candidates: list[tuple[float, NormalisedEvent]] = []
+            for evt in scored_events:
+                if not is_actionable_event(evt):
+                    continue
+                if (
+                    evt.personal_relevance_score < 0.55
+                    and evt.source != "sec_edgar"
+                    and evt.event_type not in {"macro_release", "fed_decision", "geopolitical", "regulatory"}
+                ):
+                    continue
+                if not self._is_editorially_trustworthy(evt, session_mode, section="top_themes"):
+                    continue
+                re_entry = research_index.get(evt.event_id)
+                score = re_entry[1] if re_entry else float(evt.final_score or 0.0)
+                candidates.append((score, evt))
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            themes = [evt for _, evt in candidates[: self.rules.max_themes]]
+        else:
+            themes = build_top_themes(
+                scored_events,
+                max_themes=self.rules.max_themes,
+                editorial_gate=lambda evt: self._is_editorially_trustworthy(
+                    evt,
+                    session_mode,
+                    section="top_themes",
+                ),
+                preferred_symbols=preferred_symbols,
+            )
         cleaned: list[NormalisedEvent] = []
         for evt in themes:
             if should_suppress_low_signal(evt):
@@ -1266,10 +1333,37 @@ class MorningBriefingGenerator:
             cleaned.append(self._apply_news_hygiene(evt, section="portfolio_watchlist_themes"))
         return cleaned
 
-    def _build_applied_news_stack(self, briefing: MorningBriefing) -> list[dict[str, object]]:
-        """Build a compact deterministic morning applied-news stack."""
+    # Causal channel -> applied_news_stack bucket name mapping.
+    # Channels not listed here fall back to keyword-based matching below.
+    _CHANNEL_TO_BUCKET: dict[str, str] = {
+        "rates": "macro_rates",
+        "earnings": "event_risk",
+        "regulatory": "regulatory",
+        "geopolitical": "geopolitical",
+        "supply_chain": "supply_chain",
+        "sentiment": "sentiment",
+    }
+
+    def _build_applied_news_stack(
+        self,
+        briefing: MorningBriefing,
+        research_index: dict[str, tuple[ResearchEvent, float]] | None = None,
+    ) -> list[dict[str, object]]:
+        """Build a compact deterministic morning applied-news stack.
+
+        When research_index is provided (use_research_event_ranking=True), the
+        primary pass routes events by causal_channel and uses ResearchEvent
+        interpretation strings. A secondary keyword pass fills any remaining
+        slots for buckets without causal_channel coverage (regional, sector,
+        watchlist, portfolio). The output dict schema is identical to the
+        keyword-only path so formatter.py requires no changes.
+        """
         if (briefing.session_key or "morning").lower() != "morning":
             return []
+
+        if research_index:
+            return self._build_applied_news_stack_via_research_events(briefing, research_index)
+
         pools: list[tuple[str, list[NormalisedEvent]]] = [
             ("macro_rates", list(briefing.top_themes or [])),
             ("regional", list(briefing.global_news or [])),
@@ -1315,6 +1409,104 @@ class MorningBriefingGenerator:
             )
             if len(built) >= 7:
                 break
+        return built
+
+    def _build_applied_news_stack_via_research_events(
+        self,
+        briefing: MorningBriefing,
+        research_index: dict[str, tuple[ResearchEvent, float]],
+    ) -> list[dict[str, object]]:
+        """Causal-channel-routed applied_news_stack, used when use_research_event_ranking=True.
+
+        Primary pass: pick the highest-composite-score event per causal_channel,
+        use ResearchEvent.interpretation as why_it_matters and
+        ResearchEvent.price_confirmation_status for the signal field.
+        Secondary pass: fill remaining slots with keyword-matched regional,
+        sector, watchlist, and portfolio events (channels not in the taxonomy).
+        """
+        all_events: list[NormalisedEvent] = (
+            list(briefing.top_themes or [])
+            + list(briefing.global_news or [])
+            + [evt for snap in (briefing.sector_scan or []) for evt in (snap.top_events or [])]
+            + list(briefing.watchlist_events or [])
+            + list(briefing.portfolio_focus or [])
+        )
+
+        # Group eligible events by causal_channel, ranked by composite score.
+        from collections import defaultdict
+        channel_groups: dict[str, list[tuple[float, NormalisedEvent, ResearchEvent]]] = defaultdict(list)
+        for evt in all_events:
+            re_entry = research_index.get(evt.event_id)
+            if not re_entry:
+                continue
+            re, score = re_entry
+            channel_groups[re.causal_channel].append((score, evt, re))
+        for ch in channel_groups:
+            channel_groups[ch].sort(key=lambda x: x[0], reverse=True)
+
+        built: list[dict[str, object]] = []
+        used_ids: set[str] = set()
+
+        # Primary pass: causal_channel-routed buckets.
+        for channel, bucket in self._CHANNEL_TO_BUCKET.items():
+            if len(built) >= 7:
+                break
+            for score, evt, re in channel_groups.get(channel, []):
+                if evt.event_id in used_ids:
+                    continue
+                used_ids.add(evt.event_id)
+                conf = re.price_confirmation_status
+                built.append(
+                    {
+                        "bucket": bucket,
+                        "headline": evt.title,
+                        "why_it_matters": re.interpretation or self._applied_news_why(bucket, evt),
+                        "affected_assets": list(evt.tickers[:4]),
+                        "source_count": int(evt.cluster_size or 1),
+                        "price_confirmation": conf if conf != "unavailable" else "optional",
+                    }
+                )
+                break
+
+        # Secondary pass: keyword-matched buckets for channels without taxonomy coverage.
+        keyword_pools: list[tuple[str, list[NormalisedEvent]]] = [
+            ("regional", list(briefing.global_news or [])),
+            ("sector", [evt for snap in (briefing.sector_scan or []) for evt in (snap.top_events or [])]),
+            ("watchlist", list(briefing.watchlist_events or [])),
+            ("portfolio", list(briefing.portfolio_focus or [])),
+        ]
+        keywords: dict[str, tuple[str, ...]] = {
+            "regional": ("europe", "us", "asia", "china", "japan", "eurozone"),
+            "sector": ("sector", "semiconductor", "energy", "financial", "tech", "bank"),
+            "watchlist": tuple(symbol.lower() for symbol in self.profile.all_watchlist_tickers[:20]),
+            "portfolio": tuple(symbol.lower() for symbol in self.profile.portfolio_symbols[:20]),
+        }
+        for bucket, events in keyword_pools:
+            if len(built) >= 7:
+                break
+            evt = next(
+                (
+                    candidate
+                    for candidate in events
+                    if candidate.event_id not in used_ids
+                    and self._applied_news_match(candidate, keywords.get(bucket, ()))
+                ),
+                None,
+            )
+            if evt is None:
+                continue
+            used_ids.add(evt.event_id)
+            built.append(
+                {
+                    "bucket": bucket,
+                    "headline": evt.title,
+                    "why_it_matters": self._applied_news_why(bucket, evt),
+                    "affected_assets": list(evt.tickers[:4]),
+                    "source_count": int(evt.cluster_size or 1),
+                    "price_confirmation": self._applied_news_confirmation(bucket, briefing),
+                }
+            )
+
         return built
 
     @staticmethod

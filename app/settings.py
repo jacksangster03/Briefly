@@ -113,6 +113,7 @@ class Settings(BaseSettings):
     breaking_followup_min_asset_move_pct: float = 0.9
     enable_finbert: bool = False
     enable_garch: bool = False
+    use_research_event_ranking: bool = False
 
     # -- Paths ----------------------------------------------------------------
     configs_dir: str = str(PROJECT_ROOT / "configs")
