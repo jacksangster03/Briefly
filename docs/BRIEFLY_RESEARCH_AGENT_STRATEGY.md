@@ -564,4 +564,111 @@ Storage rules: bounded text columns; never store full copyrighted article bodies
 
 This file (`docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md`) is the deliverable. It is detailed enough for another agent to implement phase by phase. No broad runtime changes were made.
 
-Cross-references: builds on `docs/SESSION_DESIGN.md`, `docs/NEWS_TREND_RADAR_PLAN.md`, `docs/LLM_VERTICAL_SHADOW_PLAN.md`, `docs/VERTICAL_INTELLIGENCE_API_PLAN.md`, `docs/AUDIT_CURRENT_STATE.md`, and `docs/FUTURE_ENHANCEMENTS.md`. It does not contradict them; it unifies the source tiers, adds the research-agent output modes, and sequences delivery.
+Cross-references: builds on `docs/SESSION_DESIGN.md`, `docs/NEWS_TREND_RADAR_PLAN.md`, `docs/LLM_VERTICAL_SHADOW_PLAN.md`, `docs/VERTICAL_INTELLIGENCE_API_PLAN.md`, `docs/BRIEFLY.md`, and `docs/FUTURE_ENHANCEMENTS.md`. It does not contradict them; it unifies the source tiers, adds the research-agent output modes, and sequences delivery.
+
+---
+
+## Part 17 - Equity-Analyst-First Redesign (2026-06-16 Addendum)
+
+This section reframes the product goal stated in Parts 1-16 around a sharper test: a session output should only ship if it answers "what actually matters, why, is it new, is it confirmed, which tickers/sectors does it touch, and what to watch next." It does not replace Parts 1-16; it sequences the next concrete step on top of them, grounded in a fresh audit of `app/briefing/` (23,365 lines across 48 files) that the earlier parts did not cover file-by-file.
+
+### 17.1 Product Philosophy
+
+Briefly is currently architected, and reads, as a **scheduled market briefing bot with portfolio/news/macro sections**. The target is an **equity research and market intelligence agent, with scheduled briefings as one output format**. The distinction is not cosmetic: today the pipeline starts from "session + market data" and fills sections; the target pipeline starts from evidence and only renders a session once enough of it clears a research bar.
+
+Target pipeline:
+
+```
+Evidence -> ResearchEvent -> Interpretation -> Asset Impact -> Session Briefing
+```
+
+This does not require ripping out the deterministic-first architecture documented elsewhere in this file and in `docs/BRIEFLY.md`. It requires inserting one new typed object (`ResearchEvent`) between "deduplicated `NormalisedEvent`" and "rendered briefing section," and moving the scattered interpretation/ranking logic that already exists (see 17.2) onto that object instead of leaving it spread across `global_news_selector.py`, `morning_generator.py`, and `theme_builder.py` independently.
+
+### 17.2 What Already Exists That Supports This (Audit Findings)
+
+A direct file-level audit of `app/briefing/` found that most of the *mechanics* an analyst-first design needs already exist, just unconsolidated and string-keyed rather than object-typed:
+
+- **Editorial scoring already exists, separate from `relevance_scoring.py`**: `global_news_selector.py::_editorial_score()` (lines ~276-283) adds a second deterministic scoring pass on top of `final_score`: `+1.2` for `sec_edgar` source, confidence-tiered bonuses, cluster-size bonuses, catalyst-signal bonus, and penalties for "valuation"/"analysts say"/"price target" boilerplate and weekend low-trust sources. `select_global_market_events()` ranks candidates on `(priority, editorial, cluster_size, published_at)`. This is effectively a first draft of `corroboration_score` + `source_quality_score` already, just not named or exposed that way.
+- **"Why it matters" generation already exists and is already deterministic**: `morning_generator.py::_build_applied_news_stack()` (lines ~1269-1318) buckets events (macro_rates, regional, sector, watchlist, portfolio, event_risk, geopolitical) and `_applied_news_why()` (lines ~1339-1356) returns templated interpretation strings per bucket (e.g. "Rates context can reset valuation-sensitive growth and duration risk."). `formatter.py::_format_applied_news_stack()` (lines ~1141-1168) renders it. There is no LLM in this path today. This is the seed of `ResearchEvent.interpretation`, but it is keyed to a fixed bucket taxonomy rather than to the event's own `causal_channel`.
+- **LLM paths are confirmed shadow-only / fallback-only, consistent with the deterministic-first principle**: `llm_news_classifier.py` early-returns when disabled, tags its own output `"shadow"` vs `"live_noop"`, and on error explicitly states "deterministic path unchanged." `llm_email_renderer.py` returns `mode="disabled"|"fallback"` and uses the deterministic email as `active_email` on any missing key, request failure, or validation failure. Nothing in `ResearchEvent` should change this; the LLM remains prose-only, never structural.
+- **Repeated-story suppression exists but is weaker than the target**: `session_delta.py::split_news_since_previous()` (lines ~58-112) does pure title-string matching against the previous session's snapshot (`_seen_title_keys_from_snapshot()`) to classify `repeated_items` vs new, with only a cluster-size >= 8 escape hatch to carry a big story forward as context. **There is no "materially updated" detection**: no diff on price confirmation, no diff on event facts, just "is this title new." This is the single biggest gap relative to the user's "is it new? is it confirmed?" bar and should be the first thing `ResearchEvent` fixes (via `novelty_score` derived from more than title string equality).
+- **`quality_guard.py` is post-render text hygiene, not event-level gating**: it fixes things like duplicate headings and contradictory directional claims (e.g. "VIX confirms" vs "VIX unavailable") after the briefing text is assembled. It does not gate which events get in; that gating happens earlier in `processing/article_quality.py` and `processing/pipeline.py`'s `LOW_SIGNAL_PATTERNS`. `ResearchEvent`'s suppression rules belong upstream of `quality_guard.py`, not as a replacement for it.
+- **Ticker/entity matching has no collision defence today**: `processing/cleaners.py::extract_tickers_from_text()` is regex (`\$([A-Z]{1,5})\b` and `\b([A-Z]{1,5})\b`) plus a `COMMON_WORDS` blocklist, and short symbols additionally require `$T` or `(T)` notation. There is no validation against an actual ticker/symbol registry, so a collision like "custard apple" plausibly extracting `CA` and being treated as a near-miss for a 1-2 letter symbol is a real, currently-unguarded failure mode (mitigated only by the blocklist and the explicit-notation rule for short symbols, not eliminated). `theme_builder.py` and `watchlist_chart_service.py` both assume upstream-extracted tickers are valid and add no further validation. This needs a real fix (a known-symbol allowlist check, not just a stopword blocklist) and is independent of the ResearchEvent rollout, but should be sequenced early since every downstream relevance/portfolio-linkage score depends on ticker accuracy.
+- **Chart selection is a session/regime-template-driven hybrid, with an unused hook for event-driven attachment**: `morning_charts.py` (2470 lines) selects charts primarily via `_stack_policy(stack_key, briefing)` keyed to session/regime, with required-group constraints and density-mode caps. However, lines ~702-703 already contain an `"optional_event"` role path that accepts an event-attached `chart_key` and is currently unused in practice. Attaching a chart to a specific `ResearchEvent` (the "only show charts that support the read" goal) is therefore a **small, additive change**: add a `chart_key` field to `ResearchEvent`, populate it where a confirming chart exists (price action, sector ETF, FX pair), and let the existing `optional_event` path surface it. Most charts (yield curve, VIX risk card, etc.) remain session-level and unaffected; only the "this bullet has a supporting chart" case routes through the new path.
+- **Filename correction**: the audit prompt referenced `app/briefing/news_hub.py` and `app/briefing/applied_news.py`; neither exists. The actual files playing those roles are `app/data_sources/global_news_hub.py` (provider orchestration, audited in `docs/BRIEFLY.md` Section 3.2) and `app/briefing/global_news_selector.py` + `morning_generator.py::_build_applied_news_stack()` (the "Applied News Stack" referenced in `docs/SESSION_DESIGN.md` and `MorningBriefing.applied_news_stack`).
+
+### 17.3 The `ResearchEvent` Contract
+
+`ResearchEvent` sits between a deduplicated `NormalisedEvent` and a rendered briefing line. It is a plain Pydantic model (same pattern as `NormalisedEvent` in `app/schemas/events.py`), produced by pure functions, never by an LLM. Proposed fields, grouped by what already has a deterministic source today vs. what's net new:
+
+**Already computable from existing code (consolidate, don't reinvent):**
+- `event_id`, `title`, `summary`: from `NormalisedEvent`.
+- `source_tier`, `source_quality_score`: from `processing/source_credibility.py::SOURCE_CREDIBILITY` / `DEFAULT_TRUST_TIERS`.
+- `tickers`, `sectors`: from `processing/cleaners.py::extract_tickers_from_text()` (pending the collision-defence fix in 17.2) and `configs/sectors.yaml` matching.
+- `portfolio_relevance_score`, `watchlist_relevance_score`: from `processing/personal_relevance.py`.
+- `corroboration_score`: from `global_news_selector.py::_editorial_score()`'s cluster-size and confidence-tier logic, renamed and exposed rather than left as an internal scoring detail.
+- `confidence`: from `NewsClassification.confidence` in `app/briefing/news_classifier.py`.
+- `suppress_reason`: from `processing/article_quality.py` / `LOW_SIGNAL_PATTERNS` / `should_suppress_low_signal()`.
+
+**Net new, needs real implementation:**
+- `causal_channel`: a small fixed taxonomy (e.g. `rates`, `earnings`, `regulatory`, `geopolitical`, `supply_chain`, `sentiment`) replacing the current ad-hoc bucket keys in `_build_applied_news_stack()`, so interpretation text is generated from the channel rather than a hardcoded per-bucket string.
+- `novelty_score`: must do better than `session_delta.py`'s title-string match: needs at minimum a content-similarity check against the prior session's events, not just exact title equality, so a meaningfully updated story isn't classified as "repeated."
+- `price_confirmation`: new: does the price/volume action in the relevant ticker(s) actually move in the direction the story implies? This does not exist anywhere today and is the single most analyst-grade addition (it directly answers "is it confirmed?").
+- `evidence_items` / `primary_sources` / `secondary_sources`: structured list of the underlying source URLs/snippets behind the event, replacing the current single-source-per-event assumption in the pipeline.
+- `interpretation`, `second_order_readthrough`, `what_to_watch_next`: generated from `causal_channel` + `price_confirmation` + `tickers`, deterministically (template-driven, same style as today's `_applied_news_why()`, just keyed to the new typed fields instead of string buckets).
+- `chart_key`: optional, populated when a specific confirming chart exists, surfaced via the existing `morning_charts.py` `optional_event` path (17.2).
+
+Hard rule, consistent with the rest of this document and with `docs/BRIEFLY.md`'s stated architecture: an LLM may draft prose *from* a fully-populated `ResearchEvent` (interpretation wording, headline phrasing), but may never set `source_tier`, `confidence`, `suppress_reason`, `corroboration_score`, or any field that decides inclusion or trust. Those remain pure-function outputs, exactly as `SendDecision` and `NewsClassification` are today.
+
+### 17.4 Ranking and Suppression, Consolidated
+
+The redesign's ranking formula is not new math; it is the union of three scoring passes that exist today in three different places (`relevance_scoring.py::final_score`, `global_news_selector.py::_editorial_score()`, `theme_builder.py::build_top_themes()`'s portfolio-tag bonus) plus two genuinely new inputs (`price_confirmation`, a real `novelty_score`). Concretely, `ResearchEvent` ranking should be:
+
+```
+score = source_quality_score
+      + freshness_weight
+      + novelty_score            # NEW: content-diff based, not title-match
+      + ticker_match_quality     # tightened: requires symbol-registry validation, not just blocklist
+      + portfolio_relevance_score
+      + watchlist_relevance_score
+      + sector_importance
+      + corroboration_score      # from existing _editorial_score() cluster/confidence logic
+      + official_source_bonus    # from existing sec_edgar +1.2 pattern, generalised to all official tiers
+      + price_confirmation_bonus # NEW
+      + earnings_proximity_bonus
+      + causal_clarity_bonus     # NEW: derived from causal_channel being resolvable at all
+      + confidence
+```
+
+Suppression rules already mostly exist and should be kept, not redesigned: `LOW_SIGNAL_PATTERNS` (clickbait/listicle), `GLOBAL_HARD_BLOCK_PATTERNS`/`GLOBAL_SOFT_PENALTY_PATTERNS` (generic price-target spam, "analysts say"), and the `COMMON_WORDS` ticker blocklist. The one rule that needs to be **added**, not consolidated, is: suppress when `novelty_score` is low AND no `price_confirmation` exists AND it's not a large-cluster carry-forward, i.e. close the gap `session_delta.py` currently leaves open (title changed slightly, nothing material happened, currently still gets through if cluster_size >= 8).
+
+### 17.5 Session Output Hierarchy (Analyst Read First)
+
+Each session keeps its existing job (per `docs/SESSION_DESIGN.md`) but leads with an analyst read assembled from the top-ranked `ResearchEvent`s, not from a fixed section template:
+
+| Session | Leads with | Source |
+|---|---|---|
+| Morning | Analyst Read (max 5 bullets), top 3 investable catalysts, watchlist/portfolio impact, macro/rates setup, today's earnings/events, "what would change the view" | Top-N `ResearchEvent`s by score + macro/earnings calendar |
+| Europe Midday | Confirmed/faded vs. morning read, new-since-morning only (via real `novelty_score`, not title match), Europe sector rotation, US pre-open setup | `session_delta` diff against morning's `ResearchEvent` set |
+| US Pre-Open | US open game plan, pre-market movers with actual catalysts (ticker + `causal_channel` required, not just a mover), opening confirmation triggers | `ResearchEvent`s with `price_confirmation` pending/early |
+| US Intraday | Did the open confirm or fade the pre-open thesis (direct `price_confirmation` check), live breadth; **suppress entirely if no fresh `ResearchEvent` and no price confirmation**, per the existing `send_decision.py` gate | `price_confirmation` deltas since pre-open |
+| Into Close | Session strengthening/fading, portfolio attribution, closing risks, tomorrow setup forming | End-of-day `ResearchEvent` re-scoring |
+| Closing Wrap | What actually drove today (confirmed drivers vs. false signals, i.e. `ResearchEvent`s whose `price_confirmation` held up vs. didn't), top 3 stories for tomorrow, next-day trigger board | Full-day `ResearchEvent` set, re-ranked by realised `price_confirmation` |
+
+This is a re-sequencing of existing `MorningBriefing` fields (`applied_news_stack`, `top_themes`, `trigger_board`, `what_changed_lines` already exist) around the new object, not a new rendering system. `docs/SESSION_DESIGN.md`'s per-session "Not" exclusions and the freshness-aware send-decision matrix in `send_decision.py` are unchanged and still authoritative.
+
+### 17.6 Controlled Source Monitoring (Unchanged Stance, Restated)
+
+This does not change the position already documented in Part 10 of this file: API/RSS-first, allowlist-only, robots.txt/ToS-respecting, metadata/snippet-only, no full-article storage, no paywall bypass. The only addition the `ResearchEvent` model motivates is that `evidence_items`/`primary_sources`/`secondary_sources` give controlled source monitoring a clear destination object to populate into, rather than needing its own ad-hoc schema when it's eventually built. Sequencing-wise, controlled source monitoring should come **after** `ResearchEvent` + ranking + output hierarchy (17.3-17.5), not before, per the user's own ordering and Part 14's phased roadmap.
+
+### 17.7 Implementation Phases (This Redesign, Sequenced)
+
+1. **`ResearchEvent` schema** (`app/schemas/research_event.py`, new file): pure Pydantic model per 17.3, no wiring yet.
+2. **Ticker collision defence** (`processing/cleaners.py`): add a known-symbol registry check; this is small, independent, and removes a real correctness bug ahead of everything else depending on ticker accuracy.
+3. **Real `novelty_score`** (extend `session_delta.py`): replace pure title-match with a content-similarity check; this is the highest-leverage fix for "is it new?".
+4. **`price_confirmation`** (new module, reads existing quote/price data already fetched for charts): the highest-leverage fix for "is it confirmed?".
+5. **Consolidate existing scoring passes onto `ResearchEvent`** (`global_news_selector.py`, `relevance_scoring.py`, `theme_builder.py` all populate the same object instead of three parallel computations).
+6. **Re-sequence session output around `ResearchEvent`** (17.5): touches `morning_generator.py`, `formatter.py`, `email_formatter.py` rendering order, not `send_decision.py` or the scheduler.
+7. **Event-attached charts via the existing `optional_event` hook** (`morning_charts.py` lines ~702-703): last, since it's purely additive once `ResearchEvent.chart_key` exists.
+
+Each phase is independently shippable and testable; none requires scheduler, delivery, idempotency, or provider-routing changes, and none grants the LLM new authority. This matches the user's explicit Phase 1 scope constraint: this document is the plan, not an implementation. No code was changed to produce this section.
