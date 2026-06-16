@@ -186,6 +186,45 @@ def _is_market_linked(event: NormalisedEvent, text_lower: str) -> bool:
     return any(term in text_lower for term in GLOBAL_MARKET_LINK_TERMS)
 
 
+def raw_corroboration_points(event: NormalisedEvent) -> float:
+    """Corroboration strength from confidence tier + cluster breadth.
+
+    Extracted from the confidence-tier and cluster-size terms of
+    _editorial_score() so this evidentiary-strength signal can be reused on
+    ResearchEvent (docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md Part 17.3)
+    instead of staying an internal scoring detail. _editorial_score() still
+    adds its own catalyst/penalty/session-mode adjustments on top.
+
+    Returns the raw point scale used by _editorial_score (0.2 to 1.15, not
+    normalised). Use corroboration_score() for the 0-1 normalised value.
+    """
+    if event.factual_confidence_score >= 0.80:
+        confidence_component = 0.8
+    elif event.factual_confidence_score >= 0.65:
+        confidence_component = 0.5
+    else:
+        confidence_component = 0.2
+
+    if event.cluster_size >= 4:
+        cluster_component = 0.35
+    elif event.cluster_size >= 2:
+        cluster_component = 0.2
+    else:
+        cluster_component = 0.0
+
+    return confidence_component + cluster_component
+
+
+# Maximum value raw_corroboration_points() can return (0.8 confidence + 0.35
+# cluster), used to normalise it to a 0-1 ResearchEvent field.
+_MAX_RAW_CORROBORATION_POINTS = 1.15
+
+
+def corroboration_score(event: NormalisedEvent) -> float:
+    """0-1 normalised corroboration strength; see raw_corroboration_points()."""
+    return min(1.0, raw_corroboration_points(event) / _MAX_RAW_CORROBORATION_POINTS)
+
+
 def _editorial_score(
     event: NormalisedEvent,
     *,
@@ -197,17 +236,7 @@ def _editorial_score(
     score = 0.0
     if event.source == "sec_edgar":
         score += 1.2
-    if event.factual_confidence_score >= 0.80:
-        score += 0.8
-    elif event.factual_confidence_score >= 0.65:
-        score += 0.5
-    else:
-        score += 0.2
-
-    if event.cluster_size >= 4:
-        score += 0.35
-    elif event.cluster_size >= 2:
-        score += 0.2
+    score += raw_corroboration_points(event)
 
     if has_catalyst:
         score += 0.5
