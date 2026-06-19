@@ -21,7 +21,7 @@ This README is the primary reference. For deeper detail, see `docs/`:
 | [`docs/NEWS_TREND_RADAR_PLAN.md`](docs/NEWS_TREND_RADAR_PLAN.md), [`docs/LLM_VERTICAL_SHADOW_PLAN.md`](docs/LLM_VERTICAL_SHADOW_PLAN.md), [`docs/VERTICAL_INTELLIGENCE_API_PLAN.md`](docs/VERTICAL_INTELLIGENCE_API_PLAN.md) | Forward-looking plans for the vertical intelligence framework (healthcare/geopolitics/ai_tech). Partially implemented; check `docs/BRIEFLY.md` Section 7 for current state before treating these as up to date. |
 | [`docs/UX_SIMPLIFICATION_PLAN.md`](docs/UX_SIMPLIFICATION_PLAN.md) | Web UI information-architecture plan. Most of the proposed structure (Command Centre, Portfolio, Macro, News Intelligence, Verticals, Diagnostics, Settings) already exists in `app/web/templates/`; treat as largely implemented and verify before acting on remaining items. |
 | [`docs/FUTURE_ENHANCEMENTS.md`](docs/FUTURE_ENHANCEMENTS.md) | Forward-looking enhancement ideas, not yet built. |
-| [`docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md`](docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md) | Strategy for evolving the news/research layer into a research agent. Forward-looking, not yet implemented. |
+| [`docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md`](docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md) | Strategy for evolving the news/research layer into a research agent. Forward-looking, not yet implemented. Parts 1-16 were written against an earlier codebase audit; Part 17+ onward is the current strategy. |
 
 Removed as outdated (superseded by the README and `docs/BRIEFLY.md`, or factually contradicted by the current code/config): `docs/architecture.md`, `docs/product_modules.md`, `docs/personalization.md`, `docs/provider_strategy.md`, `docs/scheduling.md`, `docs/setup.md`, `docs/api_keys.md`, `docs/message_examples.md`, `docs/README_RESTRUCTURE_PLAN.md`, `docs/AUDIT_CURRENT_STATE.md`, and the root `README_DRAFT.md`.
 
@@ -351,6 +351,115 @@ Where to put them:
 
 Note:
 - Healthcare enable/filter settings remain in `configs/healthcare.yaml` (`healthcare.enabled`, themes, tickers, severity thresholds).
+
+---
+
+## Free primary source intelligence
+
+Briefly fetches directly from official government and regulatory sources with no API key or paid plan required. These providers run alongside the news intelligence pipeline and are included automatically when `ENABLE_PRIMARY_SOURCES=true`.
+
+### Sources
+
+| Provider | Source | Rate limit | Key |
+|---|---|---|---|
+| Federal Reserve | `federalreserve.gov` RSS + HTML | 1.5 s | None |
+| SEC EDGAR earnings | `data.sec.gov` submissions API + EX-99.1 downloads | 0.13 s | None |
+| Bank of England | `bankofengland.co.uk/monetary-policy` HTML | 1.5 s | None |
+
+All three produce `NormalisedEvent` objects with `factual_confidence_score=1.0` (Fed/BoE statements) or `factual_confidence_score=0.95` (EDGAR filings). They flow through the same scoring, dedup, and briefing pipeline as all other events.
+
+### SEC user-agent requirement
+
+SEC policy requires a user-agent string containing a valid contact email. Set in `.env`:
+
+```bash
+SEC_USER_AGENT="Briefly your.email@example.com"
+```
+
+### Configuration
+
+```bash
+ENABLE_PRIMARY_SOURCES=true        # default true
+SEC_USER_AGENT="Briefly your.email@example.com"
+```
+
+---
+
+## IPO and private company intelligence
+
+Briefly includes a parallel intelligence layer for private companies and IPO events. It operates without LLM authority and without paid APIs.
+
+### Registry
+
+`configs/private_companies.yaml` defines 13 tracked companies at launch: OpenAI, Anthropic, Stripe, Databricks, Revolut, Canva, Discord, Anduril, xAI, SpaceX, Klarna, SHEIN, Figma.
+
+Each entry includes: canonical name, aliases, IPO status and confidence, official domains, newsroom URLs, SEC CIK (where public), proposed ticker, public-market peer relationships (with evidence), sector ETFs, and themes.
+
+### IPO status lifecycle
+
+`private` → `confidential_filing` → `public_filing` → `roadshow` → `priced` → `listed`
+
+Also: `postponed`, `withdrawn`, `acquired`.
+
+### Providers
+
+| Provider | Source | Key |
+|---|---|---|
+| `IpoEdgarProvider` | SEC EDGAR EFTS + Submissions API (S-1, F-1, 424B4, EFFECT, RW) | None |
+| `PrivateCompanyNewsroomProvider` | Official company newsrooms (allowlist only, robots.txt checked) | None |
+| `IpoCalendarProvider` | Nasdaq IPO calendar + FMP (optional) | None (FMP optional) |
+
+### Event types and scores
+
+| Event type | Importance | Description |
+|---|---|---|
+| `ipo_pricing` | 0.92 | 424B4 final prospectus (pricing confirmed) |
+| `central_bank_statement` | 0.92 | Fed / BoE statement (primary source) |
+| `ipo_filing` | 0.88 | S-1 or F-1 initial registration |
+| `ipo_listing` | 0.85 | EFFECT or 8-A12B (company goes public) |
+| `ipo_withdrawal` | 0.82 | RW (offering withdrawn) |
+| `private_funding` | 0.78 | Official funding announcement |
+| `ipo_amendment` | 0.75 | S-1/A or F-1/A amendment |
+| `ipo_readthrough` | 0.68 | Derived event for a public peer |
+| `ipo_calendar` | 0.55 | Calendar estimate (lower confidence) |
+
+### Read-through mapping
+
+When a private-company event fires, Briefly emits one `ipo_readthrough` event per public peer listed in the registry for that company. Example: an OpenAI S-1 generates additional events for MSFT (direct ownership) and NVDA (supplier). Speculative relationships are suppressed for low-confidence events. Watchlist filtering applies.
+
+### State persistence
+
+JSON files at `data/cache/ipo/{company_id}.json`. Tracks: content fingerprints (change detection, skip unchanged pages), last poll timestamps (4-hour minimum between re-polls per URL), known accession numbers (filing dedup), IPO status history, and filing event log (capped at 100 per company).
+
+### Newsroom monitoring rules
+
+- Only fetches URLs listed in `configs/private_companies.yaml` (never arbitrary sites)
+- robots.txt checked before every domain (cached per process run)
+- Content fingerprinted: skip if page unchanged since last poll
+- Excerpt capped at 800 characters (no full articles stored)
+
+### IPO status CLI
+
+```bash
+# Show all tracked companies
+python -m app.cli ipo-status
+
+# Filter to companies with an active IPO process
+python -m app.cli ipo-status --upcoming
+
+# Show a single company
+python -m app.cli ipo-status --company openai
+
+# Trigger a live EDGAR + newsroom fetch before displaying
+python -m app.cli ipo-status --live
+```
+
+### Configuration
+
+```bash
+ENABLE_IPO_INTELLIGENCE=true       # default true
+IPO_MONITOR_NEWSROOMS=true         # default true
+```
 
 ---
 
@@ -753,6 +862,20 @@ WEB_HOST=127.0.0.1
 WEB_PORT=8080
 ```
 
+### Primary sources (no API key required)
+
+```bash
+ENABLE_PRIMARY_SOURCES=true
+SEC_USER_AGENT="Briefly your.email@example.com"    # required by SEC policy
+```
+
+### IPO and private company intelligence
+
+```bash
+ENABLE_IPO_INTELLIGENCE=true
+IPO_MONITOR_NEWSROOMS=true
+```
+
 ### Provider resilience
 
 ```bash
@@ -763,13 +886,16 @@ PROVIDER_MAX_RETRIES=2
 ### YAML config files
 
 ```
-configs/user_profile.example.yaml   — profile defaults
-configs/watchlists.example.yaml     — watchlist definitions
-configs/schedules.yaml              — cadence schedule
-configs/sectors.yaml                — sector taxonomy
-configs/alert_rules.yaml            — breaking alert thresholds
-configs/holdings.example.yaml       — example holdings
-configs/healthcare.example.yaml     — healthcare vertical defaults
+configs/user_profile.example.yaml      — profile defaults
+configs/watchlists.example.yaml        — watchlist definitions
+configs/schedules.yaml                 — cadence schedule
+configs/sectors.yaml                   — sector taxonomy
+configs/alert_rules.yaml               — breaking alert thresholds
+configs/holdings.example.yaml          — example holdings
+configs/healthcare.example.yaml        — healthcare vertical defaults
+configs/private_companies.yaml         — IPO registry (13 companies)
+configs/sources.yaml                   — provider trust tiers and capabilities
+configs/macro_calendar.yaml            — macro event seed calendar (manually maintained)
 ```
 
 ---
@@ -814,20 +940,32 @@ python -m pytest app/tests/test_day_replay.py -q
 python -m pytest app/tests/test_market_data.py -q
 python -m pytest app/tests/test_circuit_breaker.py -q
 python -m pytest app/tests/test_llm_usage_tracker.py -q
+python -m pytest app/tests/test_primary_sources.py -q
+python -m pytest app/tests/test_ipo_intelligence.py -q
 ```
+
+Full suite: **1614 tests passing**.
 
 ---
 
 ## Architecture
 
 ```
-Providers
+Market data providers (paid/free)
   Finnhub | NewsAPI | FRED | yfinance
   Optional: GDELT | Alpha Vantage News | FMP | Mediastack
+
+Primary sources (no API key required)
+  Federal Reserve press releases | SEC EDGAR earnings (EX-99.1) | Bank of England
+
+IPO and private company intelligence (no API key required)
+  EDGAR S-1/F-1/424B4 monitor | Company newsrooms (allowlist only) | IPO calendars
+  Registry: 13 companies tracked | Read-through events for public peers
 
 Intelligence pipeline
   cleaners -> ticker resolution -> sector enrichment -> dedupe
   -> credibility -> personal relevance -> clustering -> scoring
+  -> IPO event type weighting -> read-through mapping
 
 Briefing generation
   session auto-route (brief) | morning | midday | preopen | intraday | close | breaking
@@ -844,6 +982,10 @@ Portfolio workbench
   -> Risk Analytics -> CMA Builder -> Rebalancing Engine
   -> Attribution -> Simulation Lab
   -> Fixed Income -> PDF Reports -> ESG/SRI -> Multi-Currency/FX
+
+Persistence
+  SQLite (briefing state, portfolio, analytics)
+  JSON cache (IPO store: data/cache/ipo/)
 ```
 
 Key persistence tables:
@@ -1338,6 +1480,12 @@ Recovery/catch-up:
 - `backfill --date YYYY-MM-DD` -> historical labeled backfill
 - `day-replay ...` -> multi-session test harness
 - `snapshots replay --date ... --session ...` -> resend exact archived output
+
+IPO intelligence:
+- `ipo-status` -> show all tracked private companies and IPO state
+- `ipo-status --upcoming` -> filter to companies with active IPO process
+- `ipo-status --company <id>` -> single company
+- `ipo-status --live` -> fetch EDGAR + newsrooms before display
 
 Portfolio workbench:
 - Use `/ui/portfolio/*` routes for holdings/policy/allocation/risk/CMA/rebalancing/attribution/simulation/bonds/reports/ESG/FX.

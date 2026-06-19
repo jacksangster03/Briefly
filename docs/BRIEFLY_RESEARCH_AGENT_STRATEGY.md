@@ -2,6 +2,8 @@
 
 Status: strategy and design document (Phase 1). No major runtime behaviour changes are made by this document. It is written to be implementable phase by phase by another agent.
 
+> **Note on file accuracy:** Parts 1-16 of this document were written against a codebase audit from an earlier date and contain file paths, line counts, and module names that may not match the current state of the repo. Parts 17 onward (added June 2026) are current. Before implementing any phase, verify file paths and module names against `docs/BRIEFLY.md`, which is the authoritative grounded reference.
+
 Author context: this evolves the existing `market-briefing-bot` / Briefly codebase (repo `jacksangster03/Briefly`) from a scheduled six-session market briefing bot into a stronger research and equity-intelligence agent, while preserving the current scheduler, delivery, session structure, providers, deterministic scoring, diagnostics and fail-soft behaviour.
 
 Guiding principle: API and official sources first, RSS second, controlled scraping last. Deterministic scoring stays authoritative. LLM usage is shadow-only or clearly bounded. Briefly becomes a reliable research agent, not a random web scraper.

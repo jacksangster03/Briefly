@@ -339,7 +339,43 @@ These are observations, not action items: recorded here so future work doesn't h
 
 ---
 
-## 14. IPO and Private-Company Intelligence
+## 14. Free Primary Source Intelligence
+
+Added June 2026. Fetches directly from official government and regulatory sources; no API key required.
+
+### Providers
+
+| Class | File | Source |
+|---|---|---|
+| `FedPressReleaseProvider` | `app/sources/primary/fed.py` | `federalreserve.gov` RSS + HTML |
+| `EarningsReleaseProvider` | `app/sources/primary/edgar_earnings.py` | `data.sec.gov` Submissions API + EX-99.1 |
+| `BoEProvider` | `app/sources/primary/boe.py` | `bankofengland.co.uk/monetary-policy` HTML |
+
+All three are `BaseProvider` subclasses. They are aggregated by `PrimarySourcesService` (`app/sources/primary/service.py`) and integrated into `NewsDataService.fetch_all()`.
+
+### Event types produced
+
+- `FedPressReleaseProvider`: `event_type="central_bank_statement"`, `factual_confidence_score=1.0`, `source="federal_reserve"`.
+- `EarningsReleaseProvider`: `event_type="earnings"`, `factual_confidence_score=0.95`, `source="sec_edgar_earnings"`.
+- `BoEProvider`: `event_type="central_bank_statement"`, `factual_confidence_score=1.0`, `source="bank_of_england"`.
+
+### SEC user-agent
+
+SEC policy requires a contact email in the `User-Agent` header. Set via `SEC_USER_AGENT` in `.env`. Requests without this may be rate-limited by SEC.
+
+### Settings
+
+```python
+enable_primary_sources: bool = True
+```
+
+### Tests
+
+`app/tests/test_primary_sources.py`: 33 tests covering all three providers. All dates in tests use `days_back=9999` to avoid time-cutoff failures.
+
+---
+
+## 15. IPO and Private-Company Intelligence
 
 Added June 2026. Introduces a parallel intelligence layer for private companies and IPO events that operates entirely without LLM authority, no paid APIs required.
 
