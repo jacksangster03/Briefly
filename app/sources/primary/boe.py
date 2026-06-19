@@ -19,7 +19,7 @@ from app.schemas.events import NormalisedEvent
 
 logger = get_logger("primary.boe")
 
-_MPC_INDEX_URL = "https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes/"
+_MPC_INDEX_URL = "https://www.bankofengland.co.uk/monetary-policy"
 _BASE_URL = "https://www.bankofengland.co.uk"
 _RATE_LIMIT_S = 1.5
 
@@ -105,7 +105,7 @@ class BoEProvider(BaseProvider):
             if "/monetary-policy-summary-and-minutes/" not in href:
                 continue
             full_url = href if href.startswith("http") else _BASE_URL + href
-            if full_url.rstrip("/") == _MPC_INDEX_URL.rstrip("/"):
+            if full_url.rstrip("/") in (_MPC_INDEX_URL.rstrip("/"), _BASE_URL):
                 continue
             if full_url not in seen and text:
                 seen.add(full_url)
