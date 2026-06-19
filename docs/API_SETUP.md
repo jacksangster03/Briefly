@@ -60,3 +60,48 @@ python -m pytest app/tests -q
 - **GitHub rate-limited**: use optional `GITHUB_TOKEN` if needed.
 - **No vertical lines in briefing**: expected when `VERTICALS_INCLUDE_IN_BRIEFING=false`.
 - **Source status disabled/stub_inactive/error**: expected fail-soft behaviour for optional sources.
+
+---
+
+## IPO and Private-Company Intelligence
+
+No API keys required for core functionality.
+
+### Sources
+
+| Source | URL | Key | Notes |
+|---|---|---|---|
+| SEC EDGAR EFTS | `https://efts.sec.gov/LATEST/search-index` | None | Full-text search for S-1/F-1/424B4 filings |
+| SEC EDGAR Submissions | `https://data.sec.gov/submissions/CIK...json` | None | Per-company filing history |
+| Company newsrooms | Registry-defined URLs | None | Only official allowlisted domains |
+| Nasdaq IPO calendar | `https://api.nasdaq.com/api/ipo/calendar` | None | Estimated dates; unofficial API |
+| FMP IPO calendar | `https://financialmodelingprep.com/api/v3/ipo_calendar` | FMP_API_KEY | Optional; skip if key absent |
+
+### `.env` settings
+
+```bash
+ENABLE_IPO_INTELLIGENCE=true      # default true
+IPO_MONITOR_NEWSROOMS=true        # default true
+```
+
+### SEC user-agent requirement
+
+All SEC EDGAR requests must include a user-agent with a valid email address (SEC policy). Set in `.env`:
+
+```bash
+SEC_USER_AGENT="Briefly jacksangster.033@gmail.com"
+```
+
+### Rate limits
+
+| Provider | Minimum interval |
+|---|---|
+| EDGAR EFTS | 0.13 s per request |
+| Company newsrooms | 2.0 s per request, 4 h between re-polls of same URL |
+| IPO calendar | 1.5 s per request |
+
+### Troubleshooting
+
+- **No IPO events appearing**: check `data/cache/ipo/` for JSON store files; if absent, `init_store()` may not have been called.
+- **Newsroom events missing**: verify `newsroom_urls` in `configs/private_companies.yaml` are reachable and not blocked by robots.txt.
+- **Calendar dates stale**: Nasdaq calendar entries more than 45 days past are automatically discarded.

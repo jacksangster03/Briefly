@@ -696,3 +696,34 @@ Minimum move required to qualify as "largest impulse":
 - VIX: >= 1%
 - FX: >= 0.25%
 If no impulse passes threshold: "Cross-asset impulse is muted; no single macro market is leading."
+
+---
+
+## IPO and Private-Company Quality Rules
+
+### Confidence gating
+
+| Source | `factual_confidence_score` | Notes |
+|---|---|---|
+| SEC EDGAR filing | >= 0.95 | Authoritative; company signed and filed |
+| Official newsroom (IPO) | 0.90 | Company-controlled domain; announcement may precede EDGAR |
+| Official newsroom (funding) | 0.80 | Cross-check against press release details |
+| IPO calendar (Nasdaq/FMP) | 0.65 | Estimated date; do not treat as confirmed |
+| Read-through (derived) | max(base - 0.15, 0.50) | Indirect causality; never presented as primary signal |
+
+### Content rules
+
+- Never store full article text: excerpt capped at 800 characters (newsroom), 1,500 characters (EDGAR prospectus).
+- Never infer valuation when the company does not disclose it. Leave `latest_private_valuation_usd_m` as `None`.
+- Never classify a company as actively preparing an IPO without official or highly credible evidence. Registry `status_confidence` must be `medium` or `high` before status is surfaced in briefings.
+- Do not automatically claim causality between a private-company event and a public-market move. Read-through events are labelled as derived and carry reduced confidence.
+- Rumour/unconfirmed IPO reports from news sources: these are filtered at source; the newsroom monitor only processes official company domains (robots.txt checked).
+- Calendar dates sourced from Nasdaq or FMP are estimates. Every calendar `NormalisedEvent` includes the suffix "Calendar estimate only; confirm against EDGAR filings." in its summary.
+
+### SpaceX policy
+
+SpaceX is in the registry with `status: private`. Its status is never overridden programmatically. If a public S-1 filing appears on EDGAR, it will be detected and surfaced like any other company. No hardcoded IPO prediction is made.
+
+### No briefing format changes (June 2026)
+
+IPO events flow through the existing scoring and section-assignment pipeline. No live briefing section has been created for IPO events. They surface as standard `ResearchEvent` items in the briefing body. A dedicated IPO section is a future enhancement contingent on preview review.

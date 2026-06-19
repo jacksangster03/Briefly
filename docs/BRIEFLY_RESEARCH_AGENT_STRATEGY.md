@@ -672,3 +672,22 @@ This does not change the position already documented in Part 10 of this file: AP
 7. **Event-attached charts via the existing `optional_event` hook** (`morning_charts.py` lines ~702-703): last, since it's purely additive once `ResearchEvent.chart_key` exists.
 
 Each phase is independently shippable and testable; none requires scheduler, delivery, idempotency, or provider-routing changes, and none grants the LLM new authority. This matches the user's explicit Phase 1 scope constraint: this document is the plan, not an implementation. No code was changed to produce this section.
+
+---
+
+## IPO and Private-Company Scoring
+
+IPO events use the standard `EVENT_TYPE_WEIGHTS` map in `relevance_scoring.py`. No special scoring branch exists: all scoring is deterministic via the same composite formula used for public-market events.
+
+Key weights (added June 2026):
+
+- `ipo_pricing` = 0.92: treated as equivalent to an earnings beat in market-impact magnitude
+- `ipo_filing` = 0.88: high signal; S-1 represents committed intent
+- `ipo_withdrawal` = 0.82: material negative signal for sector peers
+- `central_bank_statement` = 0.92: primary-source Fed/BoE events now correctly weighted (previously fell to 0.35 default)
+
+**No-ticker events**: private-company filing events have `tickers=[]`. `compute_personal_relevance()` returns 0.2 floor for these, which is intentional. The `importance_score` (set at provider level to 0.88-0.95) compensates via the `event_type_weight` composite dimension (weight 0.25). A correctly-built S-1 event still clears the research inclusion threshold even with 0.2 personal relevance.
+
+**Read-through events** (`ipo_readthrough`): these carry the watchlist ticker, so `personal_relevance` scores normally for portfolio-held peers. Importance is capped at 0.68 to reflect the indirect causality.
+
+**Calendar events** (`ipo_calendar`): capped at 0.55 importance and 0.65 confidence. They exist to surface upcoming IPOs before filings appear, but are explicitly labelled as estimates and will not compete with primary-source events for section priority.

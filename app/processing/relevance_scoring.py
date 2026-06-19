@@ -51,6 +51,17 @@ EVENT_TYPE_WEIGHTS: dict[str, float] = {
     "headline": 0.45,
     "news_search": 0.40,
     "filing": 0.60,
+    # IPO and private-company events
+    "ipo_filing": 0.88,
+    "ipo_amendment": 0.75,
+    "ipo_pricing": 0.92,
+    "ipo_listing": 0.85,
+    "ipo_withdrawal": 0.82,
+    "ipo_readthrough": 0.68,
+    "private_funding": 0.78,
+    "ipo_calendar": 0.55,
+    # Central bank events from primary sources
+    "central_bank_statement": 0.92,
 }
 
 # -- Composite weights -------------------------------------------------------

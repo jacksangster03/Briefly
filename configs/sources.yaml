@@ -88,3 +88,33 @@ trust_tiers:
   medium: 0.55     # NewsAPI, yfinance
   low: 0.25        # Social, unverified sources
   experimental: 0.15
+
+# IPO and private-company intelligence sources (no keys required)
+ipo_sources:
+  ipo_edgar:
+    enabled: true
+    tier: free
+    trust: highest
+    note: "SEC EDGAR EFTS + Submissions API. S-1/F-1/424B4/EFFECT/RW monitoring."
+    capabilities: [ipo_filings, ipo_pricing, ipo_withdrawal, ipo_effectiveness]
+
+  company_newsroom:
+    enabled: true
+    tier: free
+    trust: high
+    note: "Official company newsroom monitor. Allowlisted URLs only. robots.txt checked."
+    capabilities: [ipo_announcement, funding_announcement]
+
+  nasdaq_ipo_calendar:
+    enabled: true
+    tier: free
+    trust: medium
+    note: "Nasdaq unofficial IPO calendar API. Estimated dates only."
+    capabilities: [ipo_calendar]
+
+  fmp_ipo_calendar:
+    enabled: false
+    tier: premium
+    trust: medium
+    note: "Financial Modelling Prep IPO calendar. Requires FMP_API_KEY."
+    capabilities: [ipo_calendar]

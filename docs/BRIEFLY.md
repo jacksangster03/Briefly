@@ -336,3 +336,62 @@ These are observations, not action items: recorded here so future work doesn't h
 - `docs/AUDIT_CURRENT_STATE.md` (2026-05-10): prior product-level audit, useful for what was true a month before this document; this document is the more current code-level ground truth.
 - `docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md`: forward-looking strategy for evolving the news/research layer specifically; this document is the present-state map the strategy doc was written against.
 - `docs/NEWS_TREND_RADAR_PLAN.md`, `docs/LLM_VERTICAL_SHADOW_PLAN.md`, `docs/VERTICAL_INTELLIGENCE_API_PLAN.md`, `docs/FUTURE_ENHANCEMENTS.md`: forward-looking plans for specific subsystems; not restated here since they describe what doesn't exist yet rather than what does.
+
+---
+
+## 14. IPO and Private-Company Intelligence
+
+Added June 2026. Introduces a parallel intelligence layer for private companies and IPO events that operates entirely without LLM authority, no paid APIs required.
+
+### Registry (`configs/private_companies.yaml`)
+
+13 companies tracked at launch: OpenAI, Anthropic, Stripe, Databricks, Revolut, Canva, Discord, Anduril, xAI, SpaceX, Klarna (listed), SHEIN, Figma.
+
+Each entry contains: `canonical_name`, `aliases`, `status`, `status_confidence`, `official_domains`, `newsroom_urls`, `sec_cik` (where public), `proposed_ticker`, `public_peers` (ticker to relationship + evidence), `suppliers`, `sector_etfs`, `themes`.
+
+Status values: `private`, `confidential_filing`, `public_filing`, `roadshow`, `priced`, `listed`, `postponed`, `withdrawn`, `acquired`.
+
+### Providers
+
+| Provider | Source | Key required |
+|---|---|---|
+| `IpoEdgarProvider` | SEC EDGAR EFTS + Submissions API | No |
+| `PrivateCompanyNewsroomProvider` | Official company newsrooms (allowlist only) | No |
+| `IpoCalendarProvider` | Nasdaq IPO calendar + FMP (optional) | No (FMP optional) |
+
+All are `BaseProvider` subclasses. Rate limits: EDGAR 0.13 s, newsrooms 2.0 s, calendar 1.5 s.
+
+### State persistence (`app/sources/primary/ipo_store.py`)
+
+JSON files at `data/cache/ipo/{company_id}.json`. Tracks: content fingerprints (change detection), last poll timestamps (4-hour minimum interval), known accession numbers (dedup), IPO status history, filing events log (capped at 100 entries per company).
+
+### Event types and scores
+
+| Event type | Importance | Description |
+|---|---|---|
+| `ipo_pricing` | 0.92 | 424B4 final prospectus |
+| `ipo_filing` | 0.88 | S-1 / F-1 initial registration |
+| `ipo_listing` | 0.85 | EFFECT / 8-A12B — company goes public |
+| `ipo_withdrawal` | 0.82 | RW — offering withdrawn |
+| `central_bank_statement` | 0.92 | Fed / BoE statement |
+| `ipo_amendment` | 0.75 | S-1/A / F-1/A |
+| `private_funding` | 0.78 | Official funding announcement |
+| `ipo_readthrough` | 0.68 | Derived event for public peer |
+| `ipo_calendar` | 0.55 | Calendar estimate (low confidence) |
+
+### Read-through mapping
+
+When a private-company event fires, `IpoIntelligenceService._generate_readthrough_events()` emits one `ipo_readthrough` NormalisedEvent per public peer in the registry. Speculative (`speculative_readthrough`) relationships are suppressed for low-confidence events. Watchlist filtering is respected.
+
+### CLI
+
+```
+briefly ipo-status                   # show all companies
+briefly ipo-status --upcoming        # filter to active IPO process
+briefly ipo-status --company openai  # single company
+briefly ipo-status --live            # fetch EDGAR + newsrooms before display
+```
+
+### Integration point
+
+`NewsDataService.__init__` instantiates `IpoIntelligenceService`. `fetch_all(watchlist)` calls `ipo.fetch_all(watchlist)` after existing providers. No live briefing-format changes: IPO events flow through the existing scoring, dedup, and section-assignment pipeline unchanged.

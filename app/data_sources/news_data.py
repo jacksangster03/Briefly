@@ -9,6 +9,7 @@ from app.data_sources.providers.sec_provider import SECProvider
 from app.logger import get_logger
 from app.schemas.events import NormalisedEvent
 from app.settings import Settings
+from app.sources.primary.ipo_service import IpoIntelligenceService
 from app.sources.primary.service import PrimarySourcesService
 
 logger = get_logger("news_data")
@@ -59,6 +60,7 @@ class NewsDataService:
             newsapi=self.newsapi,
         )
         self.primary = PrimarySourcesService(settings=settings)
+        self.ipo = IpoIntelligenceService(settings=settings)
 
     def fetch_market_news(self) -> list[NormalisedEvent]:
         """Fetch general market news from all configured providers."""
@@ -137,6 +139,8 @@ class NewsDataService:
         all_events.extend(self.fetch_insider_trades(tickers=watchlist))
         if self.primary.is_available():
             all_events.extend(self.primary.fetch_all(watchlist=watchlist))
+        if self.ipo.is_available():
+            all_events.extend(self.ipo.fetch_all(watchlist=watchlist))
 
         logger.info("Total events from all sources: %d", len(all_events))
         return all_events

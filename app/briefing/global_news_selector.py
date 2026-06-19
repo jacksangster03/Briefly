@@ -65,6 +65,27 @@ GLOBAL_MARKET_LINK_TERMS = (
     "manufacturing",
     "imports",
     "exports",
+    # IPO and private-company terms
+    "ipo",
+    "initial public offering",
+    "s-1",
+    "f-1",
+    "prospectus",
+    "registration statement",
+    "going public",
+    "listing",
+    "pre-ipo",
+    "private funding",
+    "series a",
+    "series b",
+    "series c",
+    "series d",
+    "series e",
+    "unicorn",
+    "valuation",
+    "secondary market",
+    "tender offer",
+    "confidential filing",
 )
 
 GLOBAL_CATALYST_TERMS = (

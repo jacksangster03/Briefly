@@ -124,6 +124,10 @@ class Settings(BaseSettings):
     # Requires sec_user_agent to include a valid email address (SEC policy).
     enable_primary_sources: bool = True
 
+    # -- IPO and private-company intelligence ---------------------------------
+    enable_ipo_intelligence: bool = True
+    ipo_monitor_newsrooms: bool = True
+
     # -- Paths ----------------------------------------------------------------
     configs_dir: str = str(PROJECT_ROOT / "configs")
     logs_dir: str = str(PROJECT_ROOT / "logs")
