@@ -1286,6 +1286,7 @@ class MorningBriefingGenerator:
         min_confidence = str(
             getattr(self.settings, "research_agent_min_confidence", "medium") or "medium"
         )
+
         ranked = rank_research_events(
             candidates,
             session_key=session_key,

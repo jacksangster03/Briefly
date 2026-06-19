@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -49,6 +49,7 @@ CausalChannel = Literal[
 # came from and treat `source_quality_score` as the normalised 0-1 value.
 
 PriceConfirmationStatus = Literal["confirmed", "contradicted", "pending", "unavailable"]
+ResearchConfidenceLabel = Literal["high", "medium", "low", "none"]
 
 
 class EvidenceItem(BaseModel):
@@ -76,6 +77,9 @@ class ResearchEvent(BaseModel):
     # --- Identity / content ---
     title: str = ""
     summary: str = ""
+    published_at: datetime | None = None
+    first_seen_at: datetime | None = None
+    last_seen_at: datetime | None = None
 
     # --- Source quality (already computable from existing code; see Part 17.3) ---
     source_tier: str = ""
@@ -99,6 +103,11 @@ class ResearchEvent(BaseModel):
     macro_relevance: float = 0.0
     geo_relevance: float = 0.0
     confidence: float = 0.5
+    confidence_label: ResearchConfidenceLabel = "none"
+    confidence_reason: str = ""
+    confidence_factors: dict[str, Any] = Field(default_factory=dict)
+    freshness_state: str = "unknown"
+    material_update: bool = False
 
     # --- Price confirmation (net new; does not exist anywhere upstream today) ---
     price_confirmation_status: PriceConfirmationStatus = "unavailable"
@@ -112,6 +121,9 @@ class ResearchEvent(BaseModel):
     # from these fields but never sets them as a trust/inclusion decision) ---
     interpretation: str = ""
     second_order_readthrough: str = ""
+    why_now: str = ""
+    portfolio_impact: str = ""
+    what_changed: str = ""
     what_to_watch_next: str = ""
 
     # --- Evidence ---
@@ -151,12 +163,31 @@ class ResearchEvent(BaseModel):
             source_event_id=event.event_id,
             title=event.title,
             summary=event.summary,
+            published_at=event.published_at,
+            first_seen_at=_raw_datetime(event, "news_first_seen_time") or _raw_datetime(event, "first_seen_at"),
+            last_seen_at=_raw_datetime(event, "news_last_seen_time") or _raw_datetime(event, "last_seen_at"),
             tickers=list(event.tickers),
             sectors=list(event.sectors),
             novelty_score=event.novelty_score,
             portfolio_relevance_score=event.personal_relevance_score,
             confidence=event.factual_confidence_score,
+            freshness_state=str(event.raw_data.get("news_freshness_state") or event.update_status or "unknown"),
+            material_update=bool(event.raw_data.get("news_material_update") or event.update_status == "material_update"),
             final_score=event.final_score,
-            suppress_reason=event.reason_code,
+            suppress_reason=event.reason_code if event.reason_code in {
+                "already_sent_tracking_id", "already_sent_exact", "continuation_suppressed",
+            } else "",
             primary_sources=[event.url] if event.url else [],
         )
+
+
+def _raw_datetime(event: NormalisedEvent, key: str) -> datetime | None:
+    value = (event.raw_data or {}).get(key)
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
