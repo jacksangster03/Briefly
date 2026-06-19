@@ -58,6 +58,13 @@ from app.processing.article_quality import (
 )
 from app.processing.pipeline import is_actionable_event, process_event_stream
 from app.processing.research_event_builder import build_research_event, composite_research_score
+from app.research.events import build_research_events, build_research_freshness_summary, diff_research_events, rank_research_events
+from app.research.rendering import render_analyst_read
+from app.research.snapshot import (
+    compact_dicts_to_stub_events,
+    load_previous_research_snapshot,
+    persist_research_snapshot,
+)
 from app.schemas.research_event import ResearchEvent
 from app.schemas.briefings import MarketSetup, MorningBriefing, session_mode_for
 from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, PricePoint, QuoteData, SectorSnapshot
@@ -622,22 +629,31 @@ class MorningBriefingGenerator:
             )
             if s
         }
-        _research_index = (
-            self._build_research_event_index(eligible, _preferred_symbols)
-            if getattr(self.settings, "use_research_event_ranking", False)
-            else None
+        _research_enabled = bool(
+            getattr(self.settings, "use_research_event_ranking", False)
+            or getattr(self.settings, "enable_research_agent_briefings", False)
         )
         briefing.global_news = self._build_global_news(eligible, briefing.session_mode)
+        briefing.earnings_calendar = self._fetch_earnings()
+        briefing.earnings_relevance = self._build_earnings_relevance(briefing.earnings_calendar)
+        briefing.watchlist_quotes = self._fetch_watchlist_quotes()
+        briefing.portfolio_quotes = self._fetch_portfolio_quotes()
+        _quotes_by_symbol = self._quotes_by_symbol(briefing)
+        _research_index = (
+            self._build_research_event_index(eligible, _preferred_symbols, _quotes_by_symbol)
+            if _research_enabled
+            else None
+        )
         briefing.top_themes = self._build_top_themes(
             eligible, briefing.session_mode, research_index=_research_index
         )
         briefing.portfolio_focus = self._build_portfolio_focus(eligible)
         briefing.sector_scan = self._build_sector_scan(eligible, briefing.session_mode)
-        briefing.earnings_calendar = self._fetch_earnings()
-        briefing.earnings_relevance = self._build_earnings_relevance(briefing.earnings_calendar)
         briefing.watchlist_events = self._filter_watchlist_events(eligible)
-        briefing.watchlist_quotes = self._fetch_watchlist_quotes()
-        briefing.portfolio_quotes = self._fetch_portfolio_quotes()
+        if _research_index:
+            briefing.global_news = self._rank_normalised_by_research(briefing.global_news, _research_index, MAX_GLOBAL_NEWS)
+            briefing.portfolio_focus = self._rank_normalised_by_research(briefing.portfolio_focus, _research_index, MAX_PORTFOLIO_FOCUS)
+            briefing.watchlist_events = self._rank_normalised_by_research(briefing.watchlist_events, _research_index, self.rules.max_watchlist_events)
         healthcare_candidates = self._healthcare_candidate_events(
             eligible=eligible,
             briefing=briefing,
@@ -802,6 +818,12 @@ class MorningBriefingGenerator:
         briefing.regime_context = regime_context
         briefing.positioning_alignment = alignment
         self._dedupe_cross_section_events(briefing)
+        if getattr(self.settings, "enable_research_agent_briefings", False):
+            self._apply_research_agent_briefing(
+                briefing,
+                research_index=_research_index,
+                provider_contributions=dict(hub_stats.get("provider_contributions", {}) or {}),
+            )
         if self._should_build_charts():
             chart_briefing = briefing.model_copy(deep=True)
             chart_briefing.market_setup = active_setup.model_copy(deep=True)
@@ -1178,24 +1200,164 @@ class MorningBriefingGenerator:
         self,
         eligible: list[NormalisedEvent],
         preferred_symbols: set[str],
+        quotes_by_symbol: dict[str, QuoteData] | None = None,
     ) -> dict[str, tuple[ResearchEvent, float]]:
         """Build event_id -> (ResearchEvent, composite_score) for re-ranking.
 
-        Called only when settings.use_research_event_ranking is True. Pure
-        computation: no provider or DB calls. Price confirmation is skipped
-        here (quotes not yet available at section-assembly time) so
-        price_confirmation_status will be "unavailable" for all events; the
-        causal_channel/corroboration/novelty/portfolio signals still re-rank
-        meaningfully without it.
+        Called only when research-agent ranking is enabled. Pure computation:
+        no provider or DB calls. Price confirmation uses already-fetched
+        watchlist/portfolio quotes when supplied.
         """
         index: dict[str, tuple[ResearchEvent, float]] = {}
-        for evt in eligible:
-            try:
-                re = build_research_event(evt, preferred_symbols=preferred_symbols)
-                index[evt.event_id] = (re, composite_research_score(re))
-            except Exception:
-                logger.debug("research event build failed for %s", evt.event_id, exc_info=True)
+        failures_out: list[int] = [0]
+        research_events = build_research_events(
+            eligible,
+            quotes_by_symbol=quotes_by_symbol or {},
+            preferred_symbols=preferred_symbols,
+            now=datetime.now(timezone.utc),
+            failures_out=failures_out,
+        )
+        if failures_out[0]:
+            logger.debug("Research event build failures: %d", failures_out[0])
+        # Stash failures on instance so _apply_research_agent_briefing can read them.
+        self._last_research_build_failures = failures_out[0]
+        for re in research_events:
+            index[re.source_event_id] = (re, composite_research_score(re))
         return index
+
+    @staticmethod
+    def _quotes_by_symbol(briefing: MorningBriefing) -> dict[str, QuoteData]:
+        quotes: dict[str, QuoteData] = {}
+        for quote in (
+            list(briefing.watchlist_quotes or [])
+            + list(briefing.portfolio_quotes or [])
+            + list(briefing.market_setup.index_quotes or [])
+            + list(briefing.market_setup.macro_quotes or [])
+        ):
+            if quote.symbol:
+                quotes[str(quote.symbol).upper()] = quote
+        return quotes
+
+    @staticmethod
+    def _rank_normalised_by_research(
+        events: list[NormalisedEvent],
+        research_index: dict[str, tuple[ResearchEvent, float]],
+        max_items: int,
+    ) -> list[NormalisedEvent]:
+        ranked: list[tuple[float, int, NormalisedEvent]] = []
+        for idx, event in enumerate(events):
+            entry = research_index.get(event.event_id)
+            score = entry[1] if entry else float(event.final_score or 0.0)
+            ranked.append((score, -idx, event))
+        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [event for _, _idx, event in ranked[:max_items]]
+
+    def _apply_research_agent_briefing(
+        self,
+        briefing: MorningBriefing,
+        *,
+        research_index: dict[str, tuple[ResearchEvent, float]] | None,
+        provider_contributions: dict[str, int],
+    ) -> None:
+        """Populate analyst-read fields from the post-dedupe surfaced sections."""
+        surfaced_ids: list[str] = []
+        for event in (
+            list(briefing.top_themes or [])
+            + list(briefing.global_news or [])
+            + list(briefing.portfolio_focus or [])
+            + list(briefing.watchlist_events or [])
+            + [evt for snap in (briefing.sector_scan or []) for evt in (snap.top_events or [])]
+        ):
+            if event.event_id not in surfaced_ids:
+                surfaced_ids.append(event.event_id)
+
+        # Read build failure count tracked during index construction.
+        build_failures = int(getattr(self, "_last_research_build_failures", 0) or 0)
+        if research_index:
+            candidates = [
+                research_index[event_id][0]
+                for event_id in surfaced_ids
+                if event_id in research_index
+            ]
+        else:
+            candidates = []
+
+        session_key = briefing.session_key or "morning"
+        min_confidence = str(
+            getattr(self.settings, "research_agent_min_confidence", "medium") or "medium"
+        )
+        ranked = rank_research_events(
+            candidates,
+            session_key=session_key,
+            max_items=int(getattr(self.settings, "research_agent_max_items_per_session", 5) or 5),
+            min_confidence=min_confidence,
+        )
+
+        # For non-morning sessions, load the previous session's research snapshot
+        # and annotate ranked events with their delta status (new / material_update /
+        # repeated / stale). This gives the analyst-read genuine session-to-session
+        # novelty rather than re-ranking the same stories as if they were fresh.
+        if (session_key or "morning").lower() != "morning" and ranked:
+            try:
+                from zoneinfo import ZoneInfo as _ZI
+                _tz = _ZI(self.profile.timezone or self.settings.timezone or "Europe/Madrid")
+                _local_date = briefing.generated_at.astimezone(_tz).date()
+                prev_records = load_previous_research_snapshot(
+                    profile_name=self.profile.name,
+                    local_date=_local_date,
+                    session_key=session_key,
+                )
+                if prev_records:
+                    prev_stubs = compact_dicts_to_stub_events(prev_records)
+                    deltas = diff_research_events(ranked, prev_stubs)
+                    for event, delta in zip(ranked, deltas):
+                        if delta.status == "new":
+                            event.what_changed = event.what_changed or "New since prior session."
+                        elif delta.status == "material_update":
+                            changed = ", ".join(delta.changed_fields) if delta.changed_fields else "signal"
+                            event.what_changed = f"Updated since prior session ({changed} changed)."
+                        elif delta.status in {"repeated", "stale"}:
+                            event.what_changed = f"Carried from prior session ({delta.status})."
+            except Exception:
+                logger.debug("Research diff against previous session failed; skipping delta annotation", exc_info=True)
+
+        briefing.research_events = ranked
+        briefing.analyst_read_lines = render_analyst_read(
+            ranked,
+            session_key=session_key,
+            use_llm_prose=bool(getattr(self.settings, "research_agent_llm_prose_enabled", False)),
+        )
+        tz_label = self.profile.timezone or self.settings.timezone or "UTC"
+        freshness = build_research_freshness_summary(
+            ranked,
+            provider_contributions=provider_contributions,
+            timezone_label=tz_label,
+            build_failures=build_failures,
+        )
+        briefing.research_source_basis = freshness.source_basis_label
+        briefing.research_freshness = {
+            "newest_event_at": freshness.newest_event_at.isoformat() if freshness.newest_event_at else "",
+            "provider_contributions": freshness.provider_contributions,
+            "stale_provider_count": freshness.stale_provider_count,
+            "outage_provider_count": freshness.outage_provider_count,
+            "source_basis_label": freshness.source_basis_label,
+            "build_failures": build_failures,
+        }
+
+        # Persist a compact snapshot so the next session can diff against this one.
+        if ranked:
+            try:
+                from zoneinfo import ZoneInfo as _ZI2
+                _tz2 = _ZI2(self.profile.timezone or self.settings.timezone or "Europe/Madrid")
+                _local_date2 = briefing.generated_at.astimezone(_tz2).date()
+                persist_research_snapshot(
+                    ranked,
+                    profile_name=self.profile.name,
+                    local_date=_local_date2,
+                    session_key=session_key,
+                )
+            except Exception:
+                logger.debug("Research snapshot persist failed; skipping", exc_info=True)
 
     def _build_market_setup(self) -> MarketSetup:
         """Fetch quotes for indices and macro instruments."""
