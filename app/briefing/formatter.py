@@ -153,18 +153,35 @@ class TelegramFormatter:
         (split if exceeding Telegram's 4096 char limit).
         """
         sections = []
-        is_weekend = briefing.session_mode in {"saturday", "sunday"}
 
-        # Header
-        date_str = briefing.generated_at.strftime("%a %d %b %Y")
+        # Convert UTC generated_at to local timezone before determining day/title.
+        # A briefing generated at 00:00 CEST (= 22:00 UTC Sunday) must show
+        # Monday's date and a non-weekend header, not "Sun 24 May".
+        gen = briefing.generated_at
+        if gen.tzinfo is None:
+            from datetime import timezone as _tz
+            gen = gen.replace(tzinfo=_tz.utc)
+        local_gen = gen.astimezone(self.local_tz)
+        local_weekday = local_gen.weekday()  # 0=Mon, 6=Sun
+
+        is_weekend = briefing.session_mode in {"saturday", "sunday"} and local_weekday >= 5
+
+        # Header: use local date to avoid cross-midnight UTC artefacts.
+        date_str = local_gen.strftime("%a %d %b %Y")
         if briefing.session_title and briefing.session_key not in {"morning", ""}:
             header = briefing.session_title.upper()
-        elif briefing.session_mode == "saturday":
+        elif briefing.session_mode == "saturday" and local_weekday == 5:
             header = SECTION_HEADERS["weekend_title_saturday"]
-        elif briefing.session_mode == "sunday":
+        elif briefing.session_mode == "sunday" and local_weekday == 6:
             header = SECTION_HEADERS["weekend_title_sunday"]
         else:
             header = SECTION_HEADERS["morning_title"]
+        briefing_mode = getattr(briefing, "briefing_mode", "normal")
+
+        # Mode-specific title override for news_only
+        if briefing_mode == "news_only":
+            header = f"FRESH NEWS UPDATE — {header}"
+
         tldr = briefing.dominant_tape_driver or briefing.market_setup_analysis or ""
         if tldr:
             tldr = tldr[:130] + ("…" if len(tldr) > 130 else "")
@@ -172,6 +189,53 @@ class TelegramFormatter:
             f"<b>{header}</b>\n{date_str}"
             + (f"\n<i>{tldr}</i>" if tldr else "")
         )
+
+        # Degraded context banner (covers both degraded_context mode and legacy stale snapshot)
+        if briefing_mode == "degraded_context":
+            snap_sess = (
+                getattr(briefing, "stale_snapshot_session", "")
+                or getattr(briefing, "last_valid_market_snapshot_session", "")
+                or "prior session"
+            )
+            snap_time = (
+                getattr(briefing, "stale_snapshot_time", "")
+                or getattr(briefing, "last_valid_market_snapshot_time", "")
+                or "unknown time"
+            )
+            sections.append(
+                f"⚠️ <b>LIVE MARKET DATA DEGRADED</b>\n"
+                f"Provider fetch failed. Using {snap_sess} snapshot ({snap_time}). "
+                f"Treat all levels as stale."
+            )
+        elif briefing_mode == "news_only":
+            snap_sess = (
+                getattr(briefing, "last_valid_market_snapshot_session", "")
+                or getattr(briefing, "stale_snapshot_session", "")
+            )
+            snap_time = (
+                getattr(briefing, "last_valid_market_snapshot_time", "")
+                or getattr(briefing, "stale_snapshot_time", "")
+            )
+            if snap_sess or snap_time:
+                sections.append(
+                    f"⚠️ Live market data unavailable. Last valid snapshot: "
+                    f"{snap_sess or 'prior session'} at {snap_time or 'unknown time'}. "
+                    f"Levels below are stale."
+                )
+        elif briefing.market_data_outage:
+            sections.append(
+                "<b>DATA OUTAGE / PROVIDER DEGRADED</b>\n"
+                "Market data unavailable; no directional read generated. "
+                "Provider data outage; see diagnostics."
+            )
+        elif getattr(briefing, "stale_snapshot_used", False):
+            snap_time = getattr(briefing, "stale_snapshot_time", "prior session")
+            snap_sess = getattr(briefing, "stale_snapshot_session", "prior session")
+            sections.append(
+                f"⚠️ <b>LIVE DATA DEGRADED</b>\n"
+                f"Provider fetch failed; using {snap_sess} snapshot ({snap_time}). "
+                f"Treat all levels as stale until providers recover."
+            )
 
         session_key = (briefing.session_key or "morning").lower()
         is_morning = session_key == "morning"
@@ -188,6 +252,7 @@ class TelegramFormatter:
             tags = [str(tag).replace("_", " ").upper() for tag in (briefing.market_setup_signal_tags or [])[:4]]
             driver_line = " | ".join(tags) if tags else "No single driver tag dominated; cross-asset context remained mixed."
             sections.append("\n".join(["<b>CONFIRMED DRIVERS</b>", "- " + driver_line]))
+            sections.append("<b>TOMORROW SETUP</b>\nTrigger board and event risk follow below.")
 
         if not is_morning:
             what_changed = self._format_what_changed(
@@ -228,6 +293,9 @@ class TelegramFormatter:
         setup = self._format_market_setup(briefing) if (is_morning or is_preopen or is_closing) else self._format_session_snapshot(briefing)
         if setup:
             sections.append(setup)
+        diagnosis_block = self._format_session_diagnosis(briefing)
+        if diagnosis_block:
+            sections.append(diagnosis_block)
 
         if is_morning or is_preopen or is_closing:
             macro = self._format_macro(briefing.macro_context)
@@ -310,33 +378,46 @@ class TelegramFormatter:
             if global_news:
                 sections.append(global_news)
         elif not briefing.global_news:
-            since = self._since_label_from_header(briefing.what_changed_header)
-            weekend_elevated_geo = (
-                is_weekend
-                and str(briefing.geo_risk_level or "").strip().lower()
-                in {"elevated", "high", "severe"}
-            )
-            empty_line = (
-                "No new material headlines since the last weekend scan; existing risk context remains active"
-                if weekend_elevated_geo
-                else (
-                    f"No material new headlines since {since}."
-                    if since
-                    else "No material new headlines this session."
+            if briefing.news_data_outage:
+                sections.append(
+                    "\n".join(
+                        [
+                            f"<b>{SECTION_HEADERS['global_news']}</b>",
+                            "News scan returned no usable items; provider diagnostics required.",
+                        ]
+                    )
                 )
-            )
-            sections.append(
-                "\n".join(
-                    [
-                        f"<b>{SECTION_HEADERS['global_news']}</b>",
-                        empty_line,
-                    ]
+            else:
+                since = self._since_label_from_header(briefing.what_changed_header)
+                weekend_elevated_geo = (
+                    is_weekend
+                    and str(briefing.geo_risk_level or "").strip().lower()
+                    in {"elevated", "high", "severe"}
                 )
-            )
+                empty_line = (
+                    "No new material headlines since the last weekend scan; existing risk context remains active"
+                    if weekend_elevated_geo
+                    else (
+                        f"No material new headlines since {since}."
+                        if since
+                        else "No material new headlines this session."
+                    )
+                )
+                sections.append(
+                    "\n".join(
+                        [
+                            f"<b>{SECTION_HEADERS['global_news']}</b>",
+                            empty_line,
+                        ]
+                    )
+                )
 
         themes = self._format_themes_for_mode(briefing.top_themes, briefing.session_mode)
         if themes and (is_morning or is_preopen or is_closing):
             sections.append(themes)
+        applied_news = self._format_applied_news_stack(briefing.applied_news_stack)
+        if applied_news and is_morning:
+            sections.append(applied_news)
 
         portfolio_focus = self._format_portfolio_focus(briefing.portfolio_focus)
         if portfolio_focus and (is_morning or is_preopen or is_closing):
@@ -345,6 +426,9 @@ class TelegramFormatter:
         healthcare = self._format_healthcare_intelligence(briefing.healthcare_intelligence, session_key=session_key)
         if healthcare:
             sections.append(healthcare)
+        vertical_shadow = self._format_vertical_shadow(briefing)
+        if vertical_shadow:
+            sections.append(vertical_shadow)
 
         if is_weekend:
             week_ahead = self._format_week_ahead(briefing)
@@ -373,12 +457,17 @@ class TelegramFormatter:
             sections.append(watchlist)
 
         # Footer
-        sections.append(
-            f"<i>{SECTION_HEADERS['footer']} | "
+        footer_line = (
+            f"{SECTION_HEADERS['footer']} | "
             f"{briefing.events_fetched} fetched, "
             f"{briefing.events_after_dedup} unique, "
-            f"{briefing.events_sent} sent</i>"
+            f"{briefing.events_sent} sent"
         )
+        if briefing.news_data_outage:
+            footer_line += " | provider outage (raw fetch 0)"
+        elif briefing.news_raw_fetched > 0 and briefing.events_fetched <= 0:
+            footer_line += f" | {briefing.news_raw_fetched} raw fetched, 0 selected after filters"
+        sections.append(f"<i>{footer_line}</i>")
         provider_health = (briefing.data_freshness or {}).get("Provider Health", "").strip()
         if provider_health:
             note = self._provider_health_note(provider_health)
@@ -465,41 +554,60 @@ class TelegramFormatter:
 
     def _format_watch_triggers(self, briefing: MorningBriefing) -> str:
         session_key = (briefing.session_key or "morning").lower()
-        if session_key == "morning":
+        board = dict(getattr(briefing, "trigger_board", {}) or {})
+        active = [str(line).strip() for line in (board.get("active") or []) if str(line).strip()]
+        watch = [str(line).strip() for line in (board.get("watch") or []) if str(line).strip()]
+        cooled = [str(line).strip() for line in (board.get("cooled") or []) if str(line).strip()]
+        if not (active or watch or cooled):
             return ""
-        if session_key in {"saturday_weekend_briefing", "sunday_weekend_watch"}:
-            header = "MONDAY WATCHPOINTS"
-        elif session_key == "closing_wrap":
-            header = "TOMORROW SETUP"
-        elif session_key in {"us_intraday_risk", "into_close"}:
-            header = "WATCH INTO CLOSE"
-        elif session_key == "us_pre_open":
-            header = "OPENING TRIGGERS"
-        else:
-            header = "SESSION TRIGGERS"
-        index_quotes = briefing.market_setup.index_quotes + briefing.market_setup.macro_quotes
-        vix = next((float(q.current_price or 0.0) for q in index_quotes if "VIX" in (q.display_name or q.symbol or "").upper()), None)
-        ten_y = next((float(q.current_price or 0.0) for q in index_quotes if "10Y" in (q.display_name or q.symbol or "").upper()), None)
-        oil = next(
-            (
-                float(q.current_price or 0.0)
-                for q in index_quotes
-                if ("WTI" in (q.display_name or q.symbol or "").upper()) or ("CRUDE" in (q.display_name or q.symbol or "").upper())
-            ),
-            None,
-        )
-        triggers: list[str] = []
-        vix_line = format_trigger_line("VIX", vix, 20.0, "above", "confirms broader risk-off pressure")
-        if vix_line:
-            triggers.append(vix_line)
-        ten_y_line = format_trigger_line("US 10Y", ten_y, 4.45, "above", "reinforce rates pressure")
-        if ten_y_line:
-            triggers.append(ten_y_line)
-        oil_line = format_trigger_line("WTI", oil, 107.0, "above", "signal escalating energy pressure")
-        if oil_line:
-            triggers.append(oil_line)
-        triggers.append("Nasdaq turning negative would indicate the growth cushion is fading.")
-        return "\n".join([f"<b>{header}</b>"] + [f"- {line}" for line in triggers[:4]])
+        header = self._trigger_board_header(session_key)
+        if session_key == "closing_wrap":
+            # Backward-compatible alias while transitioning to Trigger Board wording.
+            header = f"{header} (TOMORROW SETUP)"
+        lines = [f"<b>{header}</b>"]
+        if active:
+            lines.append("Active triggers:")
+            lines.extend([f"- {line}" for line in active[:3]])
+        if watch:
+            lines.append("Watch triggers:")
+            lines.extend([f"- {line}" for line in watch[:3]])
+        if cooled:
+            lines.append("Cooled / invalidated:")
+            lines.extend([f"- {line}" for line in cooled[:2]])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _trigger_board_header(session_key: str) -> str:
+        mapping = {
+            "morning": "TODAY'S TRIGGER BOARD",
+            "europe_midday": "EUROPE/US HANDOFF TRIGGERS",
+            "us_pre_open": "OPENING TRIGGER BOARD",
+            "us_intraday_risk": "INTRADAY CONFIRMATION TRIGGERS",
+            "into_close": "CLOSE-QUALITY TRIGGERS",
+            "closing_wrap": "TOMORROW TRIGGER BOARD",
+            "saturday_weekend_briefing": "MONDAY WATCHPOINTS",
+            "sunday_weekend_watch": "MONDAY WATCHPOINTS",
+        }
+        return mapping.get(session_key, "SESSION TRIGGER BOARD")
+
+    def _format_session_diagnosis(self, briefing: MorningBriefing) -> str:
+        diag = dict(getattr(briefing, "session_diagnosis", {}) or {})
+        if not diag:
+            return ""
+        lines = ["<b>SESSION DIAGNOSIS</b>"]
+        sentence = str(diag.get("one_sentence_diagnosis") or "").strip()
+        if sentence:
+            lines.append(sentence)
+        regional = str(diag.get("regional_diagnosis") or "").strip()
+        if regional:
+            lines.append(regional)
+        portfolio = str(diag.get("portfolio_diagnosis") or "").strip()
+        if portfolio:
+            lines.append(portfolio)
+        caveats = [str(c).strip() for c in (diag.get("data_caveats") or []) if str(c).strip()]
+        if caveats:
+            lines.append("Data caveats: " + " | ".join(caveats[:2]))
+        return "\n".join(lines)
 
     def _format_healthcare_intelligence(
         self,
@@ -537,6 +645,16 @@ class TelegramFormatter:
             if meta:
                 lines.append(f"   <i>{' | '.join(meta)}</i>")
         return "\n".join(lines)
+
+    def _format_vertical_shadow(self, briefing: MorningBriefing) -> str:
+        lines = [str(x).strip() for x in (getattr(briefing, "vertical_shadow_lines", []) or []) if str(x).strip()]
+        if not lines:
+            return ""
+        rendered = ["<b>VERTICAL INTELLIGENCE (SHADOW)</b>"]
+        for line in lines[:9]:
+            rendered.append(f"- {truncate(line, 220)}")
+        rendered.append("Deterministic signal summaries; not a live alert authority.")
+        return "\n".join(rendered)
 
     def format_intraday_update(self, update: IntradayUpdate) -> list[str]:
         """Format an hourly intraday update."""
@@ -1020,6 +1138,38 @@ class TelegramFormatter:
                 lines.append(f"  <i>{' | '.join(meta)}</i>")
         return "\n".join(lines)
 
+    def _format_applied_news_stack(self, rows: list[dict[str, object]]) -> str:
+        if not rows:
+            return ""
+        bucket_labels = {
+            "macro_rates": "Macro/Rates",
+            "regional": "Regional",
+            "sector": "Sector",
+            "watchlist": "Watchlist",
+            "portfolio": "Portfolio",
+            "event_risk": "Event Risk",
+            "geopolitical": "Geopolitical",
+            "regulatory": "Regulatory",
+            "supply_chain": "Supply Chain",
+            "sentiment": "Analyst/Sentiment",
+        }
+        lines = ["<b>APPLIED NEWS STACK</b>"]
+        for row in rows[:7]:
+            bucket = bucket_labels.get(str(row.get("bucket") or ""), "Theme")
+            headline = str(row.get("headline") or "").strip()
+            why = str(row.get("why_it_matters") or "").strip()
+            assets = [str(a).strip() for a in (row.get("affected_assets") or []) if str(a).strip()]
+            conf = str(row.get("price_confirmation") or "optional")
+            src_ct = int(row.get("source_count") or 1)
+            if headline:
+                lines.append(f"- <b>{bucket}:</b> {headline}")
+            if why:
+                lines.append(f"  Why it matters: {why}")
+            if assets:
+                lines.append(f"  Affected: {', '.join(assets[:4])}")
+            lines.append(f"  Signal: {conf} · sources: {src_ct}")
+        return "\n".join(lines)
+
     def _format_global_risk_update(self, events: list[NormalisedEvent]) -> str:
         if not events:
             return ""
@@ -1167,7 +1317,7 @@ class TelegramFormatter:
             intraday_like = (briefing.session_key or "").lower() in {"us_intraday_risk", "into_close"}
             if intraday_like and shown_quotes and live_count >= max(1, int(len(shown_quotes) * 0.7)):
                 parts.append("<i>Watchlist basis changed from prior-close context to live intraday quotes.</i>")
-            freshness = self._format_quotes_freshness_summary(quotes, session_mode)
+            freshness = self._format_quotes_freshness_summary(quotes, session_mode, briefing)
             if freshness:
                 parts.append(f"<i>{freshness}</i>")
 
@@ -1374,9 +1524,26 @@ class TelegramFormatter:
         self,
         quotes: list[QuoteData],
         session_mode: str,
+        briefing: MorningBriefing | None = None,
     ) -> str:
         if not quotes:
             return ""
+        if briefing is not None:
+            states = [
+                str(self._freshness_meta(briefing, quote).get("freshness_state") or "")
+                for quote in quotes
+            ]
+            states = [s for s in states if s]
+            if states:
+                state_counts: dict[str, int] = {}
+                for state in states:
+                    state_counts[state] = state_counts.get(state, 0) + 1
+                state_summary = ", ".join(f"{k}:{v}" for k, v in sorted(state_counts.items()))
+            else:
+                state_summary = "unknown"
+        else:
+            state_summary = "unknown"
+
         latest = max(quotes, key=lambda quote: self._coerce_utc_ts(quote.timestamp))
         latest_ts = self._coerce_utc_ts(latest.timestamp)
         local_label = latest_ts.astimezone(self.local_tz).strftime("%H:%M %Z")
@@ -1389,7 +1556,7 @@ class TelegramFormatter:
             for source, count in sorted(source_counts.items(), key=lambda item: item[0])
         )
         reference = "vs Friday close" if session_mode in {"saturday", "sunday"} else "vs prior close"
-        return f"Quotes as of {local_label} | sources: {source_summary} | {reference}"
+        return f"Quotes as of {local_label} | freshness: {state_summary} | sources: {source_summary} | {reference}"
 
     def _format_quote_freshness_line(
         self,

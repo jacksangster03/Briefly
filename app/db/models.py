@@ -948,3 +948,39 @@ class HealthcareSourceEventRecord(Base):
     raw_data_json = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=_utcnow, index=True)
     updated_at = Column(DateTime, default=_utcnow, index=True)
+
+
+class VerticalSourceEventRecord(Base):
+    """Persisted normalised source events for all vertical plugins."""
+
+    __tablename__ = "vertical_source_events"
+    __table_args__ = (
+        UniqueConstraint("vertical", "source_name", "payload_hash", name="uq_vertical_source_event_key"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    vertical = Column(String(80), nullable=False, index=True)
+    source_name = Column(String(120), nullable=False, default="", index=True)
+    source_tier = Column(String(40), nullable=False, default="primary", index=True)
+    source_url = Column(Text, nullable=True)
+    published_at = Column(DateTime, nullable=True, index=True)
+    fetched_at = Column(DateTime, nullable=True, index=True)
+    title = Column(Text, nullable=False, default="")
+    summary = Column(Text, nullable=False, default="")
+    event_type = Column(String(80), nullable=True, index=True)
+    causal_channel = Column(String(120), nullable=True)
+    entities_json = Column(JSON, nullable=True)
+    tickers_json = Column(JSON, nullable=True)
+    regions_json = Column(JSON, nullable=True)
+    countries_json = Column(JSON, nullable=True)
+    asset_classes_json = Column(JSON, nullable=True)
+    source_count = Column(Integer, nullable=True)
+    novelty_score = Column(Float, nullable=True)
+    relevance_score = Column(Float, nullable=True)
+    portfolio_relevance = Column(Float, nullable=True)
+    market_relevance = Column(Float, nullable=True)
+    confidence = Column(Float, nullable=True)
+    payload_hash = Column(String(64), nullable=False, index=True)
+    diagnostics_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)
+    updated_at = Column(DateTime, default=_utcnow, index=True)

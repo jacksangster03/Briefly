@@ -113,6 +113,20 @@ class Settings(BaseSettings):
     breaking_followup_min_asset_move_pct: float = 0.9
     enable_finbert: bool = False
     enable_garch: bool = False
+    use_research_event_ranking: bool = False
+    enable_research_agent_briefings: bool = False
+    research_agent_max_items_per_session: int = 5
+    research_agent_min_confidence: str = "low"
+    research_agent_llm_prose_enabled: bool = False
+
+    # -- Primary sources (no API key required) --------------------------------
+    # Fetches directly from Federal Reserve, SEC EDGAR, and Bank of England.
+    # Requires sec_user_agent to include a valid email address (SEC policy).
+    enable_primary_sources: bool = True
+
+    # -- IPO and private-company intelligence ---------------------------------
+    enable_ipo_intelligence: bool = True
+    ipo_monitor_newsrooms: bool = True
 
     # -- Paths ----------------------------------------------------------------
     configs_dir: str = str(PROJECT_ROOT / "configs")
@@ -195,6 +209,12 @@ class Settings(BaseSettings):
     @property
     def eurostat_configured(self) -> bool:
         return bool(self.eurostat_base_url)
+
+    @property
+    def primary_sources_configured(self) -> bool:
+        return self.enable_primary_sources and bool(
+            self.sec_user_agent and "@" in self.sec_user_agent
+        )
 
     @property
     def newsapi_configured(self) -> bool:

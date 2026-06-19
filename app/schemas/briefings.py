@@ -76,6 +76,7 @@ class MorningBriefing(BaseModel):
     global_news: list[NormalisedEvent] = Field(default_factory=list)
     top_themes: list[NormalisedEvent] = Field(default_factory=list)
     portfolio_focus: list[NormalisedEvent] = Field(default_factory=list)
+    applied_news_stack: list[dict[str, object]] = Field(default_factory=list)
     sector_scan: list[SectorSnapshot] = Field(default_factory=list)
     earnings_calendar: list[EarningsEvent] = Field(default_factory=list)
     earnings_relevance: dict[str, str] = Field(default_factory=dict)
@@ -88,7 +89,15 @@ class MorningBriefing(BaseModel):
     session_quality_label: str = ""
     section_confidence: dict[str, str] = Field(default_factory=dict)
     data_freshness: dict[str, str] = Field(default_factory=dict)
+    market_data_outage: bool = False
+    news_data_outage: bool = False
+    news_pipeline_status: str = ""
+    news_raw_fetched: int = 0
+    news_after_fingerprint_dedup: int = 0
+    session_diagnosis: dict[str, object] = Field(default_factory=dict)
+    trigger_board: dict[str, list[str]] = Field(default_factory=dict)
     macro_policy_watch: str = ""
+    vertical_shadow_lines: list[str] = Field(default_factory=list)
     valuation_lens_lines: list[str] = Field(default_factory=list)
     quote_freshness: dict[str, dict] = Field(default_factory=dict)
     data_basis_lines: list[str] = Field(default_factory=list)
@@ -107,6 +116,18 @@ class MorningBriefing(BaseModel):
     events_sent: int = 0
     fx_pulse_section: str = ""
     fx_materiality_score: int = 0
+    stale_snapshot_used: bool = False
+    stale_snapshot_session: str | None = None
+    stale_snapshot_time: str | None = None
+    # Freshness status contract
+    market_data_status: str = "live"   # live | partial | stale_snapshot | unavailable
+    news_status: str = "fresh"         # fresh | stale | empty | provider_outage
+    briefing_mode: str = "normal"      # normal | market_only | news_only | degraded_context | suppressed
+    suppress_reason: str = ""
+    last_valid_market_snapshot_session: str = ""
+    last_valid_market_snapshot_time: str = ""
+    fresh_news_count: int = 0
+    fresh_news_materiality_score: float = 0.0
 
 
 class IntradayUpdate(BaseModel):

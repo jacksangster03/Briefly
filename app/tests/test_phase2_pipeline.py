@@ -576,6 +576,39 @@ def test_ticker_resolution_summary_fallback_when_title_has_none():
     assert "TSM" in evt.tickers
 
 
+def test_ticker_resolution_drops_collision_prone_bare_word():
+    """A provider-tagged ticker that collides with a common word (e.g. ALL =
+    Allstate) should not be confirmed by a bare-word match; the underlying
+    word is almost certainly not about the company.
+    """
+    from app.processing.pipeline import _resolve_event_tickers
+
+    evt = NormalisedEvent(
+        title="Fed says all major banks passed the stress test",
+        summary="Regulators confirmed all institutions cleared the bar.",
+        tickers=["ALL"],  # Allstate, spuriously provider-tagged
+        event_type="market_news",
+    )
+    _resolve_event_tickers([evt])
+    assert evt.tickers == []  # "all" the common word, not ALL the ticker
+
+
+def test_ticker_resolution_keeps_collision_prone_symbol_with_explicit_notation():
+    """The same collision-prone symbol should still resolve when the text
+    uses explicit ticker notation rather than a bare word.
+    """
+    from app.processing.pipeline import _resolve_event_tickers
+
+    evt = NormalisedEvent(
+        title="Allstate ($ALL) raises premiums after storm losses",
+        summary="",
+        tickers=["ALL"],
+        event_type="market_news",
+    )
+    _resolve_event_tickers([evt])
+    assert evt.tickers == ["ALL"]
+
+
 def test_sentence_aware_truncation():
     """Truncation should prefer sentence boundaries over mid-word cuts."""
     from app.processing.cleaners import truncate

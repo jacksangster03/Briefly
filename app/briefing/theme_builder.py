@@ -20,6 +20,28 @@ _PORTFOLIO_TAG_PRIORITY = {
 }
 
 
+def portfolio_tag_bonus(event: NormalisedEvent) -> float:
+    """Ranking bonus for an event's portfolio_tag (DIRECT/SECTOR/MACRO/TANGENTIAL).
+
+    Extracted from build_top_themes()'s inline lookup so the same bonus can
+    be reused on ResearchEvent (docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md Part
+    17.3) instead of staying duplicated wherever theme ranking is needed.
+    """
+    tag = str(event.portfolio_tag or event.raw_data.get("portfolio_tag") or "").upper()
+    return _PORTFOLIO_TAG_PRIORITY.get(tag, 0.0)
+
+
+def watchlist_overlap_bonus(event: NormalisedEvent, preferred_symbols: set[str] | None) -> float:
+    """Ranking bonus when an event's tickers overlap the user's watchlist.
+
+    Extracted from build_top_themes()'s inline overlap check (the flat 0.35
+    bonus there) for the same reuse reason as portfolio_tag_bonus().
+    """
+    if not preferred_symbols:
+        return 0.0
+    return 0.35 if set(event.tickers) & preferred_symbols else 0.0
+
+
 def build_top_themes(
     events: list[NormalisedEvent],
     max_themes: int = 5,
@@ -40,11 +62,9 @@ def build_top_themes(
         if editorial_gate and not editorial_gate(evt):
             continue
         rank = float(evt.final_score or 0.0)
-        tag = str(evt.portfolio_tag or evt.raw_data.get("portfolio_tag") or "").upper()
-        rank += _PORTFOLIO_TAG_PRIORITY.get(tag, 0.0)
+        rank += portfolio_tag_bonus(evt)
         overlap = set(evt.tickers) & preferred_symbols
-        if overlap:
-            rank += 0.35
+        rank += watchlist_overlap_bonus(evt, preferred_symbols)
         if evt.cluster_size >= 3:
             rank += 0.08
         if evt.source == "sec_edgar" and not overlap and evt.cluster_size < 2:

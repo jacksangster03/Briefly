@@ -1,0 +1,644 @@
+# Private Company and Pre-IPO Intelligence Registry
+# =============================================================================
+# Each entry defines a monitored company, its IPO status, official sources for
+# monitoring, and its relationship map to public equities.
+#
+# IMPORTANT: Status classifications are based on officially confirmed public
+# information only. Do not assume IPO intent without official evidence.
+# Statuses must be reviewed and updated when monitoring runs produce new data.
+#
+# Status vocabulary:
+#   private              - actively private, no known IPO activity
+#   confidential_filing  - company has officially confirmed a confidential S-1/F-1 submission
+#   public_filing        - S-1 or F-1 is live on SEC EDGAR
+#   roadshow             - active investor roadshow underway
+#   priced               - final offer price set, not yet trading
+#   listed               - trading on an exchange
+#   postponed            - IPO paused, may resume
+#   withdrawn            - IPO formally cancelled
+#   acquired             - company acquired before or instead of IPO
+#
+# Relationship types (public_peers, suppliers, partners):
+#   direct_ownership     - public company holds an equity stake
+#   commercial_partner   - major commercial/strategic agreement
+#   supplier             - provides hardware, cloud, or critical services
+#   customer             - significant revenue customer
+#   competitor           - competes in same product market
+#   sector_peer          - comparable public company for valuation
+#   speculative_readthrough - inferred relationship, not directly confirmed
+#
+# Review date: 2026-06-19
+# =============================================================================
+
+version: "1.1"
+last_reviewed: "2026-06-19"
+
+companies:
+
+  openai:
+    canonical_name: "OpenAI"
+    aliases:
+      - "OpenAI Group"
+      - "OpenAI Group PBC"
+      - "OpenAI Global"
+      - "ChatGPT"
+      - "OAI"
+      - "Open AI"
+    status: "confidential_filing"
+    status_confidence: "high"
+    status_note: >
+      OpenAI publicly announced a confidential draft S-1 submission in 2025
+      as part of its restructuring to a for-profit public benefit corporation.
+      Status may have advanced; verify against SEC EDGAR and official newsroom.
+    official_domains:
+      - "openai.com"
+    newsroom_urls:
+      - "https://openai.com/news/"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: "NASDAQ"
+    latest_known_valuation_usd_bn: 157
+    latest_valuation_source: "reported (March 2025 funding round)"
+    latest_valuation_date: "2025-03-01"
+    incorporation_state: "DE"
+    description: "AI research company, creator of ChatGPT and GPT-4 model family"
+    public_peers:
+      MSFT:
+        relationship: direct_ownership
+        evidence: "Microsoft ~$13B cumulative investment; Azure exclusive cloud partner"
+      GOOGL:
+        relationship: competitor
+        evidence: "Google DeepMind / Gemini competes directly in frontier AI"
+      META:
+        relationship: competitor
+        evidence: "Meta AI and open-weight Llama series compete in AI models"
+      ORCL:
+        relationship: commercial_partner
+        evidence: "Oracle provides cloud infrastructure for OpenAI workloads"
+    suppliers:
+      NVDA:
+        relationship: supplier
+        evidence: "NVIDIA H100/H200 GPUs are primary training and inference hardware"
+      AVGO:
+        relationship: supplier
+        evidence: "Broadcom networking and custom AI accelerator partnerships"
+      AMD:
+        relationship: supplier
+        evidence: "AMD MI300X used in some inference deployments"
+    sector_etfs:
+      - AIQ
+      - BOTZ
+    themes:
+      - frontier_ai
+      - cloud_compute
+      - ai_infrastructure
+      - enterprise_ai
+      - consumer_ai
+
+  anthropic:
+    canonical_name: "Anthropic"
+    aliases:
+      - "Anthropic PBC"
+      - "Anthropic AI"
+      - "Claude"
+      - "Anthropic Holding"
+    status: "private"
+    status_confidence: "high"
+    status_note: >
+      No public IPO filing or confirmed confidential S-1 as of last review.
+      Anthropic has raised substantial strategic funding from Amazon and Google.
+      Update when official announcement is made.
+    official_domains:
+      - "anthropic.com"
+    newsroom_urls:
+      - "https://www.anthropic.com/news"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: null
+    latest_known_valuation_usd_bn: 61
+    latest_valuation_source: "reported (2025 funding round)"
+    latest_valuation_date: "2025-01-01"
+    incorporation_state: "DE"
+    description: "AI safety company and creator of the Claude model family"
+    public_peers:
+      AMZN:
+        relationship: direct_ownership
+        evidence: "Amazon committed up to $4B investment; AWS is primary cloud"
+      GOOGL:
+        relationship: direct_ownership
+        evidence: "Google invested ~$300M+ in Anthropic; GCP is secondary cloud"
+      MSFT:
+        relationship: competitor
+        evidence: "Microsoft / OpenAI compete directly with Anthropic / Claude"
+      META:
+        relationship: competitor
+        evidence: "Meta AI and Llama compete in the enterprise AI model market"
+    suppliers:
+      GOOGL:
+        relationship: supplier
+        evidence: "Google Cloud TPUs and GCP infrastructure"
+      AMZN:
+        relationship: supplier
+        evidence: "AWS Trainium / Inferentia chips and cloud compute"
+      AVGO:
+        relationship: supplier
+        evidence: "Broadcom custom AI accelerators"
+    sector_etfs:
+      - AIQ
+    themes:
+      - frontier_ai
+      - ai_safety
+      - enterprise_ai
+      - cloud_compute
+
+  stripe:
+    canonical_name: "Stripe"
+    aliases:
+      - "Stripe Inc"
+      - "Stripe Technology"
+      - "Stripe Financial"
+    status: "private"
+    status_confidence: "high"
+    status_note: >
+      Stripe has discussed IPO publicly but no formal S-1 filing or confidential
+      submission has been officially confirmed. Monitor official newsroom for announcements.
+    official_domains:
+      - "stripe.com"
+    newsroom_urls:
+      - "https://stripe.com/newsroom"
+      - "https://stripe.com/blog"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: null
+    latest_known_valuation_usd_bn: 65
+    latest_valuation_source: "reported (2023 tender offer)"
+    latest_valuation_date: "2023-03-01"
+    incorporation_state: "DE"
+    description: "Global payments and financial infrastructure platform"
+    public_peers:
+      V:
+        relationship: sector_peer
+        evidence: "Visa competes in payments infrastructure"
+      MA:
+        relationship: sector_peer
+        evidence: "Mastercard competes in payments infrastructure"
+      PYPL:
+        relationship: competitor
+        evidence: "PayPal competes in online and SMB payments"
+      ADYEN:
+        relationship: competitor
+        evidence: "Adyen competes directly in enterprise payments processing"
+      GPN:
+        relationship: competitor
+        evidence: "Global Payments provides similar merchant services"
+    suppliers: {}
+    sector_etfs:
+      - FINX
+      - IPAY
+    themes:
+      - fintech
+      - payments
+      - financial_infrastructure
+      - smb_tech
+
+  databricks:
+    canonical_name: "Databricks"
+    aliases:
+      - "Databricks Inc"
+      - "Databricks AI"
+    status: "private"
+    status_confidence: "high"
+    status_note: >
+      Raised $15B Series J at ~$62B valuation (December 2024). No formal IPO filing.
+      CEO has publicly referenced eventual IPO but no formal process announced.
+    official_domains:
+      - "databricks.com"
+    newsroom_urls:
+      - "https://www.databricks.com/blog"
+      - "https://www.databricks.com/company/newsroom"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: null
+    latest_known_valuation_usd_bn: 62
+    latest_valuation_source: "Series J (December 2024)"
+    latest_valuation_date: "2024-12-01"
+    incorporation_state: "DE"
+    description: "Data, analytics and AI platform; creator of Delta Lake and MLflow"
+    public_peers:
+      SNOW:
+        relationship: competitor
+        evidence: "Snowflake competes directly in data lakehouse and analytics"
+      MSFT:
+        relationship: commercial_partner
+        evidence: "Azure Databricks integration; Microsoft Azure is primary cloud host"
+      GOOGL:
+        relationship: commercial_partner
+        evidence: "Google Cloud partnership for data and AI workloads"
+      AMZN:
+        relationship: commercial_partner
+        evidence: "AWS Databricks partnership"
+      MDB:
+        relationship: sector_peer
+        evidence: "MongoDB is a comparable enterprise data company"
+    suppliers: {}
+    sector_etfs:
+      - CLOU
+      - AIQ
+    themes:
+      - data_platform
+      - ai_infrastructure
+      - enterprise_software
+      - cloud_compute
+
+  revolut:
+    canonical_name: "Revolut"
+    aliases:
+      - "Revolut Ltd"
+      - "Revolut Group Holdings"
+      - "Revolut Bank"
+    status: "private"
+    status_confidence: "high"
+    status_note: >
+      Revolut obtained a UK banking licence in 2024. IPO has been discussed by
+      management but no formal filing or confidential S-1 announced. Monitor for updates.
+    official_domains:
+      - "revolut.com"
+    newsroom_urls:
+      - "https://www.revolut.com/blog"
+      - "https://www.revolut.com/news"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: null
+    latest_known_valuation_usd_bn: 45
+    latest_valuation_source: "reported (2024 secondary sale)"
+    latest_valuation_date: "2024-08-01"
+    incorporation_state: null
+    description: "UK-based global neobank offering banking, payments, FX, and crypto services"
+    public_peers:
+      V:
+        relationship: sector_peer
+        evidence: "Visa is a comparable global payments business"
+      PYPL:
+        relationship: competitor
+        evidence: "PayPal competes in digital payments and consumer finance"
+      NU:
+        relationship: sector_peer
+        evidence: "Nubank is a comparable digital bank in EM; similar model"
+      SQ:
+        relationship: competitor
+        evidence: "Block/Square competes in SMB payments and consumer finance"
+    suppliers: {}
+    sector_etfs:
+      - FINX
+    themes:
+      - neobank
+      - fintech
+      - payments
+      - consumer_finance
+
+  canva:
+    canonical_name: "Canva"
+    aliases:
+      - "Canva Pty Ltd"
+      - "Canva Inc"
+    status: "private"
+    status_confidence: "high"
+    status_note: >
+      No IPO filing or confidential submission announced. CEO has discussed IPO
+      aspirations but no formal process. Monitor official newsroom.
+    official_domains:
+      - "canva.com"
+    newsroom_urls:
+      - "https://www.canva.com/newsroom/"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: null
+    latest_known_valuation_usd_bn: 26
+    latest_valuation_source: "reported (2021 funding round)"
+    latest_valuation_date: "2021-09-01"
+    incorporation_state: null
+    description: "Australian visual communications platform; design tools for teams"
+    public_peers:
+      ADBE:
+        relationship: competitor
+        evidence: "Adobe Creative Cloud competes in professional design tools"
+      MSFT:
+        relationship: competitor
+        evidence: "Microsoft Designer and PowerPoint compete in presentation tools"
+      GOOGL:
+        relationship: competitor
+        evidence: "Google Slides and Workspace compete in presentation tools"
+    suppliers: {}
+    sector_etfs:
+      - CLOU
+    themes:
+      - saas
+      - creator_tools
+      - enterprise_software
+
+  discord:
+    canonical_name: "Discord"
+    aliases:
+      - "Discord Inc"
+      - "Hammer & Chisel"
+    status: "private"
+    status_confidence: "high"
+    status_note: >
+      Discord explored IPO and acquisition (Microsoft acquisition discussions in 2021
+      fell through). No current active IPO process confirmed. Monitor for updates.
+    official_domains:
+      - "discord.com"
+    newsroom_urls:
+      - "https://discord.com/blog"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: null
+    latest_known_valuation_usd_bn: 15
+    latest_valuation_source: "reported (2021 funding round)"
+    latest_valuation_date: "2021-09-01"
+    incorporation_state: "DE"
+    description: "Community and messaging platform primarily serving gaming and online communities"
+    public_peers:
+      MSFT:
+        relationship: sector_peer
+        evidence: "Microsoft Teams is a comparable communication platform"
+      META:
+        relationship: competitor
+        evidence: "Meta Messenger and WhatsApp compete for messaging users"
+      SNAP:
+        relationship: sector_peer
+        evidence: "Snap competes for Gen Z digital social engagement"
+    suppliers: {}
+    sector_etfs:
+      - SOCL
+    themes:
+      - social_media
+      - gaming
+      - consumer_tech
+
+  anduril:
+    canonical_name: "Anduril Industries"
+    aliases:
+      - "Anduril"
+      - "Anduril Industries Inc"
+    status: "private"
+    status_confidence: "high"
+    status_note: >
+      No IPO filing. Anduril raised $1.5B+ Series F in August 2024 at ~$14B valuation.
+      Primary focus is defence contracts; not publicly pursuing IPO.
+    official_domains:
+      - "anduril.com"
+    newsroom_urls:
+      - "https://www.anduril.com/newsroom/"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: null
+    latest_known_valuation_usd_bn: 14
+    latest_valuation_source: "Series F (August 2024)"
+    latest_valuation_date: "2024-08-01"
+    incorporation_state: "DE"
+    description: "Defence technology company building autonomous systems and AI for military"
+    public_peers:
+      RTX:
+        relationship: competitor
+        evidence: "Raytheon competes in defence technology and autonomous systems"
+      LMT:
+        relationship: competitor
+        evidence: "Lockheed Martin competes in autonomous defence systems"
+      NOC:
+        relationship: competitor
+        evidence: "Northrop Grumman competes in unmanned systems and AI for defence"
+      PLTR:
+        relationship: sector_peer
+        evidence: "Palantir is a comparable defence AI software company"
+    suppliers: {}
+    sector_etfs:
+      - ITA
+      - SJET
+    themes:
+      - defence_tech
+      - autonomous_systems
+      - ai_infrastructure
+
+  xai:
+    canonical_name: "xAI"
+    aliases:
+      - "xAI Corp"
+      - "X.AI Corp"
+      - "Grok"
+      - "x.ai"
+    status: "private"
+    status_confidence: "high"
+    status_note: >
+      xAI raised ~$6B in May 2024 and additional rounds in 2025. No IPO filing.
+      Potential merger or integration with X (Twitter) discussed but unconfirmed.
+    official_domains:
+      - "x.ai"
+    newsroom_urls:
+      - "https://x.ai/blog"
+      - "https://x.ai/news"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: null
+    latest_known_valuation_usd_bn: 50
+    latest_valuation_source: "reported (2025 funding round)"
+    latest_valuation_date: "2025-01-01"
+    incorporation_state: "NV"
+    description: "AI company founded by Elon Musk; creator of the Grok large language model"
+    public_peers:
+      GOOGL:
+        relationship: competitor
+        evidence: "Google Gemini competes in frontier AI models"
+      MSFT:
+        relationship: competitor
+        evidence: "Microsoft / OpenAI GPT-4 competes in frontier AI"
+      META:
+        relationship: competitor
+        evidence: "Meta AI and Llama compete in open AI models"
+    suppliers:
+      NVDA:
+        relationship: supplier
+        evidence: "Reported large H100/H200 GPU cluster purchase for Colossus supercomputer"
+    sector_etfs:
+      - AIQ
+    themes:
+      - frontier_ai
+      - social_media
+      - ai_infrastructure
+
+  spacex:
+    canonical_name: "SpaceX"
+    aliases:
+      - "Space Exploration Technologies"
+      - "Space Exploration Technologies Corp"
+      - "Starlink"
+      - "SpaceX Holdings"
+    status: "private"
+    status_confidence: "high"
+    status_note: >
+      SpaceX conducts regular employee liquidity programmes and tender offers (most
+      recently in 2024 at ~$200/share implying ~$350B valuation). CEO Elon Musk has
+      stated repeatedly that SpaceX will not pursue a traditional IPO. Starlink
+      (the satellite internet subsidiary) has been discussed as a potential separate
+      listing but no S-1 has been filed. Do not classify as IPO-pending without
+      official announcement.
+    secondary_sales_active: true
+    official_domains:
+      - "spacex.com"
+      - "starlink.com"
+    newsroom_urls:
+      - "https://www.spacex.com/updates/"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: null
+    latest_known_valuation_usd_bn: 350
+    latest_valuation_source: "reported (2024 tender offer)"
+    latest_valuation_date: "2024-12-01"
+    incorporation_state: "DE"
+    description: "Aerospace manufacturer and space transport company; operates Starlink satellite internet"
+    public_peers:
+      BA:
+        relationship: competitor
+        evidence: "Boeing competes in launch services and aerospace"
+      LMT:
+        relationship: competitor
+        evidence: "Lockheed Martin competes in space systems"
+      ASTS:
+        relationship: sector_peer
+        evidence: "AST SpaceMobile competes in satellite broadband connectivity"
+      RKLB:
+        relationship: competitor
+        evidence: "Rocket Lab competes in small launch services"
+    suppliers:
+      NVDA:
+        relationship: supplier
+        evidence: "NVIDIA provides compute for Starlink satellite management and AI"
+    sector_etfs:
+      - ARKX
+      - UFO
+    themes:
+      - aerospace
+      - satellite_internet
+      - defence_tech
+
+  klarna:
+    canonical_name: "Klarna"
+    aliases:
+      - "Klarna Bank"
+      - "Klarna Group"
+      - "Klarna Holding"
+    status: "listed"
+    status_confidence: "high"
+    status_note: >
+      Klarna IPO'd on NYSE (KL) in July 2025 after filing its S-1 with the SEC.
+      Now a public company; tracking for ongoing relevance to fintech peers.
+    listed_ticker: "KL"
+    listed_exchange: "NYSE"
+    sec_cik: null
+    official_domains:
+      - "klarna.com"
+    newsroom_urls:
+      - "https://www.klarna.com/us/business/newsroom/"
+    public_peers:
+      AFRM:
+        relationship: competitor
+        evidence: "Affirm competes directly in BNPL in the US market"
+      PYPL:
+        relationship: competitor
+        evidence: "PayPal competes in checkout and BNPL services"
+      V:
+        relationship: sector_peer
+        evidence: "Visa competes in global payments infrastructure"
+    suppliers: {}
+    sector_etfs:
+      - FINX
+    themes:
+      - fintech
+      - bnpl
+      - payments
+      - consumer_credit
+
+  shein:
+    canonical_name: "SHEIN"
+    aliases:
+      - "Shein"
+      - "Zoetop Business"
+      - "Roadget Business"
+      - "SHEIN Group"
+    status: "confidential_filing"
+    status_confidence: "medium"
+    status_note: >
+      SHEIN reportedly submitted a confidential S-1 to the SEC in 2023. Plans faced
+      regulatory and geopolitical complications. Status is uncertain as of last review;
+      verify against latest SEC EDGAR submissions and official announcements.
+    official_domains:
+      - "shein.com"
+      - "sheingroup.com"
+    newsroom_urls:
+      - "https://www.sheingroup.com/news/"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: null
+    latest_known_valuation_usd_bn: 66
+    latest_valuation_source: "reported (2023 funding round)"
+    latest_valuation_date: "2023-05-01"
+    incorporation_state: null
+    description: "Fast-fashion e-commerce company; dominant in cross-border online retail"
+    public_peers:
+      PDD:
+        relationship: competitor
+        evidence: "Temu (PDD Holdings) competes in cross-border e-commerce"
+      AMZN:
+        relationship: competitor
+        evidence: "Amazon competes in e-commerce and cross-border retail"
+      BABA:
+        relationship: competitor
+        evidence: "Alibaba / AliExpress competes in cross-border fashion retail"
+    suppliers: {}
+    sector_etfs:
+      - EMQQ
+    themes:
+      - ecommerce
+      - fashion_retail
+      - consumer_discretionary
+
+  figma:
+    canonical_name: "Figma"
+    aliases:
+      - "Figma Inc"
+    status: "private"
+    status_confidence: "medium"
+    status_note: >
+      Adobe's acquisition of Figma was terminated in December 2023 after EU/DOJ
+      regulatory challenges. Figma has discussed pursuing an IPO but verify current
+      status against SEC EDGAR and official communications.
+    official_domains:
+      - "figma.com"
+    newsroom_urls:
+      - "https://www.figma.com/blog/"
+    sec_cik: null
+    proposed_ticker: null
+    expected_exchange: null
+    latest_known_valuation_usd_bn: 20
+    latest_valuation_source: "Adobe acquisition termination (2023)"
+    latest_valuation_date: "2023-12-01"
+    incorporation_state: "DE"
+    description: "Collaborative design and prototyping platform; widely used in product design"
+    public_peers:
+      ADBE:
+        relationship: sector_peer
+        evidence: "Adobe XD competes; Adobe attempted acquisition of Figma in 2022"
+      MSFT:
+        relationship: sector_peer
+        evidence: "Microsoft Visio and design tools compete for enterprise design budget"
+      CRM:
+        relationship: sector_peer
+        evidence: "Salesforce ecosystem competes for enterprise software spend"
+    suppliers: {}
+    sector_etfs:
+      - CLOU
+    themes:
+      - saas
+      - creator_tools
+      - enterprise_software
+      - design_tech

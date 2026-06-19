@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -18,9 +19,8 @@ from app.settings import Settings
 from app.universe.ticker_metadata import (
     TICKER_DISPLAY_NAMES,
     extract_tickers_from_text,
+    is_collision_prone_symbol,
 )
-
-import re
 
 SectorLookup = Callable[[str], list[str]]
 
@@ -476,14 +476,17 @@ def _resolve_event_tickers(events: list[NormalisedEvent]) -> None:
 def _symbol_in_text(symbol: str, text: str) -> bool:
     """Return True if ``symbol`` appears in ``text`` with acceptable context.
 
-    Short symbols (1–2 chars like T, F, V) must appear in explicit notation
-    (``$T`` or ``(T)``) to avoid matching common English words. Longer symbols
-    need only word-boundary matching.
+    Short symbols (1-2 chars like T, F, V) must appear in explicit notation
+    (``$T`` or ``(T)``) to avoid matching common English words. Symbols known
+    to collide with common words or abbreviations (ALL, LOW, ON, ...; see
+    ``is_collision_prone_symbol``) require the same explicit notation, even
+    though they are 3+ characters. Other symbols need only word-boundary
+    matching.
     """
     if not text:
         return False
     upper = text.upper()
-    if len(symbol) <= 2:
+    if len(symbol) <= 2 or is_collision_prone_symbol(symbol):
         return f"${symbol}" in upper or f"({symbol})" in upper
     return re.search(rf"\b{re.escape(symbol)}\b", upper) is not None
 

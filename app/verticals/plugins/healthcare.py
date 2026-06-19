@@ -13,6 +13,8 @@ from app.settings import get_settings
 from app.schemas.events import NormalisedEvent
 from app.verticals.base import VerticalMode
 from app.verticals.config import infer_healthcare_mode_from_legacy_enabled, normalize_vertical_mode
+from app.verticals.healthcare_bridge import healthcare_source_to_vertical_event
+from app.verticals.source_store import upsert_vertical_source_events
 
 
 class HealthcareVerticalPlugin:
@@ -178,6 +180,11 @@ class HealthcareVerticalPlugin:
         )
         if official_events:
             upsert_healthcare_source_events(official_events)
+            try:
+                upsert_vertical_source_events([healthcare_source_to_vertical_event(evt) for evt in official_events])
+            except Exception:
+                # Keep healthcare path fail-soft; generic archive is non-critical.
+                pass
 
         normalized_official = [self._to_normalized_event(evt) for evt in official_events]
         self._last_official_candidates = normalized_official

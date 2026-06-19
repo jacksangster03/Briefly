@@ -136,6 +136,34 @@
           </article>
 
           <article class="card">
+            <h2>Geopolitics</h2>
+            <p class="muted">API/RSS-first geopolitics diagnostics.</p>
+            <div class="row"><span>Mode</span><span class="badge {{ vx.geopolitics.mode }}">{{ vx.geopolitics.mode }}</span></div>
+            <div class="row"><span>Status</span><span class="badge {{ vx.geopolitics.status }}">{{ vx.geopolitics.status|replace("_"," ") }}</span></div>
+            <div class="row"><span>Reason</span><span class="value">{{ vx.geopolitics.reason|replace("_"," ") }}</span></div>
+            <div class="row"><span>Candidates / included / suppressed</span><span class="value">{{ vx.geopolitics.candidate_count if vx.geopolitics.candidate_count is not none else "—" }} / {{ vx.geopolitics.included_count if vx.geopolitics.included_count is not none else "—" }} / {{ vx.geopolitics.suppressed_count if vx.geopolitics.suppressed_count is not none else "—" }}</span></div>
+            {% if vx.geopolitics.plugin_error %}
+              <div class="row"><span>Error</span><span class="value">{{ vx.geopolitics.plugin_error }}</span></div>
+            {% endif %}
+            <div class="row"><span>Last run</span><span class="value">{{ vx.geopolitics.updated_at_utc or "No diagnostics yet." }}</span></div>
+          </article>
+        </section>
+
+        <section class="grid" style="margin-bottom:12px;">
+          <article class="card">
+            <h2>AI / Tech</h2>
+            <p class="muted">SEC + arXiv foundation; GitHub source is optional/fail-soft.</p>
+            <div class="row"><span>Mode</span><span class="badge {{ vx.ai_tech.mode }}">{{ vx.ai_tech.mode }}</span></div>
+            <div class="row"><span>Status</span><span class="badge {{ vx.ai_tech.status }}">{{ vx.ai_tech.status|replace("_"," ") }}</span></div>
+            <div class="row"><span>Reason</span><span class="value">{{ vx.ai_tech.reason|replace("_"," ") }}</span></div>
+            <div class="row"><span>Candidates / included / suppressed</span><span class="value">{{ vx.ai_tech.candidate_count if vx.ai_tech.candidate_count is not none else "—" }} / {{ vx.ai_tech.included_count if vx.ai_tech.included_count is not none else "—" }} / {{ vx.ai_tech.suppressed_count if vx.ai_tech.suppressed_count is not none else "—" }}</span></div>
+            {% if vx.ai_tech.plugin_error %}
+              <div class="row"><span>Error</span><span class="value">{{ vx.ai_tech.plugin_error }}</span></div>
+            {% endif %}
+            <div class="row"><span>Last run</span><span class="value">{{ vx.ai_tech.updated_at_utc or "No diagnostics yet." }}</span></div>
+          </article>
+
+          <article class="card">
             <h2>Mode controls</h2>
             <p class="muted">Changing these settings affects future briefings. This does not change delivery channels.</p>
             <form action="/ui/briefing/verticals/save?profile={{ state.profile }}" method="post">
@@ -202,6 +230,7 @@
               {% for src in vx.source_cards %}
                 <div class="source-card">
                   <div class="name">{{ src.label }}</div>
+                  <div class="muted">{{ src.vertical }}</div>
                   <div><span class="badge {{ src.status }}">{{ src.status|replace("_"," ") }}</span></div>
                   <div class="muted">Tier: {{ src.tier }}</div>
                   <div class="muted">Fetched: {{ src.fetched_count if src.fetched_count is not none else "—" }} · Normalised: {{ src.normalized_count if src.normalized_count is not none else "—" }}</div>

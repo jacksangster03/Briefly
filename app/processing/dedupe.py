@@ -9,6 +9,7 @@ from app.db.models import SentMessage
 from app.db.session import get_session
 from app.logger import get_logger
 from app.processing.cleaners import normalise_for_comparison
+from app.processing.cleaners import title_similarity as _title_similarity
 from app.schemas.events import NormalisedEvent
 
 logger = get_logger("dedupe")
@@ -235,9 +236,3 @@ def _compatible_event_types(type_a: str, type_b: str) -> bool:
     return False
 
 
-def _title_similarity(a: str, b: str) -> float:
-    tokens_a = set(normalise_for_comparison(a).split())
-    tokens_b = set(normalise_for_comparison(b).split())
-    if not tokens_a or not tokens_b:
-        return 0.0
-    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)

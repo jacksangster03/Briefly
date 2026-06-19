@@ -272,6 +272,18 @@ def build_freshness_map(
     return out
 
 
+def _is_us_market_holiday_at(generated_at: datetime) -> tuple[bool, str | None]:
+    """Return (is_holiday, holiday_name) for the NYSE date at generation time."""
+    try:
+        from app.markets.calendar import is_us_market_holiday, us_holiday_name
+        ny_date = generated_at.astimezone(ZoneInfo("America/New_York")).date()
+        if is_us_market_holiday(ny_date):
+            return True, us_holiday_name(ny_date)
+        return False, None
+    except Exception:
+        return False, None
+
+
 def build_data_basis_lines(
     *,
     session_key: str,
@@ -290,9 +302,16 @@ def build_data_basis_lines(
     eu_quotes = [q for q in index_quotes if _is_europe_equity_like(q)]
     commodity_quotes = [q for q in macro_quotes if _is_commodity_like(q)]
 
+    us_holiday, us_holiday_name_str = _is_us_market_holiday_at(generated_at)
+
     us_basis = _basis_for_group(us_quotes, generated_at, session_key, timezone_name, fallback="unavailable")
     eu_basis = _basis_for_group(eu_quotes, generated_at, session_key, timezone_name, fallback="unavailable")
     com_basis = _basis_for_group(commodity_quotes, generated_at, session_key, timezone_name, fallback="unavailable")
+
+    # On a US market holiday, override any "near-real-time" US equity basis to
+    # "Friday close / market holiday" since NYSE is closed.
+    if us_holiday and us_basis.startswith(("near-real-time", "live")):
+        us_basis = f"Friday close / market holiday ({us_holiday_name_str or 'US holiday'})"
 
     lines = [
         f"US equities: {us_basis}",
@@ -301,23 +320,37 @@ def build_data_basis_lines(
         f"News: live scan, {stamp}",
         "Macro/FRED: latest official release",
     ]
-    if session_key == "us_pre_open":
+
+    if us_holiday:
+        holiday_label = us_holiday_name_str or "US market holiday"
+        lines[0] = f"US equities: Friday close, not live ({holiday_label})"
+        lines.append(
+            f"US cash is closed today ({holiday_label}); US equity data reflects prior session close."
+        )
+
+    if session_key in {"us_pre_open", "us_holiday_handoff"}:
         us_cash_basis = _basis_for_group(
             us_index_quotes, generated_at, session_key, timezone_name, fallback="unavailable"
         )
         us_proxy_basis = _basis_for_group(
             us_watch_quotes, generated_at, session_key, timezone_name, fallback="unavailable"
         )
-        lines[0] = (
-            f"US cash indices: {us_cash_basis} (pre-open context); "
-            f"US watchlist/pre-market proxies: {us_proxy_basis}"
-        )
+        if us_holiday:
+            lines[0] = (
+                f"US cash indices: Friday close, not live ({us_holiday_name_str or 'US holiday'}); "
+                f"US watchlist: {us_proxy_basis}"
+            )
+        else:
+            lines[0] = (
+                f"US cash indices: {us_cash_basis} (pre-open context); "
+                f"US watchlist/pre-market proxies: {us_proxy_basis}"
+            )
 
     if session_key in {"europe_midday", "us_pre_open"} and eu_basis.startswith(("prior close",)):
         # During Europe cash hours, annotate that provider returned prior-close
         # quotes while the cash session is open. Keep the legacy wording that
         # existing tests rely on, and add a more precise label for the basis line.
-        lines[1] = "Europe equities: prior close (provider-returned during open session)"
+        lines[1] = "Europe equities: provider-held prior close during open session"
         lines.append(
             "Europe cash is open but provider quotes are prior close/delayed; "
             "treat as stale context, not live."
@@ -325,8 +358,8 @@ def build_data_basis_lines(
     elif session_key in {"europe_midday", "us_pre_open"} and eu_basis.startswith(("delayed", "stale")):
         lines.append("Europe cash is open but provider quotes are prior close/delayed.")
 
-    # VIX availability note for intraday risk reads.
-    if session_key in {"us_intraday_risk", "into_close"}:
+    # VIX availability note for all core briefing sessions.
+    if session_key in {"morning", "europe_midday", "us_pre_open", "us_intraday_risk", "into_close", "closing_wrap"}:
         vix_quote = next(
             (
                 q for q in index_quotes + macro_quotes
@@ -335,7 +368,7 @@ def build_data_basis_lines(
             None,
         )
         if vix_quote is None:
-            lines.append("VIX: unavailable (provider path did not return a live quote this cycle).")
+            lines.append("VIX: unavailable (provider returned no quote this cycle).")
         else:
             vix_meta = classify_quote_freshness(
                 quote=vix_quote,

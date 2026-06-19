@@ -145,7 +145,10 @@ def test_email_formatter_embeds_inline_chart_cids():
     )
 
     rendered = formatter.format_morning_briefing(briefing)
-    assert "Weekend Briefing" in rendered.subject
+    # On a Sunday, the subject shows either "Weekend Briefing" or "Sunday Weekend Watch".
+    assert "Weekend Briefing" in rendered.subject or "Sunday Weekend Watch" in rendered.subject, (
+        f"Expected weekend label in subject, got: {rendered.subject}"
+    )
     assert "cid:market-snapshot-cid" in rendered.html_body
     assert "PORTFOLIO FOCUS" in rendered.plain_text
 

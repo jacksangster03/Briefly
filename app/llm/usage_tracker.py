@@ -71,7 +71,7 @@ def query_usage_summary(
     from sqlalchemy import func
     from app.db.models import LLMUsageLog
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
     with get_session() as db:
         rows = (
             db.query(
@@ -85,7 +85,7 @@ def query_usage_summary(
             )
             .filter(
                 LLMUsageLog.profile_name == profile_name,
-                LLMUsageLog.local_date >= cutoff,
+                LLMUsageLog.called_at_utc >= cutoff_dt,
             )
             .group_by(LLMUsageLog.local_date, LLMUsageLog.model)
             .order_by(LLMUsageLog.local_date.desc())
@@ -142,13 +142,13 @@ def query_usage_rows(
     from datetime import timedelta
     from app.db.models import LLMUsageLog
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
     with get_session() as db:
         rows = (
             db.query(LLMUsageLog)
             .filter(
                 LLMUsageLog.profile_name == profile_name,
-                LLMUsageLog.local_date >= cutoff,
+                LLMUsageLog.called_at_utc >= cutoff_dt,
             )
             .order_by(LLMUsageLog.called_at_utc.desc())
             .limit(limit)

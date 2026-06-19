@@ -1505,6 +1505,14 @@ def _geo_confirmation_ladder_spec(briefing: MorningBriefing, metrics: dict[str, 
         {"name": "Gold/Haven", "state": "YES" if haven_confirm else "NO", "value": gold},
         {"name": "Equities", "state": "YES" if equity_confirm else "PARTIAL", "value": (us + eu + asia) / 3.0},
     ]
+    no_confirmation_inputs = (
+        not vix_available
+        and abs(oil) < 1e-9
+        and abs(gold) < 1e-9
+        and abs(us) < 1e-9
+        and abs(eu) < 1e-9
+        and abs(asia) < 1e-9
+    )
     if oil_confirm and vix_confirm and haven_confirm and equity_confirm:
         conclusion = "broad stress confirmed"
     elif oil_confirm or vix_confirm:
@@ -1514,8 +1522,12 @@ def _geo_confirmation_ladder_spec(briefing: MorningBriefing, metrics: dict[str, 
     return {
         "chart_key": "geo_confirmation_ladder",
         "variant": "confirmations",
-        "available": True,
-        "reason_if_hidden": None,
+        "available": not no_confirmation_inputs,
+        "reason_if_hidden": (
+            "All geo confirmation inputs unavailable."
+            if no_confirmation_inputs
+            else None
+        ),
         "title": "Geo Confirmation Ladder",
         "caption": (
             f"Oil {'confirms' if oil_confirm else 'is mild'}, "
@@ -1584,11 +1596,16 @@ def _oil_transmission_card_spec(briefing: MorningBriefing, metrics: dict[str, An
         else (f"Brent {brent_v:+.2f}%" if brent is not None else "Brent unavailable")
     )
     vix_caption = f"VIX {vix_v:+.2f}%" if metrics.get("vix_delta_pct") is not None else "VIX unavailable"
+    no_energy_inputs = oil is None and brent is None
     return {
         "chart_key": "oil_transmission_card",
         "variant": "macro_transmission",
-        "available": True,
-        "reason_if_hidden": None,
+        "available": not no_energy_inputs,
+        "reason_if_hidden": (
+            "WTI/Brent unavailable; no live energy transmission read."
+            if no_energy_inputs
+            else None
+        ),
         "title": "Oil Transmission",
         "caption": (
             f"WTI {oil_v:+.2f}% / {brent_caption} with XLE {xle_v:+.2f}%, "
@@ -1612,12 +1629,20 @@ def _breadth_leadership_spec(metrics: dict[str, Any]) -> dict[str, Any]:
     breadth_pct = float(metrics.get("breadth") or 0.0) * 100.0
     rows = [
         {"name": "Breadth % Up", "value": round(breadth_pct, 3), "unit": "pct"},
-        {"name": "US Avg Move", "value": round(float(metrics.get("us_avg") or 0.0), 3), "unit": "pct"},
-        {"name": "Europe Avg Move", "value": round(float(metrics.get("eu_avg") or 0.0), 3), "unit": "pct"},
-        {"name": "Asia Avg Move", "value": round(float(metrics.get("asia_avg") or 0.0), 3), "unit": "pct"},
         {"name": "Small-Large", "value": round(float(metrics.get("small_vs_large") or 0.0), 3), "unit": "pct"},
         {"name": "Growth-Defensive", "value": round(float(metrics.get("growth_vs_defensive") or 0.0), 3), "unit": "pct"},
     ]
+    for key, label in (
+        ("semis_vs_market", "Semis-Market"),
+        ("energy_vs_market", "Energy-Market"),
+        ("financials_vs_market", "Financials-Market"),
+        ("tech_vs_market", "Tech-Market"),
+    ):
+        value = metrics.get(key)
+        if value is None:
+            continue
+        rows.append({"name": label, "value": round(float(value), 3), "unit": "pct"})
+    rows = [row for row in rows if row.get("name") == "Breadth % Up" or row.get("value") is not None]
     available = total > 0
     return {
         "chart_key": "breadth_leadership_panel",
@@ -1953,9 +1978,11 @@ def _pnl_waterfall_spec(holdings_quotes: list[QuoteData], profile: UserProfile) 
                     f"(contribution breadth: {positive_count}/{len(bars)} positive)."
                 )
         elif total_contrib > 0:
+            neg_is_real_drag = float(top_neg.get("contribution") or 0.0) < 0.0
+            laggard_label = "largest drag" if neg_is_real_drag else "smallest contributor"
             lens_hint = (
                 f" Main contributor: {top_pos['symbol']} {float(top_pos['contribution']):+.2f}%; "
-                f"largest drag: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}% "
+                f"{laggard_label}: {top_neg['symbol']} {float(top_neg['contribution']):+.2f}% "
                 f"(contribution breadth: {positive_count}/{len(bars)} positive)."
             )
     return {

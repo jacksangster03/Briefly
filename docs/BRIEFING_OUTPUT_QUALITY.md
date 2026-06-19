@@ -4,6 +4,79 @@ This document describes the deterministic quality layer applied to every briefin
 
 ---
 
+## Holiday-aware Market Status
+
+**Module**: `app/markets/calendar.py`
+
+All exchange holiday logic is static and deterministic, with no live API calls. The 2026 tables cover NYSE, LSE, Xetra, and Euronext. Key rules:
+
+- NYSE (US cash) is CLOSED on Memorial Day (2026-05-25), UK Spring Bank Holiday also applies to LSE.
+- Xetra (DAX) and Euronext (CAC, EURO STOXX, IBEX) are OPEN on Whit Monday (2026-05-25); this date is NOT in their holiday tables.
+- `regional_market_status(dt_utc)` returns a dict with keys: `us_cash`, `uk_equities`, `continental_europe`, `asia`.
+- Possible values per key: `open`, `closed`, `holiday:<name>`, `pre_market`, `after_hours`, `weekend`, `partial:<detail>`.
+
+---
+
+## US Holiday Labelling
+
+On a US market holiday (NYSE closed):
+
+- The 13:30-15:25 CEST session window is re-titled "US Holiday / Europe Handoff" instead of "US Pre-Open Setup".
+- The market clock shows "US cash closed: Memorial Day" (or the relevant holiday name) instead of "Opening next: US cash".
+- The closing wrap is re-titled "Holiday / Next-Day Setup" when US cash was closed all day.
+- Data basis lines show "Friday close, not live (Memorial Day)" not "near-real-time" for US equities.
+- The desk read opens with "Holiday-thinned tape: ..." and names which markets are open and which are closed.
+- Portfolio P&L notes include: "US holdings based on Friday close due to Memorial Day".
+
+---
+
+## Europe Partial-Open Logic
+
+**Module**: `app/briefing/regional_lens.py`
+
+Europe is never labelled "unavailable" when continental index data (DAX, EURO STOXX, CAC, IBEX) is present.
+
+| UK status | Continental data | Europe status |
+|---|---|---|
+| Open | Any | "active" / "lead" / "monitor" (normal) |
+| Closed (holiday/weekend) | >= 1 valid input | "partial: UK closed, continental open" |
+| Closed | None | "unavailable" |
+
+The regional skew summary must not say "Europe unavailable" while simultaneously using Europe data in a region average.
+
+Asia prior/closed context is labelled as "prior_closed_context", not "unavailable", when closed-session values are present.
+
+---
+
+## Weekend / Monday Setup Title Rule
+
+**Module**: `app/briefing/formatter.py`, `app/briefing/email_formatter.py`
+
+Briefing titles use the local timezone date, not the UTC stored timestamp:
+
+- A briefing generated at 00:00 CEST (= 22:00 UTC Sunday) is formatted with local CEST date = Monday 25 May.
+- This prevents the title "Weekend Briefing | Sun 24 May" for a briefing whose local generation time is Monday 00:00.
+- Both `TelegramFormatter` and `EmailFormatter` convert `generated_at` to the profile timezone before calling `.strftime("%a %d %b")`.
+- `session_mode` (set from UTC weekday in the generator) is cross-checked against the local weekday; if they disagree, the local weekday takes priority for title selection.
+
+---
+
+## User-Facing Desk-Read Rules
+
+**Module**: `app/briefing/email_formatter.py` (`_top_desk_read_lines`)
+
+Rules that apply to every desk-read line:
+
+1. No "rates score +X.XX" in user-facing output. Internal scores appear only in diagnosis logs.
+2. No "regional unavailable" in user-facing text. If regional data is absent, the line is omitted or replaced with "regional data pending".
+3. On a US holiday: desk read opens with "Holiday-thinned tape: ..." and states which markets are open and closed in plain language.
+4. If geo headline risk is high (ELEVATED/HIGH/EXTREME) but VIX is unavailable, the geo lens line appends: "(note: VIX unavailable, market confirmation of geo risk is incomplete)".
+5. Portfolio posture on a US holiday appends: "(US holdings based on Friday close due to Memorial Day)" or the relevant holiday name.
+
+---
+
+---
+
 ## Quality guard (`BriefingQualityGuard`)
 
 **Module**: `app/briefing/quality_guard.py`
@@ -207,6 +280,121 @@ This ensures trigger lines accurately reflect whether a threshold has already be
 
 ---
 
+## Provider outage handling (market + news)
+
+When live providers are unavailable in-cycle (for example DNS/network failure or multiple provider circuit-breakers open), the morning briefing now uses explicit outage semantics:
+
+- Header includes: `DATA OUTAGE / PROVIDER DEGRADED`
+- Market tape uses: `Market data unavailable; no directional read generated.`
+- News block uses: `News scan returned no usable items; provider diagnostics required.`
+- Footer distinguishes provider outage vs filtering:
+  - `provider outage (raw fetch 0)` when raw provider ingestion is zero
+  - `X raw fetched, 0 selected after filters` when ingestion succeeded but ranking/suppression removed all candidates
+
+## Freshness-aware send gating
+
+The send-decision layer (`app/briefing/send_decision.py`) classifies every briefing before delivery using two status dimensions:
+
+- `market_data_status`: `live` | `partial` | `stale_snapshot` | `unavailable`
+- `news_status`: `fresh` | `stale` | `empty` | `provider_outage`
+
+Based on these, `make_send_decision()` assigns a `briefing_mode` and `should_send` flag:
+
+- `normal`: live/partial market + fresh news. Full send.
+- `market_only`: live/partial market + no fresh news. Send without news-led sections.
+- `degraded_context`: stale snapshot market + material fresh news. Send with stale caveat banner.
+- `news_only`: unavailable market + material fresh news. Send news sections only; suppress stale market analysis.
+- `suppressed`: degraded market + no material fresh news. Do not send; log with `skipped_degraded_no_fresh_data`.
+
+A stale snapshot briefing with no fresh news scores enough on the materiality scorer (because it sees market levels), but is now correctly suppressed by the freshness gate before delivery.
+
+---
+
+## Vertical intelligence shadow quality (Phase 1)
+
+- Vertical source adapters are API/RSS-first and fail-soft.
+- Geopolitics and AI/Tech sources are diagnostics-first; briefing output remains off by default.
+- Optional shadow briefing lines are deterministic summaries only and capped for compactness.
+- Vertical shadow output never changes alert eligibility or delivery authority.
+
+Deterministic suppression safeguards:
+
+- Oil transmission chart is hidden when both WTI and Brent are unavailable.
+- Geo confirmation ladder is hidden when all confirmation inputs are unavailable.
+- Snapshot delta no longer writes fake portfolio contribution deltas from incomplete quote sets.
+
+Unavailable vs stale vs true zero:
+
+- `unavailable`: provider did not return usable data.
+- `stale/prior_close`: value exists but is not live for the active session context.
+- `0.00%`: treated as a real move only when a valid quote/value exists; missing values are not coerced into neutral-looking zeroes.
+
+---
+
+## Session Diagnosis Engine
+
+**Module**: `app/briefing/session_diagnosis.py`
+
+Briefly now runs a deterministic session diagnosis pass that outputs:
+
+- `primary_driver`
+- `secondary_drivers`
+- `rejected_drivers`
+- `regime_label`
+- `confidence`
+- `one_sentence_diagnosis`
+- `regional_diagnosis`
+- `portfolio_diagnosis`
+- `data_caveats`
+- score map:
+  - `rates_pressure_score`
+  - `energy_geo_score`
+  - `equity_breadth_score`
+  - `regional_divergence_score`
+  - `tech_ai_concentration_score`
+  - `portfolio_transmission_score`
+  - `data_quality_score`
+
+### Confirmation rules (risk-on/risk-off)
+
+- `risk_on_confirmation` requires breadth + regional participation support.
+- `risk_off_confirmation` requires breadth weakness + regional weakness.
+- `rates_headwind` can become primary when 10Y level/change thresholds are breached.
+- `geo_energy_pressure` can become primary when oil + geo stress align.
+- If market data is unavailable, regime is forced to `DATA DEGRADED` (never “Mixed tape”).
+
+### Geo headline vs market confirmation
+
+Geo headline intensity and market confirmation are intentionally separated:
+
+- Geo can remain elevated from headlines/context.
+- If VIX/haven confirmation is missing, diagnosis records this as a rejected confirmation path.
+
+This avoids “headline risk == fully confirmed market stress” shortcuts.
+
+---
+
+## Trigger Board rules
+
+Legacy generic trigger lines are replaced by deterministic trigger-board buckets:
+
+- **Active triggers**: breached thresholds now impacting read-through.
+- **Watch triggers**: conditional thresholds not yet breached.
+- **Cooled / invalidated**: previously hot channels that have cooled.
+
+Session-specific headers:
+
+- Morning: `TODAY'S TRIGGER BOARD`
+- Europe Midday: `EUROPE/US HANDOFF TRIGGERS`
+- US Pre-Open: `OPENING TRIGGER BOARD`
+- US Intraday: `INTRADAY CONFIRMATION TRIGGERS`
+- Into Close: `CLOSE-QUALITY TRIGGERS`
+- Closing Wrap: `TOMORROW TRIGGER BOARD`
+
+All trigger text is deterministic and uses explicit breached/conditional/unavailable wording.
+
+---
+
 ## Geo headline risk vs market-confirmation distinction
 
 **Module**: `app/briefing/morning_generator.py` (`_build_geo_risk_meter`)
@@ -369,3 +557,173 @@ All quality-layer behaviour is covered by:
 - `app/tests/test_fx_module.py`: compact FX output, no "(n/a)" for missing change
 - `app/tests/test_macro_policy_watch_briefing.py`: macro policy watch heading appears exactly once in Telegram and email
 - `app/tests/test_phase64_morning_charts.py`: chart selection, yield curve, watchlist movers with colours
+
+---
+
+## Morning Diagnosis Upgrade (Deterministic)
+
+Morning diagnosis now prefers measurable drivers over generic text:
+
+- rates/valuation pressure is explicitly named when 10Y and leadership inputs support it
+- regional split is explicitly named when Europe/US diverge
+- mixed fallback remains only when no stronger deterministic driver is present
+
+This prevents generic "balanced factors" language when a clear rates or regional regime is visible.
+
+---
+
+## Chart Clarity Updates
+
+- **Breadth & Leadership** no longer repeats US/Europe/Asia bars (those stay in Regional Divergence).
+- **Yield Curve Shape** now labels:
+  - today values + bp vs 1W
+  - available 1W values per tenor (`1W: x.xx%`) near the grey dashed points
+
+If prior-week value is missing for a tenor, only that tenor's grey label is omitted.
+
+---
+
+## Market Setup Formatting Rules
+
+- Colour styling is applied to the **actual move** only.
+- Range text remains neutral:
+  - `| range -0.7% to +0.3% | closed upper half`
+  - `| range ... | trading near highs`
+- Range remains instrument-specific from each quote's own OHLC inputs.
+
+---
+
+## VIX Availability Rules (All Core Sessions)
+
+VIX is treated as a core risk instrument in:
+- morning
+- europe_midday
+- us_pre_open
+- us_intraday_risk
+- into_close
+- closing_wrap
+
+Rules:
+- VIX is pinned in trimmed market-setup rows (it is not dropped by density trimming).
+- If live quote fetch misses VIX, generator attempts latest available fallback from recent `^VIX` history.
+- Data-basis lines always include explicit VIX status for core sessions.
+- If VIX is unavailable, risk wording must use **unconfirmed** framing (never silent neutral confirmation).
+
+---
+
+## Regional vs Breadth Separation
+
+- **Regional Divergence** owns regional bars (US/Europe/Asia).
+- **Breadth & Leadership** owns internals/factor structure:
+  - Breadth % Up
+  - Small-Large
+  - Growth-Defensive
+  - optional factor spreads (Semis/Tech/Energy/Financials vs market when available)
+
+Regional bars must not be repeated inside Breadth & Leadership.
+
+---
+
+## Yield Curve Prior-Week Labelling
+
+Yield curve rendering now includes:
+- orange today labels (`x.xx%` and `+/-bp vs 1W`)
+- grey dashed prior-week labels per tenor (`1W: x.xx%`) when available
+
+Missing prior-week value for one tenor suppresses only that tenor's grey label.
+
+---
+
+## Live Risk Board Rules
+
+Trigger output is stateful, not purely hypothetical:
+
+- `ACTIVE`: threshold already breached now
+- `ELEVATED`: risk active but below escalation zone
+- `WATCH`: threshold not breached yet
+- `CONTAINED` / `COOLED`: stress easing
+- `UNAVAILABLE` / `UNCONFIRMED`: required input missing
+
+Examples:
+- Rates above 4.45% => `Rates: ACTIVE ... already above 4.45%`
+- WTI +1% to +3% => `Oil: ELEVATED`
+- VIX unavailable => `Volatility: UNCONFIRMED`
+
+---
+
+## Applied News Stack
+
+Morning briefings can include a compact deterministic **Applied News Stack**:
+
+- Macro/Rates
+- Regional
+- Sector
+- Watchlist
+- Portfolio
+- Event Risk
+- Geopolitical
+
+Each line includes:
+- headline
+- why it matters
+- affected assets (when available)
+- confirmation state and source count
+
+Low-signal items are not force-filled just to populate sections.
+
+---
+
+## Provider Outage and Stale Snapshot Behaviour
+
+### Fallback Hierarchy
+Described in `docs/SESSION_DESIGN.md`.
+
+### Internal Score Leakage Guard
+The following strings must NEVER appear in user-facing output:
+- "rates score" (raw internal score values)
+- "regional unavailable" (when regional data exists)
+- "oil unavailable" (use natural language: "oil data is currently unavailable")
+- "geo LOW" as raw tuple text
+- "VIX available" as an internal flag string
+
+### Brent Stale Handling
+If Brent is unchanged across sessions while WTI moves >=0.25%, Brent is marked as stale/provider-held. The caveat appears at most once per email.
+
+### Cross-Asset Impulse Thresholds
+Minimum move required to qualify as "largest impulse":
+- Yields: >= 2bp
+- Commodities: >= 0.5%
+- VIX: >= 1%
+- FX: >= 0.25%
+If no impulse passes threshold: "Cross-asset impulse is muted; no single macro market is leading."
+
+---
+
+## IPO and Private-Company Quality Rules
+
+### Confidence gating
+
+| Source | `factual_confidence_score` | Notes |
+|---|---|---|
+| SEC EDGAR filing | >= 0.95 | Authoritative; company signed and filed |
+| Official newsroom (IPO) | 0.90 | Company-controlled domain; announcement may precede EDGAR |
+| Official newsroom (funding) | 0.80 | Cross-check against press release details |
+| IPO calendar (Nasdaq/FMP) | 0.65 | Estimated date; do not treat as confirmed |
+| Read-through (derived) | max(base - 0.15, 0.50) | Indirect causality; never presented as primary signal |
+
+### Content rules
+
+- Never store full article text: excerpt capped at 800 characters (newsroom), 1,500 characters (EDGAR prospectus).
+- Never infer valuation when the company does not disclose it. Leave `latest_private_valuation_usd_m` as `None`.
+- Never classify a company as actively preparing an IPO without official or highly credible evidence. Registry `status_confidence` must be `medium` or `high` before status is surfaced in briefings.
+- Do not automatically claim causality between a private-company event and a public-market move. Read-through events are labelled as derived and carry reduced confidence.
+- Rumour/unconfirmed IPO reports from news sources: these are filtered at source; the newsroom monitor only processes official company domains (robots.txt checked).
+- Calendar dates sourced from Nasdaq or FMP are estimates. Every calendar `NormalisedEvent` includes the suffix "Calendar estimate only; confirm against EDGAR filings." in its summary.
+
+### SpaceX policy
+
+SpaceX is in the registry with `status: private`. Its status is never overridden programmatically. If a public S-1 filing appears on EDGAR, it will be detected and surfaced like any other company. No hardcoded IPO prediction is made.
+
+### No briefing format changes (June 2026)
+
+IPO events flow through the existing scoring and section-assignment pipeline. No live briefing section has been created for IPO events. They surface as standard `ResearchEvent` items in the briefing body. A dedicated IPO section is a future enhancement contingent on preview review.

@@ -171,3 +171,67 @@ def test_carry_forward_clustered_story(validation_isolated_db):
         events=events,
     )
     assert len(delta.carried_forward_items) == 1
+
+
+def test_split_news_classifies_reworded_headline_as_material_update(validation_isolated_db):
+    """A reworded headline about the same story should land in
+    updated_news_items, not be treated as fully new or fully repeated.
+    """
+    with get_session() as db:
+        db.add(
+            SessionArchiveSnapshot(
+                profile_name="default_user",
+                local_date=date(2026, 5, 7),
+                session_key="morning",
+                session_title="Morning Briefing",
+                generated_at_utc=datetime(2026, 5, 7, 8, 0, tzinfo=timezone.utc),
+                source_type="live_scheduler",
+                delivery_attempted=True,
+                delivery_success=True,
+                telegram_text="- Nvidia guidance raised on strong AI chip demand",
+            )
+        )
+        db.add(
+            SessionSendState(
+                profile_name="default_user",
+                channel="email",
+                session_key="morning",
+                local_date=date(2026, 5, 7),
+                replay_namespace="",
+                message_type="session_brief:morning",
+                idempotency_key="k5",
+                success=True,
+                in_progress=False,
+                command_source="scheduler",
+                sent_at=datetime(2026, 5, 7, 8, 0, tzinfo=timezone.utc),
+                updated_at=datetime(2026, 5, 7, 8, 0, tzinfo=timezone.utc),
+            )
+        )
+
+    events = [
+        NormalisedEvent(
+            title="Nvidia raises full-year guidance after AI chip demand beats expectations",
+            summary="updated detail",
+        ),
+        NormalisedEvent(title="Completely unrelated wheat export story", summary="new"),
+    ]
+    delta = split_news_since_previous(
+        profile_name="default_user",
+        session_key="europe_midday",
+        local_date=date(2026, 5, 7),
+        timezone_name="Europe/Madrid",
+        events=events,
+    )
+    expected_title = "Nvidia raises full-year guidance after AI chip demand beats expectations"
+    updated_titles = [evt.title for evt in delta.updated_news_items]
+    assert expected_title in updated_titles
+    assert all(evt.title != updated_titles[0] for evt in delta.new_news_items)
+    assert all(evt.title != updated_titles[0] for evt in delta.repeated_news_items)
+    # Reworded event's novelty score reflects partial overlap: not 1.0 (new), not near-0 (repeated).
+    updated_evt = next(evt for evt in delta.updated_news_items if evt.title == updated_titles[0])
+    assert 0.0 < updated_evt.novelty_score < 1.0
+    assert updated_evt.update_status == "material_update"
+
+    # The unrelated story stays fully new with novelty_score 1.0.
+    new_evt = next(evt for evt in delta.new_news_items if "wheat" in evt.title)
+    assert new_evt.novelty_score == 1.0

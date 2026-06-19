@@ -1,8 +1,25 @@
-"""Deterministic regional lens builder for briefing output."""
+"""Deterministic regional lens builder for briefing output.
+
+Holiday-aware Europe partial-open logic:
+- If UK is closed but continental European exchanges (DAX, EURO STOXX, CAC, IBEX)
+  have valid data, Europe status is "partial" not "unavailable".
+- The regional skew must not say "Europe unavailable" while continental data exists.
+"""
 
 from __future__ import annotations
 
 from app.schemas.events import QuoteData, NormalisedEvent
+
+
+def _uk_closed_today() -> bool:
+    """Return True if today is a UK bank holiday or weekend (UTC date)."""
+    try:
+        from datetime import date, timezone, datetime
+        from app.markets.calendar import is_uk_market_holiday
+        d = datetime.now(timezone.utc).date()
+        return d.weekday() >= 5 or is_uk_market_holiday(d)
+    except Exception:
+        return False
 
 
 def build_regional_lens(
@@ -13,8 +30,8 @@ def build_regional_lens(
     """Return region cards + one-line skew summary."""
     regions = [
         _region_card("US", index_quotes, ("S&P", "NASDAQ", "DOW", "RUSSELL"), global_news),
-        _region_card("Europe", index_quotes, ("STOXX", "FTSE", "DAX", "CAC", "IBEX"), global_news),
-        _region_card("Asia", index_quotes, ("NIKKEI", "HANG SENG"), global_news),
+        _europe_region_card(index_quotes, global_news),
+        _asia_region_card(index_quotes, global_news),
     ]
 
     optional = [
@@ -34,6 +51,109 @@ def build_regional_lens(
     return regions, skew
 
 
+def _europe_region_card(
+    quotes: list[QuoteData],
+    global_news: list[NormalisedEvent],
+) -> dict[str, str]:
+    """Build the Europe region card with partial-open awareness.
+
+    Rules:
+    - If >= 2 valid continental index inputs (DAX, EURO STOXX, CAC, IBEX) are
+      present, Europe is "active" or "partial", never "unavailable".
+    - If UK is closed but continental data exists, status is "partial".
+    - If only FTSE is present and UK is closed, status is "unavailable".
+    - Asia prior/closed context is labelled as such, not unavailable.
+    """
+    # Separate UK (FTSE) from continental (DAX, STOXX, CAC, IBEX) quotes.
+    continental_tokens = ("STOXX", "DAX", "CAC", "IBEX")
+    uk_tokens = ("FTSE",)
+
+    continental = [
+        q for q in quotes
+        if any(tok in (q.display_name or q.symbol or "").upper() for tok in continental_tokens)
+    ]
+    uk = [
+        q for q in quotes
+        if any(tok in (q.display_name or q.symbol or "").upper() for tok in uk_tokens)
+    ]
+    all_europe = continental + uk
+
+    uk_closed = _uk_closed_today()
+
+    if not all_europe:
+        return {
+            "region": "Europe",
+            "direction": "unavailable",
+            "status": "unavailable",
+            "driver": "insufficient live market inputs",
+            "implication": "Europe directional read unavailable; wait for provider recovery.",
+        }
+
+    # When UK is closed but continental data is present, use partial status.
+    if uk_closed and len(continental) >= 1:
+        source_quotes = continental if continental else all_europe
+        avg_move = _avg([float(q.change_percent or 0.0) for q in source_quotes])
+        direction = "up" if avg_move > 0.15 else "down" if avg_move < -0.15 else "mixed"
+        driver = _driver_phrase(global_news)
+        implication = _implication(direction=direction, region="Europe")
+        return {
+            "region": "Europe",
+            "direction": direction,
+            "status": "partial",
+            "partial_detail": "UK closed, continental open",
+            "driver": driver,
+            "implication": implication,
+        }
+
+    # Standard case: use all available Europe quotes.
+    avg_move = _avg([float(q.change_percent or 0.0) for q in all_europe])
+    direction = "up" if avg_move > 0.15 else "down" if avg_move < -0.15 else "mixed"
+    status = "lead" if abs(avg_move) >= 1.0 else "active" if abs(avg_move) >= 0.4 else "monitor"
+    driver = _driver_phrase(global_news)
+    implication = _implication(direction=direction, region="Europe")
+    return {
+        "region": "Europe",
+        "direction": direction,
+        "status": status,
+        "driver": driver,
+        "implication": implication,
+    }
+
+
+def _asia_region_card(
+    quotes: list[QuoteData],
+    global_news: list[NormalisedEvent],
+) -> dict[str, str]:
+    """Build the Asia region card.
+
+    If Asia has valid closed-session values, label as "prior/closed context"
+    rather than "unavailable".
+    """
+    tokens = ("NIKKEI", "HANG SENG", "HSI", "KOSPI", "ASX")
+    selected = [q for q in quotes if any(tok in (q.display_name or q.symbol or "").upper() for tok in tokens)]
+    if not selected:
+        return {
+            "region": "Asia",
+            "direction": "unavailable",
+            "status": "unavailable",
+            "driver": "insufficient live market inputs",
+            "implication": "Asia directional read unavailable; wait for provider recovery.",
+        }
+    avg_move = _avg([float(q.change_percent or 0.0) for q in selected])
+    direction = "up" if avg_move > 0.15 else "down" if avg_move < -0.15 else "mixed"
+    # Asia markets are typically closed during EMEA/US sessions; use prior context label.
+    status = "prior_closed_context"
+    driver = _driver_phrase(global_news)
+    implication = _implication(direction=direction, region="Asia")
+    return {
+        "region": "Asia",
+        "direction": direction,
+        "status": status,
+        "driver": driver,
+        "implication": implication,
+    }
+
+
 def _region_card(
     label: str,
     quotes: list[QuoteData],
@@ -41,7 +161,15 @@ def _region_card(
     global_news: list[NormalisedEvent],
 ) -> dict[str, str]:
     selected = [q for q in quotes if any(token in (q.display_name or q.symbol or "").upper() for token in tokens)]
-    avg_move = _avg([float(q.change_percent or 0.0) for q in selected]) if selected else 0.0
+    if not selected:
+        return {
+            "region": label,
+            "direction": "unavailable",
+            "status": "unavailable",
+            "driver": "insufficient live market inputs",
+            "implication": f"{label} directional read unavailable; wait for provider recovery.",
+        }
+    avg_move = _avg([float(q.change_percent or 0.0) for q in selected])
     direction = "up" if avg_move > 0.15 else "down" if avg_move < -0.15 else "mixed"
     status = "lead" if abs(avg_move) >= 1.0 else "active" if abs(avg_move) >= 0.4 else "monitor"
     driver = _driver_phrase(global_news)
@@ -93,4 +221,3 @@ def _implication(*, direction: str, region: str) -> str:
 
 def _avg(values: list[float]) -> float:
     return float(sum(values) / len(values)) if values else 0.0
-

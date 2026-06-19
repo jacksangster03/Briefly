@@ -55,6 +55,7 @@ class MoveContext:
     day_range_display: str | None
     day_range_position_label: str | None
     final_display: str
+    session_mode: str = "weekday"
     errors: list[str] = field(default_factory=list)
     range_quality: str = "available"  # "available" | "suppressed" | "unavailable" | "wide_provider_range"
     range_suppression_reason: str | None = None
@@ -627,10 +628,12 @@ def format_move_context_line(ctx: MoveContext, *, include_range: bool = True, in
     """
     parts = [f"{ctx.label}: {ctx.level_display} {ctx.daily_move_display}"]
     if include_range and ctx.day_range_display:
-        rng = ctx.day_range_display
+        state_label = "closed" if (ctx.session_mode in {"morning", "saturday", "sunday", "closing_wrap"}) else "trading"
+        range_loc = ""
         if ctx.day_range_position_label:
-            rng += f", {ctx.day_range_position_label}"
-        parts.append(f"| {rng}")
+            position = str(ctx.day_range_position_label).replace("session ", "")
+            range_loc = f" | {state_label} {position}"
+        parts.append(f"| range {ctx.day_range_display}{range_loc}")
     context_parts: list[str] = []
     if ctx.move_context_label:
         context_parts.append(ctx.move_context_label)

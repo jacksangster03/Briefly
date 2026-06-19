@@ -336,3 +336,13 @@ def test_verticals_status_active_mode_shows_current_normally(monkeypatch):
     out = runner.invoke(cli, ["verticals-status"])
     assert out.exit_code == 0
     assert "mode=active" in out.output
+
+
+def test_verticals_cli_sparse_diagnostics_do_not_crash(monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr("app.cli.init_db", lambda: None)
+    monkeypatch.setattr("app.personalization.user_profile.load_user_profile", lambda *_a, **_k: _profile(enabled=False))
+    monkeypatch.setattr("app.verticals.engine.verticals_status_for_profile", lambda **_k: [])
+    out = runner.invoke(cli, ["verticals-status", "--verbose"])
+    assert out.exit_code == 0
+    assert "No registered vertical plugins." in out.output

@@ -117,10 +117,29 @@ class EmailFormatter:
         )
 
     def _subject(self, briefing: MorningBriefing) -> str:
-        date_str = briefing.generated_at.strftime("%a %d %b")
-        if briefing.session_mode in {"saturday", "sunday"}:
+        # Convert UTC generated_at to the formatter's local timezone before
+        # formatting the date string. Without this, a briefing generated at
+        # 00:00 CEST on Monday would display "Sun 24 May" because the UTC
+        # timestamp falls on the previous calendar day.
+        gen = briefing.generated_at
+        if gen.tzinfo is None:
+            from datetime import timezone as _tz
+            gen = gen.replace(tzinfo=_tz.utc)
+        try:
+            local_gen = gen.astimezone(ZoneInfo(self.timezone_name))
+        except Exception:
+            local_gen = gen
+        date_str = local_gen.strftime("%a %d %b")
+
+        # Determine the actual local weekday (not the UTC weekday) to decide
+        # whether this is a weekend briefing. Local weekday is authoritative;
+        # session_mode (set from UTC) can be wrong when generation crosses midnight.
+        local_weekday = local_gen.weekday()  # 0=Mon, 6=Sun
+
+        is_local_weekend = local_weekday >= 5
+        if is_local_weekend:
             key = (briefing.session_key or "").strip().lower()
-            if key == "sunday_weekend_watch":
+            if key == "sunday_weekend_watch" or local_weekday == 6:
                 session_label = "Sunday Weekend Watch"
             else:
                 session_label = "Weekend Briefing"
@@ -661,29 +680,95 @@ class EmailFormatter:
     def _top_desk_read_lines(briefing: MorningBriefing) -> list[str]:
         driver = briefing.dominant_tape_driver.strip() if briefing.dominant_tape_driver else "No single equity catalyst dominates."
         posture = briefing.session_quality_label or briefing.regime_context or "mixed"
-        regional = briefing.regional_skew_summary or "regional read unavailable"
+        regional = briefing.regional_skew_summary or ""
+
+        # Remove internal score strings that must never appear in user-facing output.
+        if regional:
+            import re as _re
+            regional = _re.sub(r"rates score [+\-]?\d+\.\d+", "", regional).strip(" ,;")
+            regional = _re.sub(r"regional unavailable", "", regional, flags=_re.IGNORECASE).strip(" ,;")
+            regional = _re.sub(r"\s{2,}", " ", regional).strip()
+
+        # Detect US holiday context.
+        us_holiday_note = ""
+        us_holiday_name_val = ""
+        try:
+            from app.markets.calendar import is_us_market_holiday, us_holiday_name
+            gen_date = briefing.generated_at
+            if gen_date.tzinfo is None:
+                from datetime import timezone
+                gen_date = gen_date.replace(tzinfo=timezone.utc)
+            from zoneinfo import ZoneInfo as _ZoneInfo
+            ny_date = gen_date.astimezone(_ZoneInfo("America/New_York")).date()
+            if is_us_market_holiday(ny_date):
+                us_holiday_name_val = us_holiday_name(ny_date) or "US market holiday"
+                us_holiday_note = us_holiday_name_val
+        except Exception:
+            pass
+
         lines = [f"Desk read: {driver}"]
         if briefing.market_setup_analysis:
             lines.append(f"Setup read: {briefing.market_setup_analysis}")
+
         us = _avg_region_move(briefing, ("S&P", "NASDAQ", "DOW", "RUSSELL"))
         eu = _avg_region_move(briefing, ("STOXX", "FTSE", "DAX", "CAC", "IBEX"))
         asia = _avg_region_move(briefing, ("NIKKEI", "HANG SENG", "HSI"))
-        lines.append(
-            f"Risk posture: {posture.lower()}; US {us:+.2f}%, Europe {eu:+.2f}%, Asia {asia:+.2f} ({regional})."
-        )
-        if briefing.session_key in {"us_pre_open", "us_intraday_risk", "into_close"}:
+
+        if us_holiday_note:
+            # Holiday-thinned tape: show which markets are open/closed in plain language.
+            europe_open = abs(eu) > 0.0
+            asia_note = f"Asia {asia:+.2f}%"
+            europe_note = f"continental Europe {eu:+.2f}%" if europe_open else "Europe unavailable"
+            posture_line = (
+                f"Holiday-thinned tape ({us_holiday_note}): {europe_note} and {asia_note}; "
+                f"US cash is closed."
+            )
+            lines.append(posture_line)
+        else:
+            region_context = f" ({regional})" if regional else ""
+            lines.append(
+                f"Risk posture: {posture.lower()}; US {us:+.2f}%, Europe {eu:+.2f}%, Asia {asia:+.2f}%{region_context}."
+            )
+
+        if briefing.session_key in {"us_pre_open", "us_intraday_risk", "into_close", "us_holiday_handoff"}:
             charts = {str(row.get("chart_key")): row for row in (briefing.morning_chart_bundle or {}).get("charts", [])}
             setup_card = charts.get("setup_confirmation_card") or {}
             setup_line = str(setup_card.get("caption") or "").strip()
             if setup_line:
                 lines.append(f"Setup confirmation: {setup_line}")
+
         if briefing.geo_risk_summary:
-            lines.append(f"Geo lens: {briefing.geo_risk_summary}")
+            geo_summary = briefing.geo_risk_summary
+            # If geo headline risk is high but VIX unavailable, flag explicitly.
+            geo_level = (briefing.geo_risk_level or "").upper()
+            if geo_level in {"ELEVATED", "HIGH", "EXTREME"}:
+                vix_ok = any(
+                    "VIX" in (q.display_name or q.symbol or "").upper() and (q.current_price or 0) > 0
+                    for q in briefing.market_setup.index_quotes + briefing.market_setup.macro_quotes
+                )
+                if not vix_ok:
+                    geo_summary = f"{geo_summary} (note: VIX unavailable, market confirmation of geo risk is incomplete)"
+            lines.append(f"Geo lens: {geo_summary}")
+
         if briefing.portfolio_action_posture:
-            lines.append(f"Portfolio implication: {briefing.portfolio_action_posture}.")
+            posture_str = briefing.portfolio_action_posture
+            if us_holiday_name_val:
+                posture_str = f"{posture_str} (US holdings based on Friday close due to {us_holiday_name_val})"
+            lines.append(f"Portfolio implication: {posture_str}.")
+
         return lines[:4]
 
     def _trigger_lines(self, briefing: MorningBriefing) -> list[str]:
+        board = dict(getattr(briefing, "trigger_board", {}) or {})
+        board_lines: list[str] = []
+        for key in ("active", "watch", "cooled"):
+            for line in (board.get(key) or []):
+                text = str(line).strip()
+                if text:
+                    board_lines.append(text)
+        if board_lines:
+            return board_lines[:5]
+
         triggers: list[str] = []
         vix = next(
             (
@@ -798,8 +883,17 @@ class EmailFormatter:
 
         # Then colorize remaining parenthetical changes: (-0.0200)
         out = _PAREN_MOVE_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), tail)
-        # Finally colorize standalone % tokens in compact strips.
-        out = _MOVE_TOKEN_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), out)
+        # Keep range text neutral in market setup rows: only colorize the pre-range segment.
+        lower_out = out.lower()
+        range_idx = lower_out.find("| range ")
+        if range_idx >= 0:
+            lead = out[:range_idx]
+            rest = out[range_idx:]
+            lead = _MOVE_TOKEN_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), lead)
+            out = f"{lead}{rest}"
+        else:
+            # Finally colorize standalone % tokens in compact strips.
+            out = _MOVE_TOKEN_RE.sub(lambda m: self._wrap_color(m.group(1), self._color_for_change(m.group(1), context)), out)
         return f"{head}{sep}{out}"
 
     @staticmethod

@@ -2455,5 +2455,59 @@ def version_cmd(ctx, **kwargs) -> None:
         print(f"  Scheduler: not running")
 
 
+@cli.command("ipo-status")
+@click.option("--company", default=None, help="Show status for a specific company (registry ID).")
+@click.option("--upcoming", is_flag=True, default=False, help="List companies with active IPO process (public_filing, priced, roadshow).")
+@click.option("--live", is_flag=True, default=False, help="Trigger a live fetch from EDGAR and newsrooms before displaying.")
+@click.pass_context
+def ipo_status(ctx, company: str | None, upcoming: bool, live: bool):
+    """Show IPO and private-company intelligence status."""
+    settings = ctx.obj["settings"]
+
+    from app.sources.primary.ipo_service import IpoIntelligenceService
+    from app.sources.primary import ipo_store
+
+    svc = IpoIntelligenceService(settings=settings)
+
+    if live:
+        print("Fetching live IPO data from EDGAR and newsrooms...")
+        events = svc.fetch_all()
+        print(f"  {len(events)} events fetched.\n")
+
+    report = svc.status_report()
+    companies = report["companies"]
+
+    if company:
+        companies = [c for c in companies if c["company_id"] == company]
+        if not companies:
+            print(f"Company '{company}' not found in registry.")
+            return
+
+    if upcoming:
+        active_statuses = {"public_filing", "confidential_filing", "roadshow", "priced"}
+        companies = [
+            c for c in companies
+            if (c.get("stored_status") or c.get("registry_status", "")) in active_statuses
+        ]
+
+    if not companies:
+        print("No matching companies found.")
+        return
+
+    print(f"IPO Intelligence — {len(companies)} companies\n")
+    print(f"{'Company':<25} {'Registry Status':<22} {'Stored Status':<22} {'Conf':<8} {'Filings'}")
+    print("-" * 90)
+    for c in companies:
+        reg_status = c.get("registry_status", "unknown")
+        stored_status = c.get("stored_status") or "not tracked"
+        conf = c.get("status_confidence", "unknown")
+        filings = c.get("known_filings", 0)
+        print(f"{c['canonical_name']:<25} {reg_status:<22} {stored_status:<22} {conf:<8} {filings}")
+
+    print()
+    print(f"Registry: {report['registry_path']}")
+    print("Note: calendar dates are estimates. Confirm against SEC EDGAR filings.")
+
+
 if __name__ == "__main__":
     cli()

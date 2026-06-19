@@ -4,6 +4,29 @@ Briefly is a local-first portfolio intelligence platform. It generates structure
 
 ---
 
+## Documentation Index
+
+This README is the primary reference. For deeper detail, see `docs/`:
+
+| Doc | What it's for |
+|---|---|
+| [`docs/BRIEFLY.md`](docs/BRIEFLY.md) | Master reference: full repo-grounded map of every module, schema, config, and data flow. Start here for system-wide detail beyond this README. |
+| [`docs/SESSION_DESIGN.md`](docs/SESSION_DESIGN.md) | Per-session roles, content rules, and the freshness-aware send-decision matrix. |
+| [`docs/deployment.md`](docs/deployment.md) | Always-on deployment profile: Docker, scheduler process, ops details. |
+| [`docs/API_SETUP.md`](docs/API_SETUP.md) | Local API/key setup for vertical intelligence sources (current; supersedes the old `api_keys.md`). |
+| [`docs/BRIEFING_OUTPUT_QUALITY.md`](docs/BRIEFING_OUTPUT_QUALITY.md) | Degraded-briefing gating by freshness and materiality. |
+| [`docs/FX_DOLLAR_PULSE.md`](docs/FX_DOLLAR_PULSE.md) | Profile-aware FX basket and Dollar Pulse module detail. |
+| [`docs/roadmap.md`](docs/roadmap.md) | Phase-by-phase technical development history (completed work log, not a forward plan despite the filename). |
+| [`docs/trading_safety.md`](docs/trading_safety.md) | Guardrails for the (currently deferred) Trading Lab module. |
+| [`docs/NEWS_TREND_RADAR_PLAN.md`](docs/NEWS_TREND_RADAR_PLAN.md), [`docs/LLM_VERTICAL_SHADOW_PLAN.md`](docs/LLM_VERTICAL_SHADOW_PLAN.md), [`docs/VERTICAL_INTELLIGENCE_API_PLAN.md`](docs/VERTICAL_INTELLIGENCE_API_PLAN.md) | Forward-looking plans for the vertical intelligence framework (healthcare/geopolitics/ai_tech). Partially implemented; check `docs/BRIEFLY.md` Section 7 for current state before treating these as up to date. |
+| [`docs/UX_SIMPLIFICATION_PLAN.md`](docs/UX_SIMPLIFICATION_PLAN.md) | Web UI information-architecture plan. Most of the proposed structure (Command Centre, Portfolio, Macro, News Intelligence, Verticals, Diagnostics, Settings) already exists in `app/web/templates/`; treat as largely implemented and verify before acting on remaining items. |
+| [`docs/FUTURE_ENHANCEMENTS.md`](docs/FUTURE_ENHANCEMENTS.md) | Forward-looking enhancement ideas, not yet built. |
+| [`docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md`](docs/BRIEFLY_RESEARCH_AGENT_STRATEGY.md) | Strategy for evolving the news/research layer into a research agent. Forward-looking, not yet implemented. Parts 1-16 were written against an earlier codebase audit; Part 17+ onward is the current strategy. |
+
+Removed as outdated (superseded by the README and `docs/BRIEFLY.md`, or factually contradicted by the current code/config): `docs/architecture.md`, `docs/product_modules.md`, `docs/personalization.md`, `docs/provider_strategy.md`, `docs/scheduling.md`, `docs/setup.md`, `docs/api_keys.md`, `docs/message_examples.md`, `docs/README_RESTRUCTURE_PLAN.md`, `docs/AUDIT_CURRENT_STATE.md`, and the root `README_DRAFT.md`.
+
+---
+
 ## What Briefly does
 
 **Market Briefing** generates and delivers session-aware briefings across six canonical weekday windows: a morning overview, Europe and US intraday updates, and a closing wrap. Briefings cover market setup, macro context, news intelligence, portfolio-relevant themes, and breaking alerts.
@@ -331,6 +354,115 @@ Note:
 
 ---
 
+## Free primary source intelligence
+
+Briefly fetches directly from official government and regulatory sources with no API key or paid plan required. These providers run alongside the news intelligence pipeline and are included automatically when `ENABLE_PRIMARY_SOURCES=true`.
+
+### Sources
+
+| Provider | Source | Rate limit | Key |
+|---|---|---|---|
+| Federal Reserve | `federalreserve.gov` RSS + HTML | 1.5 s | None |
+| SEC EDGAR earnings | `data.sec.gov` submissions API + EX-99.1 downloads | 0.13 s | None |
+| Bank of England | `bankofengland.co.uk/monetary-policy` HTML | 1.5 s | None |
+
+All three produce `NormalisedEvent` objects with `factual_confidence_score=1.0` (Fed/BoE statements) or `factual_confidence_score=0.95` (EDGAR filings). They flow through the same scoring, dedup, and briefing pipeline as all other events.
+
+### SEC user-agent requirement
+
+SEC policy requires a user-agent string containing a valid contact email. Set in `.env`:
+
+```bash
+SEC_USER_AGENT="Briefly your.email@example.com"
+```
+
+### Configuration
+
+```bash
+ENABLE_PRIMARY_SOURCES=true        # default true
+SEC_USER_AGENT="Briefly your.email@example.com"
+```
+
+---
+
+## IPO and private company intelligence
+
+Briefly includes a parallel intelligence layer for private companies and IPO events. It operates without LLM authority and without paid APIs.
+
+### Registry
+
+`configs/private_companies.yaml` defines 13 tracked companies at launch: OpenAI, Anthropic, Stripe, Databricks, Revolut, Canva, Discord, Anduril, xAI, SpaceX, Klarna, SHEIN, Figma.
+
+Each entry includes: canonical name, aliases, IPO status and confidence, official domains, newsroom URLs, SEC CIK (where public), proposed ticker, public-market peer relationships (with evidence), sector ETFs, and themes.
+
+### IPO status lifecycle
+
+`private` → `confidential_filing` → `public_filing` → `roadshow` → `priced` → `listed`
+
+Also: `postponed`, `withdrawn`, `acquired`.
+
+### Providers
+
+| Provider | Source | Key |
+|---|---|---|
+| `IpoEdgarProvider` | SEC EDGAR EFTS + Submissions API (S-1, F-1, 424B4, EFFECT, RW) | None |
+| `PrivateCompanyNewsroomProvider` | Official company newsrooms (allowlist only, robots.txt checked) | None |
+| `IpoCalendarProvider` | Nasdaq IPO calendar + FMP (optional) | None (FMP optional) |
+
+### Event types and scores
+
+| Event type | Importance | Description |
+|---|---|---|
+| `ipo_pricing` | 0.92 | 424B4 final prospectus (pricing confirmed) |
+| `central_bank_statement` | 0.92 | Fed / BoE statement (primary source) |
+| `ipo_filing` | 0.88 | S-1 or F-1 initial registration |
+| `ipo_listing` | 0.85 | EFFECT or 8-A12B (company goes public) |
+| `ipo_withdrawal` | 0.82 | RW (offering withdrawn) |
+| `private_funding` | 0.78 | Official funding announcement |
+| `ipo_amendment` | 0.75 | S-1/A or F-1/A amendment |
+| `ipo_readthrough` | 0.68 | Derived event for a public peer |
+| `ipo_calendar` | 0.55 | Calendar estimate (lower confidence) |
+
+### Read-through mapping
+
+When a private-company event fires, Briefly emits one `ipo_readthrough` event per public peer listed in the registry for that company. Example: an OpenAI S-1 generates additional events for MSFT (direct ownership) and NVDA (supplier). Speculative relationships are suppressed for low-confidence events. Watchlist filtering applies.
+
+### State persistence
+
+JSON files at `data/cache/ipo/{company_id}.json`. Tracks: content fingerprints (change detection, skip unchanged pages), last poll timestamps (4-hour minimum between re-polls per URL), known accession numbers (filing dedup), IPO status history, and filing event log (capped at 100 per company).
+
+### Newsroom monitoring rules
+
+- Only fetches URLs listed in `configs/private_companies.yaml` (never arbitrary sites)
+- robots.txt checked before every domain (cached per process run)
+- Content fingerprinted: skip if page unchanged since last poll
+- Excerpt capped at 800 characters (no full articles stored)
+
+### IPO status CLI
+
+```bash
+# Show all tracked companies
+python -m app.cli ipo-status
+
+# Filter to companies with an active IPO process
+python -m app.cli ipo-status --upcoming
+
+# Show a single company
+python -m app.cli ipo-status --company openai
+
+# Trigger a live EDGAR + newsroom fetch before displaying
+python -m app.cli ipo-status --live
+```
+
+### Configuration
+
+```bash
+ENABLE_IPO_INTELLIGENCE=true       # default true
+IPO_MONITOR_NEWSROOMS=true         # default true
+```
+
+---
+
 ## Diagnostics and operational commands
 
 ```bash
@@ -418,16 +550,30 @@ News Intelligence UI:
 Vertical Intelligence UI:
 
 - Route: `/ui/briefing/verticals?profile=default_user`
-- Purpose: user-facing control centre for portfolio-linked topic intelligence modules, starting with Healthcare/Biotech.
+- Purpose: user-facing control centre for portfolio-linked topic intelligence modules (Healthcare, Geopolitics, AI/Tech).
 - Vertical modes:
   - `off`: vertical does not run/render
   - `watch`: conservative activation for higher-signal/watchlist-relevant cases
   - `active`: runs normally and can render when material signal exists
   - `portfolio_linked`: activation anchored to portfolio/watchlist threshold settings
-- Source health cards show prepared/stubbed/disabled/active status for FDA/openFDA, ClinicalTrials.gov, EMA, SEC/company IR, and general news.
+- Source health cards show prepared/stubbed/disabled/active status for:
+  - Healthcare: FDA/openFDA, ClinicalTrials.gov, EMA, SEC/company IR, general news
+  - Geopolitics: GDELT + confirmation sources
+  - AI/Tech: SEC EDGAR, arXiv, GitHub (optional fail-soft source)
 - Current configuration is shown separately from latest stored diagnostics so historical runs are not misread as current active state.
 - Planned vertical cards are informational only; they do not enable new live behaviour.
 - Deterministic classifier/rules remain authoritative; ML/LLM are non-authoritative diagnostics.
+- Shared vertical source events are persisted in `vertical_source_events` (metadata only; no full article text).
+- Optional compact shadow briefing integration is disabled by default:
+  - `verticals.include_in_briefing=false`
+  - `verticals.briefing_sessions=["morning"]`
+
+Vertical Intelligence API setup:
+
+- See [docs/API_SETUP.md](docs/API_SETUP.md) for local environment/API setup.
+- Source architecture and current limitations: [docs/VERTICAL_INTELLIGENCE_API_PLAN.md](docs/VERTICAL_INTELLIGENCE_API_PLAN.md)
+- LLM shadow governance (non-authoritative): [docs/LLM_VERTICAL_SHADOW_PLAN.md](docs/LLM_VERTICAL_SHADOW_PLAN.md)
+- Vertical intelligence is shadow/off by default and can be diagnosed without live sends.
 
 ---
 
@@ -464,6 +610,8 @@ cp configs/watchlists.example.yaml configs/watchlists.yaml
 make setup
 make test
 ```
+
+`.env.example` is the canonical tracked environment template. Keep real secrets only in local `.env`.
 
 Minimum required environment variables:
 
@@ -714,6 +862,20 @@ WEB_HOST=127.0.0.1
 WEB_PORT=8080
 ```
 
+### Primary sources (no API key required)
+
+```bash
+ENABLE_PRIMARY_SOURCES=true
+SEC_USER_AGENT="Briefly your.email@example.com"    # required by SEC policy
+```
+
+### IPO and private company intelligence
+
+```bash
+ENABLE_IPO_INTELLIGENCE=true
+IPO_MONITOR_NEWSROOMS=true
+```
+
 ### Provider resilience
 
 ```bash
@@ -724,13 +886,16 @@ PROVIDER_MAX_RETRIES=2
 ### YAML config files
 
 ```
-configs/user_profile.example.yaml   — profile defaults
-configs/watchlists.example.yaml     — watchlist definitions
-configs/schedules.yaml              — cadence schedule
-configs/sectors.yaml                — sector taxonomy
-configs/alert_rules.yaml            — breaking alert thresholds
-configs/holdings.example.yaml       — example holdings
-configs/healthcare.example.yaml     — healthcare vertical defaults
+configs/user_profile.example.yaml      — profile defaults
+configs/watchlists.example.yaml        — watchlist definitions
+configs/schedules.yaml                 — cadence schedule
+configs/sectors.yaml                   — sector taxonomy
+configs/alert_rules.yaml               — breaking alert thresholds
+configs/holdings.example.yaml          — example holdings
+configs/healthcare.example.yaml        — healthcare vertical defaults
+configs/private_companies.yaml         — IPO registry (13 companies)
+configs/sources.yaml                   — provider trust tiers and capabilities
+configs/macro_calendar.yaml            — macro event seed calendar (manually maintained)
 ```
 
 ---
@@ -775,20 +940,32 @@ python -m pytest app/tests/test_day_replay.py -q
 python -m pytest app/tests/test_market_data.py -q
 python -m pytest app/tests/test_circuit_breaker.py -q
 python -m pytest app/tests/test_llm_usage_tracker.py -q
+python -m pytest app/tests/test_primary_sources.py -q
+python -m pytest app/tests/test_ipo_intelligence.py -q
 ```
+
+Full suite: **1614 tests passing**.
 
 ---
 
 ## Architecture
 
 ```
-Providers
+Market data providers (paid/free)
   Finnhub | NewsAPI | FRED | yfinance
   Optional: GDELT | Alpha Vantage News | FMP | Mediastack
+
+Primary sources (no API key required)
+  Federal Reserve press releases | SEC EDGAR earnings (EX-99.1) | Bank of England
+
+IPO and private company intelligence (no API key required)
+  EDGAR S-1/F-1/424B4 monitor | Company newsrooms (allowlist only) | IPO calendars
+  Registry: 13 companies tracked | Read-through events for public peers
 
 Intelligence pipeline
   cleaners -> ticker resolution -> sector enrichment -> dedupe
   -> credibility -> personal relevance -> clustering -> scoring
+  -> IPO event type weighting -> read-through mapping
 
 Briefing generation
   session auto-route (brief) | morning | midday | preopen | intraday | close | breaking
@@ -805,6 +982,10 @@ Portfolio workbench
   -> Risk Analytics -> CMA Builder -> Rebalancing Engine
   -> Attribution -> Simulation Lab
   -> Fixed Income -> PDF Reports -> ESG/SRI -> Multi-Currency/FX
+
+Persistence
+  SQLite (briefing state, portfolio, analytics)
+  JSON cache (IPO store: data/cache/ipo/)
 ```
 
 Key persistence tables:
@@ -849,6 +1030,19 @@ See [docs/roadmap.md](docs/roadmap.md) for the full phase-by-phase development h
 
 **Missed a session.** Run `schedule-status` to confirm the scheduler is running and check its lock status. Run `daily-summary` to see what was and was not sent. Run `delivery-log` for exact records. Check `logs/` for scheduler errors.
 
+**Briefing showed `0 fetched` and market sections unavailable.** This usually indicates a transient provider/network outage (for example DNS resolution failure) or open circuit-breakers across multiple providers. Use:
+
+- `python -m app.cli schedule-status`
+- `python -m app.cli session-audit --date today --live-check --classifier-details --vertical-details`
+- `python -m app.cli delivery-log --date today`
+- `tail -n 300 logs/briefly.log`
+
+Output now distinguishes:
+- provider outage (`raw fetch 0`)
+- fetched-but-filtered (`X raw fetched, 0 selected after filters`)
+
+and explicitly labels market tape outages rather than showing neutral `+0.00%` placeholders.
+
 **All six sessions arrived at startup.** This is startup catch-up (Phase 9.1): on scheduler start, any sessions that elapsed today before the scheduler was running are delivered automatically. Already-sent sessions are skipped via idempotency.
 
 **Snapshot archive shows 0/6.** Only live scheduler sessions are archived. Backfills, dry runs, manual `session-send`, and `day-replay` are excluded.
@@ -886,6 +1080,15 @@ Practical interpretation:
 - Seeing `AMD +18.61%` in pre-open can be valid **prior-close context**.
 - Seeing `AMD +1.12%` later intraday can be valid **live session move**.
 - The output should now label this distinction directly in market/watchlist rows and session data-basis lines.
+
+Session diagnosis and triggering are deterministic:
+
+- A `Session Diagnosis Engine` computes primary/secondary/rejected drivers plus data caveats.
+- Triggering is rendered as a three-bucket Trigger Board:
+  - Active triggers
+  - Watch triggers
+  - Cooled / invalidated
+- If market data is unavailable, the narrative uses `DATA DEGRADED` and avoids fake neutral `+0.00%` regional/commodity reads.
 
 ---
 
@@ -1278,6 +1481,12 @@ Recovery/catch-up:
 - `day-replay ...` -> multi-session test harness
 - `snapshots replay --date ... --session ...` -> resend exact archived output
 
+IPO intelligence:
+- `ipo-status` -> show all tracked private companies and IPO state
+- `ipo-status --upcoming` -> filter to companies with active IPO process
+- `ipo-status --company <id>` -> single company
+- `ipo-status --live` -> fetch EDGAR + newsrooms before display
+
 Portfolio workbench:
 - Use `/ui/portfolio/*` routes for holdings/policy/allocation/risk/CMA/rebalancing/attribution/simulation/bonds/reports/ESG/FX.
 
@@ -1354,6 +1563,13 @@ The pipeline includes a deterministic post-processing layer that runs before dis
 **Brent freshness**: stale Brent is tracked via `quote_freshness` on the briefing object. When `freshness_state` is `stale`, `prior_close`, or `carried_forward`, the quality guard replaces live confirmation language with a stale caveat.
 
 **Macro Policy Watch heading**: the heading "MACRO POLICY WATCH" appears exactly once per briefing in both Telegram and email output.
+
+**Morning diagnosis and setup clarity**:
+- Morning diagnosis prefers explicit rates/regional drivers over generic mixed wording when thresholds are met.
+- Breadth & Leadership no longer duplicates regional US/Europe/Asia bars from Regional Divergence.
+- Yield Curve chart shows both current labels and available 1W tenor labels.
+- Market Setup colours only the actual move; range/location text remains neutral.
+- Optional Applied News Stack can provide deterministic "why it matters" mapping without changing classifier authority.
 
 **Chart output**: full density mode (`email_density_mode: full`) has no arbitrary chart cap; all rendered charts are returned. Desk mode caps at 5, medium at 6. Set `delivery.max_email_charts` to impose a user-level cap in any mode.
 

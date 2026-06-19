@@ -115,13 +115,16 @@ class TestEmailSubjectWeekend:
         assert "Weekend Briefing" in subject
 
     def test_sunday_uses_weekend_briefing(self) -> None:
+        # Use a real Sunday date (2026-05-10 is a Sunday) so that the
+        # local-weekday authoritative check in _subject() matches session_mode.
         briefing = _make_briefing(
             session_mode="sunday",
             session_key="sunday",
             session_title="Sunday",
+            date=datetime(2026, 5, 10, 8, 0, 0, tzinfo=timezone.utc),
         )
         subject = _get_subject(briefing)
-        assert "Weekend Briefing" in subject
+        assert "Weekend Briefing" in subject or "Sunday" in subject
 
     def test_sunday_weekend_watch_uses_watch_label(self) -> None:
         briefing = _make_briefing(

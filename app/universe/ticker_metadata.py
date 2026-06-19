@@ -226,6 +226,16 @@ _AMBIGUOUS_SINGLE_WORD: set[str] = {
     "square",  # generic word
 }
 
+# Single-word company names that are also common nouns where capitalisation
+# is the only reliable disambiguating signal (e.g. "apple" the fruit vs.
+# "Apple" the company, as in "custard apple"). Unlike _AMBIGUOUS_SINGLE_WORD,
+# these ARE still matched bare, but only when the matched text is actually
+# capitalised, since news headlines/prose capitalise the company name and
+# essentially never capitalise the common noun mid-sentence.
+_REQUIRES_CAPITALISATION: set[str] = {
+    "apple",  # the fruit, as in "custard apple"
+}
+
 # Uppercase ticker symbols that would collide with common English words
 # or abbreviations if matched bare from a headline. These are still valid
 # tickers; they just can't be auto-extracted from freeform text.
@@ -291,7 +301,11 @@ def extract_tickers_from_text(text: str) -> list[str]:
     appears in ``text``.
 
     Pass 1 matches canonical company names (case-insensitive), e.g. "Nvidia"
-    → NVDA, "JPMorgan Chase" → JPM, "TSMC" → TSM.
+    → NVDA, "JPMorgan Chase" → JPM, "TSMC" → TSM. Names in
+    ``_REQUIRES_CAPITALISATION`` (single words that double as common nouns,
+    e.g. "apple") are matched case-insensitively for position but only kept
+    if the matched text is actually capitalised, so "custard apple" does not
+    resolve to AAPL while "Apple unveiled..." still does.
 
     Pass 2 matches bare ticker symbols written in uppercase in the original
     text, e.g. "AMD jumps 5%" → AMD. Symbols shorter than 3 characters or
@@ -311,7 +325,12 @@ def extract_tickers_from_text(text: str) -> list[str]:
         # Regex word boundaries handle most cases, but "&" and "." fail
         # \b; use lookaround on non-word chars instead.
         pattern = rf"(?<![\w]){re.escape(name)}(?![\w])"
-        match = re.search(pattern, lowered)
+        if name in _REQUIRES_CAPITALISATION:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match and not text[match.start()].isupper():
+                match = None
+        else:
+            match = re.search(pattern, lowered)
         if match:
             hits.append((match.start(), ticker))
             seen.add(ticker)
@@ -329,6 +348,19 @@ def extract_tickers_from_text(text: str) -> list[str]:
 
     hits.sort()
     return [ticker for _, ticker in hits]
+
+
+def is_collision_prone_symbol(symbol: str) -> bool:
+    """True if ``symbol`` is a known ticker that collides with a common
+    English word or abbreviation (e.g. ALL/Allstate, LOW/Lowe's, ON/ON Semi).
+
+    Callers that confirm a provider-supplied ticker's presence in free text
+    (rather than discovering tickers from text) should require explicit
+    notation (``$ALL`` or ``(ALL)``) for these symbols instead of trusting a
+    bare word-boundary match, for the same reason ``extract_tickers_from_text``
+    excludes them from its own bare-symbol pass via ``_BARE_SYMBOL_EXCLUDE``.
+    """
+    return symbol.upper().strip() in _BARE_SYMBOL_EXCLUDE
 
 
 def company_name_for_ticker(ticker: str) -> str:

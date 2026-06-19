@@ -38,7 +38,9 @@ from app.briefing.theme_builder import build_top_themes
 from app.briefing.news_classifier import annotate_news_events, should_suppress_low_signal
 from app.briefing.llm_news_classifier import run_llm_news_classifier_shadow
 from app.briefing.valuation_lens import ValuationLens
+from app.briefing.session_diagnosis import build_session_diagnosis
 from app.verticals.engine import build_vertical_section
+from app.verticals.shadow_summary import build_vertical_shadow_lines
 from app.logger import get_logger
 from app.db.session import get_session
 from app.personalization.delivery_rules import load_alert_rules
@@ -55,8 +57,17 @@ from app.processing.article_quality import (
     neutralize_headline,
 )
 from app.processing.pipeline import is_actionable_event, process_event_stream
+from app.processing.research_event_builder import build_research_event, composite_research_score
+from app.research.events import build_research_events, build_research_freshness_summary, diff_research_events, rank_research_events
+from app.research.rendering import render_analyst_read
+from app.research.snapshot import (
+    compact_dicts_to_stub_events,
+    load_previous_research_snapshot,
+    persist_research_snapshot,
+)
+from app.schemas.research_event import ResearchEvent
 from app.schemas.briefings import MarketSetup, MorningBriefing, session_mode_for
-from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, QuoteData, SectorSnapshot
+from app.schemas.events import EarningsEvent, MacroDataPoint, NormalisedEvent, PricePoint, QuoteData, SectorSnapshot
 from app.settings import Settings
 from app.universe.sector_universe import SectorUniverse
 from app.universe.ticker_metadata import TICKER_DISPLAY_NAMES, company_name_for_ticker
@@ -436,6 +447,43 @@ class MorningBriefingGenerator:
         # 1. Market setup (quotes for indices + macro instruments)
         briefing.market_setup = self._build_market_setup()
 
+        # Snapshot fallback: if live providers returned nothing, try prior session.
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            from app.data_sources.quote_fallback import load_snapshot_fallback_quotes
+            _local_date = now.astimezone(_ZI(self.profile.timezone or self.settings.timezone or "Europe/Madrid")).date()
+            _all_live_quotes = (
+                list(briefing.market_setup.index_quotes)
+                + list(briefing.market_setup.macro_quotes)
+            )
+            if not _all_live_quotes:
+                _fb_quotes, _fb_session, _fb_time = load_snapshot_fallback_quotes(
+                    profile_name=self.profile.name,
+                    session_key=session_key,
+                    local_date=_local_date,
+                )
+                if _fb_quotes:
+                    # Split fallback quotes into index vs macro by heuristic
+                    _index_tokens = ("S&P", "NASDAQ", "DOW", "RUSSELL", "STOXX", "DAX", "NIKKEI", "VIX", "FTSE", "CAC", "IBEX")
+                    _macro_tokens = ("WTI", "BRENT", "GOLD", "USD", "BTC", "NG", "CRUDE", "10Y", "2Y")
+                    for _fbq in _fb_quotes:
+                        _upper = ((_fbq.display_name or "") + " " + (_fbq.symbol or "")).upper()
+                        if any(t in _upper for t in _index_tokens):
+                            briefing.market_setup.index_quotes.append(_fbq)
+                        elif any(t in _upper for t in _macro_tokens):
+                            briefing.market_setup.macro_quotes.append(_fbq)
+                        else:
+                            briefing.market_setup.index_quotes.append(_fbq)
+                    briefing.stale_snapshot_session = _fb_session
+                    briefing.stale_snapshot_time = _fb_time
+                    briefing.stale_snapshot_used = True
+                    logger.warning(
+                        "Live market data empty; using stale snapshot from session=%s time=%s",
+                        _fb_session, _fb_time,
+                    )
+        except Exception:
+            logger.debug("Snapshot fallback load failed", exc_info=True)
+
         # 2. Macro context: FRED core + ECB/Eurostat when configured
         briefing.macro_context = self.macro_svc.get_morning_macro()
         briefing.macro_context.extend(self.macro_svc.get_ecb_snapshot())
@@ -529,6 +577,9 @@ class MorningBriefingGenerator:
             watchlist=self.profile.all_watchlist_tickers[:20]  # limit API calls
         )
         briefing.events_fetched = len(all_events)
+        hub_stats = dict(getattr(getattr(self.news_svc, "global_hub", None), "last_run_stats", {}) or {})
+        briefing.news_raw_fetched = int(hub_stats.get("fetched_total", 0) or 0)
+        briefing.news_after_fingerprint_dedup = int(hub_stats.get("deduped_total", 0) or 0)
 
         # 4. Process, cluster, classify, and rank
         # Sector enrichment runs inside the pipeline after ticker resolution
@@ -571,15 +622,38 @@ class MorningBriefingGenerator:
             logger.debug("llm news shadow classifier failed", exc_info=True)
 
         # 7. Assemble sections
+        _preferred_symbols: set[str] = {
+            s.upper()
+            for s in (
+                list(self.profile.portfolio_symbols) + list(self.profile.all_watchlist_tickers)
+            )
+            if s
+        }
+        _research_enabled = bool(
+            getattr(self.settings, "use_research_event_ranking", False)
+            or getattr(self.settings, "enable_research_agent_briefings", False)
+        )
         briefing.global_news = self._build_global_news(eligible, briefing.session_mode)
-        briefing.top_themes = self._build_top_themes(eligible, briefing.session_mode)
-        briefing.portfolio_focus = self._build_portfolio_focus(eligible)
-        briefing.sector_scan = self._build_sector_scan(eligible, briefing.session_mode)
         briefing.earnings_calendar = self._fetch_earnings()
         briefing.earnings_relevance = self._build_earnings_relevance(briefing.earnings_calendar)
-        briefing.watchlist_events = self._filter_watchlist_events(eligible)
         briefing.watchlist_quotes = self._fetch_watchlist_quotes()
         briefing.portfolio_quotes = self._fetch_portfolio_quotes()
+        _quotes_by_symbol = self._quotes_by_symbol(briefing)
+        _research_index = (
+            self._build_research_event_index(eligible, _preferred_symbols, _quotes_by_symbol)
+            if _research_enabled
+            else None
+        )
+        briefing.top_themes = self._build_top_themes(
+            eligible, briefing.session_mode, research_index=_research_index
+        )
+        briefing.portfolio_focus = self._build_portfolio_focus(eligible)
+        briefing.sector_scan = self._build_sector_scan(eligible, briefing.session_mode)
+        briefing.watchlist_events = self._filter_watchlist_events(eligible)
+        if _research_index:
+            briefing.global_news = self._rank_normalised_by_research(briefing.global_news, _research_index, MAX_GLOBAL_NEWS)
+            briefing.portfolio_focus = self._rank_normalised_by_research(briefing.portfolio_focus, _research_index, MAX_PORTFOLIO_FOCUS)
+            briefing.watchlist_events = self._rank_normalised_by_research(briefing.watchlist_events, _research_index, self.rules.max_watchlist_events)
         healthcare_candidates = self._healthcare_candidate_events(
             eligible=eligible,
             briefing=briefing,
@@ -590,6 +664,13 @@ class MorningBriefingGenerator:
             session_key=briefing.session_key,
             candidate_events=healthcare_candidates,
         )
+        try:
+            briefing.vertical_shadow_lines = build_vertical_shadow_lines(
+                profile=self.profile,
+                session_key=str(briefing.session_key or "morning").lower(),
+            )
+        except Exception:
+            logger.debug("vertical shadow summary unavailable", exc_info=True)
         if should_include_macro_policy_watch(
             profile=self.profile,
             session_key=briefing.session_key or "morning",
@@ -719,6 +800,17 @@ class MorningBriefingGenerator:
         )
         briefing.portfolio_impact_bullets = impact_bullets
         briefing.portfolio_action_posture = action_posture
+        briefing.applied_news_stack = self._build_applied_news_stack(
+            briefing, research_index=_research_index
+        )
+        diagnosis = build_session_diagnosis(briefing)
+        briefing.session_diagnosis = diagnosis.to_dict()
+        briefing.trigger_board = dict(diagnosis.trigger_board or {})
+        briefing.dominant_tape_driver = diagnosis.one_sentence_diagnosis
+        if briefing.market_data_outage:
+            briefing.session_quality_label = "Data degraded"
+            briefing.session_quality_bucket = "DATA_DEGRADED"
+            briefing.session_quality_score = -1.0
         regime_context, alignment = build_regime_context(
             profile_name=self.profile.name,
             current_setup_tags=briefing.market_setup_signal_tags,
@@ -726,6 +818,12 @@ class MorningBriefingGenerator:
         briefing.regime_context = regime_context
         briefing.positioning_alignment = alignment
         self._dedupe_cross_section_events(briefing)
+        if getattr(self.settings, "enable_research_agent_briefings", False):
+            self._apply_research_agent_briefing(
+                briefing,
+                research_index=_research_index,
+                provider_contributions=dict(hub_stats.get("provider_contributions", {}) or {}),
+            )
         if self._should_build_charts():
             chart_briefing = briefing.model_copy(deep=True)
             chart_briefing.market_setup = active_setup.model_copy(deep=True)
@@ -839,6 +937,53 @@ class MorningBriefingGenerator:
         provider_health = self._provider_health_summary()
         if provider_health:
             briefing.data_freshness["Provider Health"] = provider_health
+        market_quote_count = len(list(briefing.market_setup.index_quotes) + list(briefing.market_setup.macro_quotes))
+        has_macro_points = bool(briefing.macro_context or briefing.commodity_strip)
+        has_breadth = bool(briefing.market_setup.market_breadth)
+        briefing.market_data_outage = market_quote_count == 0 and not has_macro_points and not has_breadth
+
+        provider_health_lower = str(provider_health or "").lower()
+        provider_outage_signals = ("unavailable:", "core providers degraded", "provider failures")
+        global_outage = briefing.news_raw_fetched <= 0 and briefing.events_fetched <= 0
+        briefing.news_data_outage = global_outage and any(token in provider_health_lower for token in provider_outage_signals)
+        if briefing.news_data_outage:
+            briefing.news_pipeline_status = "provider_outage_raw_fetch_0"
+        elif briefing.news_raw_fetched > 0 and briefing.events_after_dedup <= 0:
+            briefing.news_pipeline_status = "raw_fetched_but_filtered_to_0"
+        else:
+            briefing.news_pipeline_status = "ok"
+
+        if briefing.market_data_outage:
+            briefing.market_setup_analysis = "Market data unavailable; no directional read generated."
+            briefing.dominant_tape_driver = "Provider data outage; market tape unavailable."
+            briefing.market_setup_signal_tags = ["data_outage"]
+            briefing.data_freshness["Market data"] = "outage"
+            briefing.data_basis_lines.append("Market data unavailable; no directional read generated.")
+            briefing.data_basis_lines.append("Provider data outage; see diagnostics.")
+        elif getattr(briefing, "stale_snapshot_used", False):
+            _snap_sess = getattr(briefing, "stale_snapshot_session", "prior session")
+            _snap_time = getattr(briefing, "stale_snapshot_time", "unknown time")
+            _degrade_banner = (
+                f"LIVE DATA DEGRADED: provider fetch failed at "
+                f"{now.astimezone(ZoneInfo(self.profile.timezone or 'Europe/Madrid')).strftime('%H:%M')}; "
+                f"using latest valid snapshot from {_snap_time} ({_snap_sess} session). "
+                f"Treat levels as stale until provider recovery."
+            )
+            briefing.data_freshness["Market data"] = "stale_snapshot"
+            briefing.data_basis_lines.insert(0, _degrade_banner)
+
+        if briefing.news_data_outage:
+            briefing.data_freshness["News pipeline"] = "provider_outage_raw_fetch_0"
+            briefing.data_basis_lines.append("News scan returned no usable items; provider diagnostics required.")
+        elif briefing.news_raw_fetched > 0 and briefing.events_fetched <= 0:
+            briefing.data_freshness["News pipeline"] = "raw_fetched_but_selected_0"
+            briefing.data_basis_lines.append(
+                f"News: {briefing.news_raw_fetched} fetched, 0 selected after filters/suppression."
+            )
+        else:
+            briefing.data_freshness["News pipeline"] = (
+                f"raw={briefing.news_raw_fetched}, merged={briefing.events_fetched}, deduped={briefing.events_after_dedup}"
+            )
         sent_ids: set[str] = set()
         for event in (
             briefing.global_news
@@ -939,10 +1084,23 @@ class MorningBriefingGenerator:
             self._trim_market_snapshot_quotes(briefing, max_index=8, max_macro=5)
             return
 
-        if key in {"us_intraday_risk", "into_close"}:
+        if key == "us_intraday_risk":
             briefing.global_news = list(briefing.global_news[:2])
             briefing.top_themes = list(briefing.top_themes[:2])
             briefing.portfolio_focus = list(briefing.portfolio_focus[:3])
+            briefing.watchlist_events = list(briefing.watchlist_events[:4])
+            briefing.sector_scan = []
+            briefing.macro_context = []
+            briefing.commodity_strip = list(briefing.commodity_strip[:3])
+            self._trim_market_snapshot_quotes(briefing, max_index=6, max_macro=4)
+            if briefing.healthcare_intelligence and briefing.healthcare_intelligence.items:
+                briefing.healthcare_intelligence.items = list(briefing.healthcare_intelligence.items[:3])
+            return
+
+        if key == "into_close":
+            briefing.global_news = list(briefing.global_news[:3])
+            briefing.top_themes = list(briefing.top_themes[:2])
+            briefing.portfolio_focus = list(briefing.portfolio_focus[:4])
             briefing.watchlist_events = list(briefing.watchlist_events[:4])
             briefing.sector_scan = []
             briefing.macro_context = []
@@ -1005,7 +1163,14 @@ class MorningBriefingGenerator:
             briefing.market_setup.macro_quotes,
             key=lambda q: (_rank(q.display_name or q.symbol, priority_macro_tokens), abs(float(q.change_percent or 0.0)) * -1),
         )
-        briefing.market_setup.index_quotes = index_quotes[:max_index]
+        selected_index = list(index_quotes[:max_index])
+        vix_row = next((q for q in index_quotes if "VIX" in f"{q.display_name} {q.symbol}".upper()), None)
+        if vix_row is not None and all("VIX" not in f"{q.display_name} {q.symbol}".upper() for q in selected_index):
+            if selected_index:
+                selected_index = selected_index[:-1] + [vix_row]
+            else:
+                selected_index = [vix_row]
+        briefing.market_setup.index_quotes = selected_index
         briefing.market_setup.macro_quotes = macro_quotes[:max_macro]
 
     @staticmethod
@@ -1031,6 +1196,170 @@ class MorningBriefingGenerator:
 
     # -- Section builders -----------------------------------------------------
 
+    def _build_research_event_index(
+        self,
+        eligible: list[NormalisedEvent],
+        preferred_symbols: set[str],
+        quotes_by_symbol: dict[str, QuoteData] | None = None,
+    ) -> dict[str, tuple[ResearchEvent, float]]:
+        """Build event_id -> (ResearchEvent, composite_score) for re-ranking.
+
+        Called only when research-agent ranking is enabled. Pure computation:
+        no provider or DB calls. Price confirmation uses already-fetched
+        watchlist/portfolio quotes when supplied.
+        """
+        index: dict[str, tuple[ResearchEvent, float]] = {}
+        failures_out: list[int] = [0]
+        research_events = build_research_events(
+            eligible,
+            quotes_by_symbol=quotes_by_symbol or {},
+            preferred_symbols=preferred_symbols,
+            now=datetime.now(timezone.utc),
+            failures_out=failures_out,
+        )
+        if failures_out[0]:
+            logger.debug("Research event build failures: %d", failures_out[0])
+        # Stash failures on instance so _apply_research_agent_briefing can read them.
+        self._last_research_build_failures = failures_out[0]
+        for re in research_events:
+            index[re.source_event_id] = (re, composite_research_score(re))
+        return index
+
+    @staticmethod
+    def _quotes_by_symbol(briefing: MorningBriefing) -> dict[str, QuoteData]:
+        quotes: dict[str, QuoteData] = {}
+        for quote in (
+            list(briefing.watchlist_quotes or [])
+            + list(briefing.portfolio_quotes or [])
+            + list(briefing.market_setup.index_quotes or [])
+            + list(briefing.market_setup.macro_quotes or [])
+        ):
+            if quote.symbol:
+                quotes[str(quote.symbol).upper()] = quote
+        return quotes
+
+    @staticmethod
+    def _rank_normalised_by_research(
+        events: list[NormalisedEvent],
+        research_index: dict[str, tuple[ResearchEvent, float]],
+        max_items: int,
+    ) -> list[NormalisedEvent]:
+        ranked: list[tuple[float, int, NormalisedEvent]] = []
+        for idx, event in enumerate(events):
+            entry = research_index.get(event.event_id)
+            score = entry[1] if entry else float(event.final_score or 0.0)
+            ranked.append((score, -idx, event))
+        ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [event for _, _idx, event in ranked[:max_items]]
+
+    def _apply_research_agent_briefing(
+        self,
+        briefing: MorningBriefing,
+        *,
+        research_index: dict[str, tuple[ResearchEvent, float]] | None,
+        provider_contributions: dict[str, int],
+    ) -> None:
+        """Populate analyst-read fields from the post-dedupe surfaced sections."""
+        surfaced_ids: list[str] = []
+        for event in (
+            list(briefing.top_themes or [])
+            + list(briefing.global_news or [])
+            + list(briefing.portfolio_focus or [])
+            + list(briefing.watchlist_events or [])
+            + [evt for snap in (briefing.sector_scan or []) for evt in (snap.top_events or [])]
+        ):
+            if event.event_id not in surfaced_ids:
+                surfaced_ids.append(event.event_id)
+
+        # Read build failure count tracked during index construction.
+        build_failures = int(getattr(self, "_last_research_build_failures", 0) or 0)
+        if research_index:
+            candidates = [
+                research_index[event_id][0]
+                for event_id in surfaced_ids
+                if event_id in research_index
+            ]
+        else:
+            candidates = []
+
+        session_key = briefing.session_key or "morning"
+        min_confidence = str(
+            getattr(self.settings, "research_agent_min_confidence", "medium") or "medium"
+        )
+
+        ranked = rank_research_events(
+            candidates,
+            session_key=session_key,
+            max_items=int(getattr(self.settings, "research_agent_max_items_per_session", 5) or 5),
+            min_confidence=min_confidence,
+        )
+
+        # For non-morning sessions, load the previous session's research snapshot
+        # and annotate ranked events with their delta status (new / material_update /
+        # repeated / stale). This gives the analyst-read genuine session-to-session
+        # novelty rather than re-ranking the same stories as if they were fresh.
+        if (session_key or "morning").lower() != "morning" and ranked:
+            try:
+                from zoneinfo import ZoneInfo as _ZI
+                _tz = _ZI(self.profile.timezone or self.settings.timezone or "Europe/Madrid")
+                _local_date = briefing.generated_at.astimezone(_tz).date()
+                prev_records = load_previous_research_snapshot(
+                    profile_name=self.profile.name,
+                    local_date=_local_date,
+                    session_key=session_key,
+                )
+                if prev_records:
+                    prev_stubs = compact_dicts_to_stub_events(prev_records)
+                    deltas = diff_research_events(ranked, prev_stubs)
+                    for event, delta in zip(ranked, deltas):
+                        if delta.status == "new":
+                            event.what_changed = event.what_changed or "New since prior session."
+                        elif delta.status == "material_update":
+                            changed = ", ".join(delta.changed_fields) if delta.changed_fields else "signal"
+                            event.what_changed = f"Updated since prior session ({changed} changed)."
+                        elif delta.status in {"repeated", "stale"}:
+                            event.what_changed = f"Carried from prior session ({delta.status})."
+            except Exception:
+                logger.debug("Research diff against previous session failed; skipping delta annotation", exc_info=True)
+
+        briefing.research_events = ranked
+        briefing.analyst_read_lines = render_analyst_read(
+            ranked,
+            session_key=session_key,
+            use_llm_prose=bool(getattr(self.settings, "research_agent_llm_prose_enabled", False)),
+        )
+        tz_label = self.profile.timezone or self.settings.timezone or "UTC"
+        freshness = build_research_freshness_summary(
+            ranked,
+            provider_contributions=provider_contributions,
+            timezone_label=tz_label,
+            build_failures=build_failures,
+        )
+        briefing.research_source_basis = freshness.source_basis_label
+        briefing.research_freshness = {
+            "newest_event_at": freshness.newest_event_at.isoformat() if freshness.newest_event_at else "",
+            "provider_contributions": freshness.provider_contributions,
+            "stale_provider_count": freshness.stale_provider_count,
+            "outage_provider_count": freshness.outage_provider_count,
+            "source_basis_label": freshness.source_basis_label,
+            "build_failures": build_failures,
+        }
+
+        # Persist a compact snapshot so the next session can diff against this one.
+        if ranked:
+            try:
+                from zoneinfo import ZoneInfo as _ZI2
+                _tz2 = _ZI2(self.profile.timezone or self.settings.timezone or "Europe/Madrid")
+                _local_date2 = briefing.generated_at.astimezone(_tz2).date()
+                persist_research_snapshot(
+                    ranked,
+                    profile_name=self.profile.name,
+                    local_date=_local_date2,
+                    session_key=session_key,
+                )
+            except Exception:
+                logger.debug("Research snapshot persist failed; skipping", exc_info=True)
+
     def _build_market_setup(self) -> MarketSetup:
         """Fetch quotes for indices and macro instruments."""
         setup = MarketSetup()
@@ -1044,6 +1373,7 @@ class MorningBriefingGenerator:
             for q in quotes:
                 q.display_name = name_map.get(q.symbol, q.symbol)
             setup.index_quotes = quotes
+            self._ensure_vix_quote(setup)
 
         # Macro instrument quotes (gold, oil, USD, BTC)
         macro_symbols = self.universe.all_macro_symbols
@@ -1074,12 +1404,50 @@ class MorningBriefingGenerator:
 
         return setup
 
+    def _ensure_vix_quote(self, setup: MarketSetup) -> None:
+        """Keep VIX available as a core risk instrument across sessions.
+
+        Falls back to latest available history point when live quote fetch misses.
+        """
+        has_vix = any("VIX" in f"{q.display_name} {q.symbol}".upper() for q in (setup.index_quotes or []))
+        if has_vix:
+            return
+        history = self.market_svc.get_price_history("^VIX", period="5d", interval="1d")
+        if not history:
+            return
+        latest: PricePoint = history[-1]
+        close = float(latest.close or 0.0)
+        if close <= 0:
+            return
+        prev_close = float(history[-2].close) if len(history) > 1 else close
+        change = close - prev_close
+        change_pct = ((close / prev_close) - 1.0) * 100.0 if prev_close else 0.0
+        setup.index_quotes.append(
+            QuoteData(
+                symbol="^VIX",
+                display_name="VIX",
+                current_price=close,
+                change=change,
+                change_percent=change_pct,
+                previous_close=prev_close,
+                timestamp=latest.timestamp,
+                source="yfinance_history_fallback",
+            )
+        )
+
     def _build_top_themes(
         self,
         scored_events: list[NormalisedEvent],
         session_mode: str,
+        research_index: dict[str, tuple[ResearchEvent, float]] | None = None,
     ) -> list[NormalisedEvent]:
-        """Build top themes with an editorial trust gate."""
+        """Build top themes with an editorial trust gate.
+
+        When research_index is provided (use_research_event_ranking=True), sorts
+        candidates by composite_research_score instead of the theme_builder's
+        final_score + portfolio/watchlist bonus formula. All editorial gates and
+        hygiene passes are unchanged.
+        """
         preferred_symbols = {
             symbol.upper()
             for symbol in (
@@ -1088,16 +1456,35 @@ class MorningBriefingGenerator:
             )
             if symbol
         }
-        themes = build_top_themes(
-            scored_events,
-            max_themes=self.rules.max_themes,
-            editorial_gate=lambda evt: self._is_editorially_trustworthy(
-                evt,
-                session_mode,
-                section="top_themes",
-            ),
-            preferred_symbols=preferred_symbols,
-        )
+        if research_index:
+            candidates: list[tuple[float, NormalisedEvent]] = []
+            for evt in scored_events:
+                if not is_actionable_event(evt):
+                    continue
+                if (
+                    evt.personal_relevance_score < 0.55
+                    and evt.source != "sec_edgar"
+                    and evt.event_type not in {"macro_release", "fed_decision", "geopolitical", "regulatory"}
+                ):
+                    continue
+                if not self._is_editorially_trustworthy(evt, session_mode, section="top_themes"):
+                    continue
+                re_entry = research_index.get(evt.event_id)
+                score = re_entry[1] if re_entry else float(evt.final_score or 0.0)
+                candidates.append((score, evt))
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            themes = [evt for _, evt in candidates[: self.rules.max_themes]]
+        else:
+            themes = build_top_themes(
+                scored_events,
+                max_themes=self.rules.max_themes,
+                editorial_gate=lambda evt: self._is_editorially_trustworthy(
+                    evt,
+                    session_mode,
+                    section="top_themes",
+                ),
+                preferred_symbols=preferred_symbols,
+            )
         cleaned: list[NormalisedEvent] = []
         for evt in themes:
             if should_suppress_low_signal(evt):
@@ -1108,6 +1495,220 @@ class MorningBriefingGenerator:
                 continue
             cleaned.append(self._apply_news_hygiene(evt, section="portfolio_watchlist_themes"))
         return cleaned
+
+    # Causal channel -> applied_news_stack bucket name mapping.
+    # Channels not listed here fall back to keyword-based matching below.
+    _CHANNEL_TO_BUCKET: dict[str, str] = {
+        "rates": "macro_rates",
+        "earnings": "event_risk",
+        "regulatory": "regulatory",
+        "geopolitical": "geopolitical",
+        "supply_chain": "supply_chain",
+        "sentiment": "sentiment",
+    }
+
+    def _build_applied_news_stack(
+        self,
+        briefing: MorningBriefing,
+        research_index: dict[str, tuple[ResearchEvent, float]] | None = None,
+    ) -> list[dict[str, object]]:
+        """Build a compact deterministic morning applied-news stack.
+
+        When research_index is provided (use_research_event_ranking=True), the
+        primary pass routes events by causal_channel and uses ResearchEvent
+        interpretation strings. A secondary keyword pass fills any remaining
+        slots for buckets without causal_channel coverage (regional, sector,
+        watchlist, portfolio). The output dict schema is identical to the
+        keyword-only path so formatter.py requires no changes.
+        """
+        if (briefing.session_key or "morning").lower() != "morning":
+            return []
+
+        if research_index:
+            return self._build_applied_news_stack_via_research_events(briefing, research_index)
+
+        pools: list[tuple[str, list[NormalisedEvent]]] = [
+            ("macro_rates", list(briefing.top_themes or [])),
+            ("regional", list(briefing.global_news or [])),
+            ("sector", [evt for snap in (briefing.sector_scan or []) for evt in (snap.top_events or [])]),
+            ("watchlist", list(briefing.watchlist_events or [])),
+            ("portfolio", list(briefing.portfolio_focus or [])),
+            ("event_risk", list(briefing.top_themes or [])),
+            ("geopolitical", list(briefing.global_news or [])),
+        ]
+        keywords: dict[str, tuple[str, ...]] = {
+            "macro_rates": ("yield", "treasury", "inflation", "fed", "ecb", "rates", "bond"),
+            "regional": ("europe", "us", "asia", "china", "japan", "eurozone"),
+            "sector": ("sector", "semiconductor", "energy", "financial", "tech", "bank"),
+            "watchlist": tuple(symbol.lower() for symbol in self.profile.all_watchlist_tickers[:20]),
+            "portfolio": tuple(symbol.lower() for symbol in self.profile.portfolio_symbols[:20]),
+            "event_risk": ("cpi", "pce", "payroll", "fomc", "ecb", "earnings", "guidance"),
+            "geopolitical": ("iran", "israel", "hormuz", "sanction", "war", "missile", "ceasefire"),
+        }
+        built: list[dict[str, object]] = []
+        used_ids: set[str] = set()
+        for bucket, events in pools:
+            evt = next(
+                (
+                    candidate
+                    for candidate in events
+                    if candidate.event_id not in used_ids
+                    and self._applied_news_match(candidate, keywords.get(bucket, ()))
+                ),
+                None,
+            )
+            if evt is None:
+                continue
+            used_ids.add(evt.event_id)
+            built.append(
+                {
+                    "bucket": bucket,
+                    "headline": evt.title,
+                    "why_it_matters": self._applied_news_why(bucket, evt),
+                    "affected_assets": list(evt.tickers[:4]),
+                    "source_count": int(evt.cluster_size or 1),
+                    "price_confirmation": self._applied_news_confirmation(bucket, briefing),
+                }
+            )
+            if len(built) >= 7:
+                break
+        return built
+
+    def _build_applied_news_stack_via_research_events(
+        self,
+        briefing: MorningBriefing,
+        research_index: dict[str, tuple[ResearchEvent, float]],
+    ) -> list[dict[str, object]]:
+        """Causal-channel-routed applied_news_stack, used when use_research_event_ranking=True.
+
+        Primary pass: pick the highest-composite-score event per causal_channel,
+        use ResearchEvent.interpretation as why_it_matters and
+        ResearchEvent.price_confirmation_status for the signal field.
+        Secondary pass: fill remaining slots with keyword-matched regional,
+        sector, watchlist, and portfolio events (channels not in the taxonomy).
+        """
+        all_events: list[NormalisedEvent] = (
+            list(briefing.top_themes or [])
+            + list(briefing.global_news or [])
+            + [evt for snap in (briefing.sector_scan or []) for evt in (snap.top_events or [])]
+            + list(briefing.watchlist_events or [])
+            + list(briefing.portfolio_focus or [])
+        )
+
+        # Group eligible events by causal_channel, ranked by composite score.
+        from collections import defaultdict
+        channel_groups: dict[str, list[tuple[float, NormalisedEvent, ResearchEvent]]] = defaultdict(list)
+        for evt in all_events:
+            re_entry = research_index.get(evt.event_id)
+            if not re_entry:
+                continue
+            re, score = re_entry
+            channel_groups[re.causal_channel].append((score, evt, re))
+        for ch in channel_groups:
+            channel_groups[ch].sort(key=lambda x: x[0], reverse=True)
+
+        built: list[dict[str, object]] = []
+        used_ids: set[str] = set()
+
+        # Primary pass: causal_channel-routed buckets.
+        for channel, bucket in self._CHANNEL_TO_BUCKET.items():
+            if len(built) >= 7:
+                break
+            for score, evt, re in channel_groups.get(channel, []):
+                if evt.event_id in used_ids:
+                    continue
+                used_ids.add(evt.event_id)
+                conf = re.price_confirmation_status
+                built.append(
+                    {
+                        "bucket": bucket,
+                        "headline": evt.title,
+                        "why_it_matters": re.interpretation or self._applied_news_why(bucket, evt),
+                        "affected_assets": list(evt.tickers[:4]),
+                        "source_count": int(evt.cluster_size or 1),
+                        "price_confirmation": conf if conf != "unavailable" else "optional",
+                    }
+                )
+                break
+
+        # Secondary pass: keyword-matched buckets for channels without taxonomy coverage.
+        keyword_pools: list[tuple[str, list[NormalisedEvent]]] = [
+            ("regional", list(briefing.global_news or [])),
+            ("sector", [evt for snap in (briefing.sector_scan or []) for evt in (snap.top_events or [])]),
+            ("watchlist", list(briefing.watchlist_events or [])),
+            ("portfolio", list(briefing.portfolio_focus or [])),
+        ]
+        keywords: dict[str, tuple[str, ...]] = {
+            "regional": ("europe", "us", "asia", "china", "japan", "eurozone"),
+            "sector": ("sector", "semiconductor", "energy", "financial", "tech", "bank"),
+            "watchlist": tuple(symbol.lower() for symbol in self.profile.all_watchlist_tickers[:20]),
+            "portfolio": tuple(symbol.lower() for symbol in self.profile.portfolio_symbols[:20]),
+        }
+        for bucket, events in keyword_pools:
+            if len(built) >= 7:
+                break
+            evt = next(
+                (
+                    candidate
+                    for candidate in events
+                    if candidate.event_id not in used_ids
+                    and self._applied_news_match(candidate, keywords.get(bucket, ()))
+                ),
+                None,
+            )
+            if evt is None:
+                continue
+            used_ids.add(evt.event_id)
+            built.append(
+                {
+                    "bucket": bucket,
+                    "headline": evt.title,
+                    "why_it_matters": self._applied_news_why(bucket, evt),
+                    "affected_assets": list(evt.tickers[:4]),
+                    "source_count": int(evt.cluster_size or 1),
+                    "price_confirmation": self._applied_news_confirmation(bucket, briefing),
+                }
+            )
+
+        return built
+
+    @staticmethod
+    def _applied_news_match(event: NormalisedEvent, keys: tuple[str, ...]) -> bool:
+        if not keys:
+            return False
+        text = f"{event.title} {event.summary}".lower()
+        return any(k and k in text for k in keys)
+
+    @staticmethod
+    def _applied_news_confirmation(bucket: str, briefing: MorningBriefing) -> str:
+        tags = {str(tag).lower() for tag in (briefing.market_setup_signal_tags or [])}
+        if bucket == "macro_rates":
+            return "confirmed" if ("rates_headwind" in tags or "rates_supportive" in tags) else "unconfirmed"
+        if bucket == "geopolitical":
+            return "partial" if briefing.geo_risk_level else "unconfirmed"
+        if bucket in {"watchlist", "portfolio"}:
+            return "confirmed" if (briefing.portfolio_quotes or briefing.watchlist_quotes) else "unconfirmed"
+        return "optional"
+
+    @staticmethod
+    def _applied_news_why(bucket: str, event: NormalisedEvent) -> str:
+        if bucket == "macro_rates":
+            return "Rates context can reset valuation-sensitive growth and duration risk."
+        if bucket == "regional":
+            return "Regional dispersion helps explain mixed index direction."
+        if bucket == "sector":
+            return "Sector leadership affects breadth quality and index resilience."
+        if bucket == "watchlist":
+            names = ", ".join(event.tickers[:3]) or "watchlist names"
+            return f"Direct watchlist relevance for {names}."
+        if bucket == "portfolio":
+            names = ", ".join(event.tickers[:3]) or "portfolio names"
+            return f"Portfolio transmission risk through {names}."
+        if bucket == "event_risk":
+            return "Upcoming catalysts can invalidate or reinforce the setup."
+        if bucket == "geopolitical":
+            return "Headline risk matters only if cross-asset confirmation follows."
+        return "Market relevance under review."
 
     def _build_global_news(
         self,
@@ -1382,24 +1983,24 @@ class MorningBriefingGenerator:
             except Exception:
                 return None
 
-        oil_delta = _canon_float("WTI", "change_percent") or 0.0
-        oil_level = _canon_float("WTI", "value") or 0.0
-        gold_delta = _canon_float("GOLD", "change_percent") or 0.0
+        oil_delta = _canon_float("WTI", "change_percent")
+        oil_level = _canon_float("WTI", "value")
+        gold_delta = _canon_float("GOLD", "change_percent")
         usd_delta = 0.0
-        brent_delta = _canon_float("BRENT", "change_percent") or 0.0
-        brent_level = _canon_float("BRENT", "value") or 0.0
+        brent_delta = _canon_float("BRENT", "change_percent")
+        brent_level = _canon_float("BRENT", "value")
         natgas_delta = 0.0
         for quote in briefing.market_setup.macro_quotes:
             text = f"{quote.display_name} {quote.symbol}".lower()
-            if ("wti" in text or "crude" in text) and oil_level <= 0:
+            if ("wti" in text or "crude" in text) and (oil_level is None or oil_level <= 0):
                 oil_delta = float(quote.change_percent or 0.0)
                 oil_level = float(quote.current_price or 0.0)
-            elif "brent" in text and brent_level <= 0:
+            elif "brent" in text and (brent_level is None or brent_level <= 0):
                 brent_delta = float(quote.change_percent or 0.0)
                 brent_level = float(quote.current_price or 0.0)
             elif "natural gas" in text or "ng1:com" in text or "ng=f" in text:
                 natgas_delta = float(quote.change_percent or 0.0)
-            elif "gold" in text and abs(gold_delta) < 1e-12:
+            elif "gold" in text and (gold_delta is None or abs(gold_delta) < 1e-12):
                 gold_delta = float(quote.change_percent or 0.0)
             elif "usd" in text or "dollar" in text or "dxy" in text:
                 usd_delta = float(quote.change_percent or 0.0)
@@ -1407,10 +2008,11 @@ class MorningBriefingGenerator:
         for pt in briefing.commodity_strip:
             key = (pt.name or pt.series_id or "").upper()
             if "WTI" in key or "DCOILWTICO" in key:
-                oil_level = oil_level or float(pt.value or 0.0)
+                if oil_level is None:
+                    oil_level = float(pt.value or 0.0)
                 break
 
-        safe_haven_strength = max(0.0, gold_delta) + max(0.0, usd_delta)
+        safe_haven_strength = max(0.0, float(gold_delta or 0.0)) + max(0.0, usd_delta)
         geo_terms = ("iran", "israel", "hormuz", "blockade", "missile", "ceasefire", "sanction", "shipping", "war", "attack", "strike", "invasion")
         events = briefing.global_news + briefing.top_themes
 
@@ -1452,7 +2054,10 @@ class MorningBriefingGenerator:
             return "oil steady"
 
         # Floor rule: oil elevated + active geo headlines → at least ELEVATED, never LOW/MODERATE
-        oil_is_elevated = oil_level > 90 or oil_delta >= 2.0
+        oil_is_elevated = (
+            (oil_level is not None and oil_level > 90)
+            or (oil_delta is not None and oil_delta >= 2.0)
+        )
         if has_geo_headlines and oil_is_elevated:
             floor = "ELEVATED"
             try:
@@ -1511,23 +2116,24 @@ class MorningBriefingGenerator:
                     f"but oil ({oil_delta:+.2f}%) and haven signals do not confirm a fresh shock."
                 )
             energy_channel_active = (
-                oil_level > 90
-                or brent_level > 100
-                or oil_delta >= 1.0
-                or brent_delta >= 1.0
+                (oil_level is not None and oil_level > 90)
+                or (brent_level is not None and brent_level > 100)
+                or (oil_delta is not None and oil_delta >= 1.0)
+                or (brent_delta is not None and brent_delta >= 1.0)
                 or natgas_delta >= 4.0
             )
             if recent_geo_context and energy_channel_active and (vix_rising or europe_avg <= -0.4):
                 level = "LOW-TO-MODERATE"
                 brent_note = (
-                    f"Brent {brent_delta:+.2f}%"
-                    if (brent_level > 0 or abs(brent_delta) > 1e-12)
+                    f"Brent {float(brent_delta):+.2f}%"
+                    if (brent_level is not None and brent_level > 0) or (brent_delta is not None and abs(brent_delta) > 1e-12)
                     else "Brent unavailable"
                 )
+                oil_note = f"WTI {float(oil_delta):+.2f}%" if oil_delta is not None else "WTI unavailable"
                 summary = (
-                    f"Geo risk LOW-TO-MODERATE, market-contained: WTI {oil_delta:+.2f}% / {brent_note}"
+                    f"Geo risk LOW-TO-MODERATE, market-contained: {oil_note} / {brent_note}"
                     f"{' / NatGas ' + format(natgas_delta, '+.2f') + '%' if natgas_delta else ''}, "
-                    f"VIX {vix_display}, gold {gold_delta:+.2f}%, with recent Middle East/Hormuz context still active."
+                    f"VIX {vix_display}, gold {float(gold_delta or 0.0):+.2f}%, with recent Middle East/Hormuz context still active."
                 )
 
         return level, raw_level, summary
@@ -2010,6 +2616,8 @@ class MorningBriefingGenerator:
         contributions = dict(stats.get("provider_contributions", {}) or {})
         if not contributions:
             return ""
+        fetched_total = int(stats.get("fetched_total", 0) or 0)
+        deduped_total = int(stats.get("deduped_total", 0) or 0)
         unavailable = sorted(name for name, count in contributions.items() if int(count or 0) <= 0)
         active = sorted(name for name, count in contributions.items() if int(count or 0) > 0)
         notes: list[str] = []
@@ -2017,4 +2625,8 @@ class MorningBriefingGenerator:
             notes.append("Unavailable: " + ", ".join(unavailable[:3]))
         if active:
             notes.append("Core providers active")
+        if fetched_total <= 0:
+            notes.append("Provider failures: raw fetch 0")
+        elif deduped_total <= 0:
+            notes.append("Fetched but deduped to 0")
         return " · ".join(notes) if notes else ""
