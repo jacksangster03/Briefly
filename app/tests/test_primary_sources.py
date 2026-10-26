@@ -456,3 +456,51 @@ class TestBoEHelpers:
         soup = BeautifulSoup("<html></html>", "lxml")
         dt = _extract_boe_date(soup, "https://www.bankofengland.co.uk/other")
         assert dt is None
+
+
+def _minimal_pdf(text: str) -> bytes:
+    """Build a one-page PDF containing `text` without any PDF library."""
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 144] "
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    ]
+    stream = f"BT /F1 12 Tf 20 100 Td ({text}) Tj ET".encode()
+    objs.append(b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream")
+    objs.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    out = b"%PDF-1.4\n"
+    offsets = []
+    for i, body in enumerate(objs, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % i + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1)
+    for off in offsets:
+        out += b"%010d 00000 n \n" % off
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    return out
+
+
+class TestPdfTextExtraction:
+    @pytest.mark.parametrize(
+        "module",
+        ["app.sources.primary.fed", "app.sources.primary.edgar_earnings"],
+    )
+    def test_extracts_text_from_pdf(self, module):
+        import importlib
+
+        pytest.importorskip("pypdf")
+        mod = importlib.import_module(module)
+        text = mod._extract_pdf_text(_minimal_pdf("Federal Open Market Committee statement"))
+        assert "Federal Open Market Committee statement" in text
+
+    @pytest.mark.parametrize(
+        "module",
+        ["app.sources.primary.fed", "app.sources.primary.edgar_earnings"],
+    )
+    def test_invalid_pdf_returns_empty_string(self, module):
+        import importlib
+
+        mod = importlib.import_module(module)
+        assert mod._extract_pdf_text(b"not a pdf") == ""

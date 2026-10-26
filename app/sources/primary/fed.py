@@ -160,9 +160,12 @@ def _extract_fed_html(html: str) -> str:
 
 def _extract_pdf_text(content: bytes) -> str:
     try:
-        import fitz  # PyMuPDF
-        doc = fitz.open(stream=content, filetype="pdf")
-        text = " ".join(page.get_text() for page in doc)
+        import io
+
+        from pypdf import PdfReader  # BSD-3-Clause; replaces AGPL PyMuPDF
+
+        reader = PdfReader(io.BytesIO(content))
+        text = " ".join((page.extract_text() or "") for page in reader.pages)
         return " ".join(text.split())[:2000]
     except Exception as exc:
         logger.debug("PDF text extraction failed: %s", exc)
