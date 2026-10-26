@@ -1,6 +1,8 @@
 # Briefly
 
-Briefly is a local-first portfolio intelligence platform. It generates structured market briefings across six weekday sessions, delivers them via Telegram and styled HTML email, and pairs them with a full institutional-grade portfolio workbench. All state lives in a local SQLite database; no cloud backend is required beyond external market data APIs. The web control centre runs locally with FastAPI and HTMX.
+Briefly is a local-first portfolio intelligence platform. It generates structured market briefings across six weekday sessions, delivers them via Telegram and styled HTML email, and pairs them with a local portfolio workbench covering risk analytics, capital market assumptions, simulation and return attribution. All state lives in a local SQLite database; no cloud backend is required beyond external market data APIs. The web control centre runs locally with FastAPI and HTMX.
+
+> Research and information tooling only. Not investment advice, and it does not place trades. Market data comes from third-party APIs and needs your own keys (see Quick start).
 
 ---
 
